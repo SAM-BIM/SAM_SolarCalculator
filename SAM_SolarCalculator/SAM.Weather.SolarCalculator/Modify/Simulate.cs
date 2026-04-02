@@ -38,7 +38,7 @@ namespace SAM.Weather.SolarCalculator
             Dictionary<LinkedFace3D, List<Tuple<DateTime, Face3D>>> dictionary = new Dictionary<LinkedFace3D, List<Tuple<DateTime, Face3D>>>();
 
             List<Tuple<DateTime, List<LinkedFace3D>>> tuples = Enumerable.Repeat<Tuple<DateTime, List<LinkedFace3D>>>(null, directionDictionary.Count()).ToList();
-            Parallel.For(0, directionDictionary.Count(), (int i) =>
+            Parallel.For(0, directionDictionary.Count(), i =>
             //for (int i = 0; i < directionDictionary.Count(); i++)
             {
                 DateTime dateTime = directionDictionary.Keys.ElementAt(i);
@@ -194,6 +194,7 @@ namespace SAM.Weather.SolarCalculator
         /// <param name="solarModel"></param>
         /// <param name="year"></param>
         /// <param name="hoursOfYear">hours of the year. Values starting from 0 to 8760</param>
+        /// <param name="calctulateRadiation"></param>
         /// <param name="minHorizonAngle">Minimal Angle to Horizon</param>
         /// <param name="tolerance_Area"></param>
         /// <param name="tolerance_Snap"></param>

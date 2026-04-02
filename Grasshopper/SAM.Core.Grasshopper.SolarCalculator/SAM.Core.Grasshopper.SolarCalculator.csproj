@@ -26,23 +26,6 @@
     <OutputPath>..\build\</OutputPath>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Remove="Classes\**" />
-    <Compile Remove="Component\**" />
-    <Compile Remove="Convert\**" />
-    <Compile Remove="Interfaces\**" />
-    <Compile Remove="Query\**" />
-    <EmbeddedResource Remove="Classes\**" />
-    <EmbeddedResource Remove="Component\**" />
-    <EmbeddedResource Remove="Convert\**" />
-    <EmbeddedResource Remove="Interfaces\**" />
-    <EmbeddedResource Remove="Query\**" />
-    <None Remove="Classes\**" />
-    <None Remove="Component\**" />
-    <None Remove="Convert\**" />
-    <None Remove="Interfaces\**" />
-    <None Remove="Query\**" />
-  </ItemGroup>
-  <ItemGroup>
     <PackageReference Include="Grasshopper">
       <Version>8.21.25188.17001</Version>
       <ExcludeAssets>runtime</ExcludeAssets>

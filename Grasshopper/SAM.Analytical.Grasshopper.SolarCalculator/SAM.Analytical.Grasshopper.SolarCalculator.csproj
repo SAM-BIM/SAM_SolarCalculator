@@ -9,6 +9,7 @@
 	  <RhinoPluginsDir>$([MSBuild]::ValueOrDefault('$(RhinoDebugPluginsDir)', '$(RhinoDefaultPluginsDir)'))</RhinoPluginsDir>
 	  <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
 	  <UseWindowsForms>true</UseWindowsForms>
+	  <Deterministic>false</Deterministic>
     <ImportWindowsDesktopTargets>true</ImportWindowsDesktopTargets>
 	  <Deterministic>false</Deterministic>
 	  <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
@@ -27,20 +28,6 @@
     <OutputPath>..\..\build\</OutputPath>
     <DocumentationFile>..\..\build\SAM.Analytical.Grasshopper.SolarCalculator.xml</DocumentationFile>
   </PropertyGroup>
-  <ItemGroup>
-    <Compile Remove="Classes\**" />
-    <Compile Remove="Convert\**" />
-    <Compile Remove="Modify\**" />
-    <Compile Remove="Query\**" />
-    <EmbeddedResource Remove="Classes\**" />
-    <EmbeddedResource Remove="Convert\**" />
-    <EmbeddedResource Remove="Modify\**" />
-    <EmbeddedResource Remove="Query\**" />
-    <None Remove="Classes\**" />
-    <None Remove="Convert\**" />
-    <None Remove="Modify\**" />
-    <None Remove="Query\**" />
-  </ItemGroup>
   <ItemGroup>
     <Reference Include="SAM.Analytical, Version=1.0.8045.26573, Culture=neutral, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
