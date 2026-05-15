@@ -1,4 +1,4 @@
-﻿using Newtonsoft.Json.Linq;
+﻿using System.Text.Json.Nodes;
 using SAM.Core;
 using SAM.Core.SolarCalculator;
 
@@ -12,7 +12,7 @@ namespace SAM.Geometry.SolarCalculator
 
         }
 
-        public SolarRelationCluster(JObject jObject)
+        public SolarRelationCluster(JsonObject jObject)
             : base(jObject)
         {
 
