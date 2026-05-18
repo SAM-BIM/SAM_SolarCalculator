@@ -1,4 +1,6 @@
-﻿using Newtonsoft.Json.Linq;
+﻿// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
+using System.Text.Json.Nodes;
 using SAM.Core;
 using SAM.Core.SolarCalculator;
 using SAM.Geometry.Object.Spatial;
@@ -12,7 +14,7 @@ namespace SAM.Geometry.SolarCalculator
         private Location location;
         private SolarRelationCluster solarRelationCluster;
 
-        public SolarModel(JObject jObject)
+        public SolarModel(JsonObject jObject)
             : base(jObject)
         {
 
@@ -95,31 +97,31 @@ namespace SAM.Geometry.SolarCalculator
             return solarRelationCluster?.GetObjects<SolarFaceSimulationResult>()?.ConvertAll(x => x == null ? null : new SolarFaceSimulationResult(x));
         }
 
-        public override bool FromJObject(JObject jObject)
+        public override bool FromJsonObject(JsonObject jObject)
         {
-            if (!base.FromJObject(jObject))
+            if (!base.FromJsonObject(jObject))
                 return false;
 
             if (jObject.ContainsKey("Location"))
-                location = new Location(jObject.Value<JObject>("Location"));
+                location = new Location(jObject["Location"] as JsonObject);
 
             if (jObject.ContainsKey("SolarRelationCluster"))
-                solarRelationCluster = new SolarRelationCluster(jObject.Value<JObject>("SolarRelationCluster"));
+                solarRelationCluster = new SolarRelationCluster(jObject["SolarRelationCluster"] as JsonObject);
 
             return true;
         }
 
-        public override JObject ToJObject()
+        public override JsonObject ToJsonObject()
         {
-            JObject jObject = base.ToJObject();
+            JsonObject jObject = base.ToJsonObject();
             if (jObject == null)
                 return jObject;
 
             if (location != null)
-                jObject.Add("Location", location.ToJObject());
+                jObject.Add("Location", location.ToJsonObject());
 
             if (solarRelationCluster != null)
-                jObject.Add("SolarRelationCluster", solarRelationCluster.ToJObject());
+                jObject.Add("SolarRelationCluster", solarRelationCluster.ToJsonObject());
 
             return jObject;
         }

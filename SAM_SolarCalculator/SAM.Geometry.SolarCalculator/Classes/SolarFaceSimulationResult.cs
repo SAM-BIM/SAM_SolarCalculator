@@ -1,4 +1,6 @@
-﻿using Newtonsoft.Json.Linq;
+﻿// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
+using System.Text.Json.Nodes;
 using SAM.Core;
 using SAM.Core.SolarCalculator;
 using SAM.Geometry.Spatial;
@@ -59,7 +61,7 @@ namespace SAM.Geometry.SolarCalculator
             }
         }
 
-        public SolarFaceSimulationResult(JObject jObject) 
+        public SolarFaceSimulationResult(JsonObject jObject) 
             : base(jObject)
         {
         }
@@ -216,30 +218,30 @@ namespace SAM.Geometry.SolarCalculator
             }
         }
 
-        public override bool FromJObject(JObject jObject)
+        public override bool FromJsonObject(JsonObject jObject)
         {
-            if (!base.FromJObject(jObject))
+            if (!base.FromJsonObject(jObject))
                 return false;
 
             if(jObject.ContainsKey("SunExposure"))
             {
                 sunExposure = new List<Tuple<DateTime, Radiation, List<Spatial.Face3D>>>();
 
-                JArray jArray_SunExposure = jObject.Value<JArray>("SunExposure");
+                JsonArray jArray_SunExposure = jObject["SunExposure"] as JsonArray;
                 if(jArray_SunExposure != null)
                 {
                     for(int i =0; i < jArray_SunExposure.Count; i++)
                     {
-                        JArray jArray = jArray_SunExposure[i] as JArray;
+                        JsonArray jArray = jArray_SunExposure[i] as JsonArray;
                         if(jArray == null || jArray.Count < 2)
                         {
                             continue;
                         }
 
-                        DateTime dateTime = jArray[0].Value<DateTime>();
-                        List<Spatial.Face3D> face3Ds = Core.Create.IJSAMObjects<Spatial.Face3D>(jArray[1] as JArray);
+                        DateTime dateTime = jArray[0]?.GetValue<DateTime>() ?? default(DateTime);
+                        List<Spatial.Face3D> face3Ds = Core.Create.IJSAMObjects<Spatial.Face3D>(jArray[1] as JsonArray);
 
-                        Radiation radiation = jArray.Count <= 2 ? null : Core.Create.IJSAMObject<Radiation>(jArray[2] as JObject);
+                        Radiation radiation = jArray.Count <= 2 ? null : Core.Create.IJSAMObject<Radiation>(jArray[2] as JsonObject);
 
                         sunExposure.Add(new Tuple<DateTime, Radiation, List<Spatial.Face3D>>(dateTime, radiation, face3Ds));
                     }
@@ -249,15 +251,15 @@ namespace SAM.Geometry.SolarCalculator
             return true;
         }
 
-        public override JObject ToJObject()
+        public override JsonObject ToJsonObject()
         {
-            JObject jObject = base.ToJObject();
+            JsonObject jObject = base.ToJsonObject();
             if (jObject == null)
                 return null;
 
             if(sunExposure != null)
             {
-                JArray jArray_SunExposure = new JArray();
+                JsonArray jArray_SunExposure = new JsonArray();
                 foreach(Tuple<DateTime, Radiation, List<Spatial.Face3D>> tuple in sunExposure)
                 {
                     if (tuple == null)
@@ -265,13 +267,20 @@ namespace SAM.Geometry.SolarCalculator
                         continue;
                     }
 
-                    JArray jArray = new JArray();
+                    JsonArray jArray = new JsonArray();
                     jArray.Add(tuple.Item1);
-                    jArray.Add(Core.Create.JArray(tuple?.Item3));
+
+                    JsonArray face3DsArray = new JsonArray();
+                    if (tuple?.Item3 != null)
+                    {
+                        foreach (Spatial.Face3D face3D in tuple.Item3)
+                            face3DsArray.Add(face3D?.ToJsonObject());
+                    }
+                    jArray.Add(face3DsArray);
 
                     if(tuple.Item2 != null)
                     {
-                        jArray.Add(tuple.Item2.ToJObject());
+                        jArray.Add(tuple.Item2.ToJsonObject());
                     }
 
                     jArray_SunExposure.Add(jArray);
