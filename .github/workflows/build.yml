@@ -76,8 +76,13 @@ jobs:
           foreach ($r in $deps) {
             if (Test-Path $r) { continue }
             $headRef = '${{ github.head_ref }}'
+            $baseRef = '${{ github.base_ref }}'
+            $refName = '${{ github.ref_name }}'
             $candidates = @()
             if ($headRef) { $candidates += $headRef }
+            # Current sow branch: base_ref on PR events, ref_name on push events.
+            $sowRef = if ($baseRef -match '^sow/') { $baseRef } elseif ($refName -match '^sow/') { $refName } else { '' }
+            if ($sowRef -and $sowRef -ne $headRef) { $candidates += $sowRef }
             $candidates += 'sow/2026-Q2'
             $cloned = $false
             foreach ($cand in $candidates) {
