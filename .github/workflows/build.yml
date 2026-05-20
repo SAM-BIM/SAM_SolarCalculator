@@ -2,9 +2,9 @@ name: Build (Windows)
 
 on:
   push:
-    branches: [ "master", "main", "sow/2026-Q2" ]
+    branches: [ "master", "main", "sow/**" ]
   pull_request:
-    branches: [ "master", "main", "sow/2026-Q2" ]
+    branches: [ "master", "main", "sow/**" ]
   workflow_dispatch:
 
 jobs:
@@ -36,6 +36,26 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
+      - name: Compute SAMVersion
+        id: ver
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ref = if ('${{ github.event_name }}' -eq 'pull_request') { '${{ github.base_ref }}' } else { '${{ github.ref_name }}' }
+          # .NET AssemblyVersion components are UInt16 (max 65535). Cap to 60000 for headroom.
+          $run = ${{ github.run_number }} % 60000
+          if ($ref -match 'sow/(\d{4})-Q(\d)') {
+            $v = "$($Matches[1]).$($Matches[2]).$run"
+            $src = "branch '$ref'"
+          } else {
+            $now = (Get-Date).ToUniversalTime()
+            $quarter = [int][Math]::Ceiling($now.Month / 3.0)
+            $v = "$($now.Year).$quarter.$run"
+            $src = "date $($now.ToString('yyyy-MM-dd')) (ref '$ref' not sow/yyyy-Qx)"
+          }
+          Write-Host "SAMVersion = $v (from $src)"
+          "samversion=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - name: Clone dependency repos (siblings)
         shell: pwsh
         run: |
@@ -56,8 +76,13 @@ jobs:
           foreach ($r in $deps) {
             if (Test-Path $r) { continue }
             $headRef = '${{ github.head_ref }}'
+            $baseRef = '${{ github.base_ref }}'
+            $refName = '${{ github.ref_name }}'
             $candidates = @()
             if ($headRef) { $candidates += $headRef }
+            # Current sow branch: base_ref on PR events, ref_name on push events.
+            $sowRef = if ($baseRef -match '^sow/') { $baseRef } elseif ($refName -match '^sow/') { $refName } else { '' }
+            if ($sowRef -and $sowRef -ne $headRef) { $candidates += $sowRef }
             $candidates += 'sow/2026-Q2'
             $cloned = $false
             foreach ($cand in $candidates) {
@@ -96,6 +121,7 @@ jobs:
             '/p:UseSharedCompilation=false'
             '/p:RunPostBuildEvent=OnOutputUpdated'
             "/p:ReferencePath=$windowsRef"
+            '/p:SAMVersion=${{ steps.ver.outputs.samversion }}'
           )
 
           # If you really want Platform, use QUOTED Any CPU:
