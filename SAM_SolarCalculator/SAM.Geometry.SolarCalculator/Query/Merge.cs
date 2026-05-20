@@ -45,7 +45,7 @@ namespace SAM.Geometry.SolarCalculator
                 foreach(LinkedFace3D linkedFace3D_Temp in linkedFace3Ds_Temp)
                 {
                     Plane plane_Temp = linkedFace3D_Temp.Face3D.GetPlane();
-                    if (plane == null)
+                    if (plane_Temp == null)
                     {
                         continue;
                     }
@@ -129,6 +129,7 @@ namespace SAM.Geometry.SolarCalculator
                     Guid guid = LinkedFace3D_Old.Guid;
                     if (guids.Contains(guid))
                         guid = Guid.NewGuid();
+                    guids.Add(guid);
 
                     LinkedFace3D linkedFace3D_New = new LinkedFace3D(guid, face3D);
 

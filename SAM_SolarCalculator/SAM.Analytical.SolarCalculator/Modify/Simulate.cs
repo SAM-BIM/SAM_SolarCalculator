@@ -7,7 +7,7 @@ namespace SAM.Analytical.SolarCalculator
 {
     public static partial class Modify
     {
-        public static List<SolarFaceSimulationResult> Simulate(this AnalyticalModel analyticalModel, IEnumerable<DateTime> dateTimes, bool merge = false, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance)
+        public static List<SolarFaceSimulationResult> Simulate(this AnalyticalModel analyticalModel, IEnumerable<DateTime> dateTimes, bool merge = false, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, double sampleSize = double.NaN)
         {
             if(analyticalModel == null || dateTimes == null)
             {
@@ -26,10 +26,10 @@ namespace SAM.Analytical.SolarCalculator
                 directionDictionary[dateTime] = Geometry.SolarCalculator.Query.SunDirection(location, dateTime, false);
             }
 
-            return Simulate(analyticalModel, directionDictionary, merge, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance);
+            return Simulate(analyticalModel, directionDictionary, merge, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, sampleSize);
         }
 
-        public static List<SolarFaceSimulationResult> Simulate(this AnalyticalModel analyticalModel, Dictionary<DateTime, Vector3D> directionDictionary, bool merge = false, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance)
+        public static List<SolarFaceSimulationResult> Simulate(this AnalyticalModel analyticalModel, Dictionary<DateTime, Vector3D> directionDictionary, bool merge = false, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, double sampleSize = double.NaN)
         {
             if (analyticalModel == null || directionDictionary == null)
             {
@@ -44,7 +44,7 @@ namespace SAM.Analytical.SolarCalculator
 
             List<SolarFaceSimulationResult> result = null;
 
-            List<SolarFaceSimulationResult> solarFaceSimulationResults = Weather.SolarCalculator.Modify.Simulate(solarModel, directionDictionary, true, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance);
+            List<SolarFaceSimulationResult> solarFaceSimulationResults = Weather.SolarCalculator.Modify.Simulate(solarModel, directionDictionary, true, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, sampleSize);
             if (solarFaceSimulationResults != null && solarFaceSimulationResults.Count != 0)
             {
                 result = new List<SolarFaceSimulationResult>();
@@ -92,7 +92,7 @@ namespace SAM.Analytical.SolarCalculator
             return solarFaceSimulationResults;
         }
 
-        public static List<SolarFaceSimulationResult> Simulate(this BuildingModel buildingModel, IEnumerable<DateTime> dateTimes, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance)
+        public static List<SolarFaceSimulationResult> Simulate(this BuildingModel buildingModel, IEnumerable<DateTime> dateTimes, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, double sampleSize = double.NaN)
         {
             if (buildingModel == null || dateTimes == null)
             {
@@ -105,7 +105,7 @@ namespace SAM.Analytical.SolarCalculator
                 return null;
             }
 
-            List<SolarFaceSimulationResult> result = Weather.SolarCalculator.Modify.Simulate(solarModel, dateTimes, true ,minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance);
+            List<SolarFaceSimulationResult> result = Weather.SolarCalculator.Modify.Simulate(solarModel, dateTimes, true ,minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, sampleSize);
             if (result != null && result.Count != 0)
             {
                 List<IPartition> partitions = buildingModel.GetPartitions();

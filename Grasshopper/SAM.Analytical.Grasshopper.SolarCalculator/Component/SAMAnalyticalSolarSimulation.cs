@@ -18,7 +18,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// <summary>
         /// The latest version of this component
         /// </summary>
-        public override string LatestComponentVersion => "1.0.5";
+        public override string LatestComponentVersion => "1.0.6";
 
         /// <summary>
         /// Provides an Icon for the component.
@@ -68,6 +68,10 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 number = new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "_minHorizonAngle_", NickName = "_minHorizonAngle_", Description = "Minimal Angle to Horizon", Access = GH_ParamAccess.item };
                 number.SetPersistentData(SAM.Core.Tolerance.Angle);
                 result.Add(new GH_SAMParam(number, ParamVisibility.Binding));
+
+                number = new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "_sampleSize_", NickName = "_sampleSize_", Description = "Optional shading sample grid size. Use 0 for exact geometry.", Access = GH_ParamAccess.item };
+                number.SetPersistentData(0);
+                result.Add(new GH_SAMParam(number, ParamVisibility.Voluntary));
 
                 global::Grasshopper.Kernel.Parameters.Param_Boolean boolean = new global::Grasshopper.Kernel.Parameters.Param_Boolean() { Name = "_run", NickName = "_run", Description = "Run", Access = GH_ParamAccess.item };
                 boolean.SetPersistentData(false);
@@ -230,8 +234,19 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 }
             }
 
+            index = Params.IndexOfInputParam("_sampleSize_");
+            double sampleSize = double.NaN;
+            if (index != -1)
+            {
+                double sampleSize_Temp = 0;
+                if (dataAccess.GetData(index, ref sampleSize_Temp) && !double.IsNaN(sampleSize_Temp) && sampleSize_Temp > 0)
+                {
+                    sampleSize = sampleSize_Temp;
+                }
+            }
+
             analyticalModel = new AnalyticalModel(analyticalModel);
-            List<Geometry.SolarCalculator.SolarFaceSimulationResult> solarFaceSimulationResults = Analytical.SolarCalculator.Modify.Simulate(analyticalModel, dateTimes, minHorizonAngle: minHorizonAngle, tolerance_Angle: tolerance_Angle);
+            List<Geometry.SolarCalculator.SolarFaceSimulationResult> solarFaceSimulationResults = Analytical.SolarCalculator.Modify.Simulate(analyticalModel, dateTimes, minHorizonAngle: minHorizonAngle, tolerance_Angle: tolerance_Angle, sampleSize: sampleSize);
 
             
             index = Params.IndexOfOutputParam("hoursOfYear");

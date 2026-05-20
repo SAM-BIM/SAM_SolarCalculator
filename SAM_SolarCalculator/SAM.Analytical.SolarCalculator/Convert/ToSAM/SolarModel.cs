@@ -24,7 +24,7 @@ namespace SAM.Analytical.SolarCalculator
             SolarModel result = new SolarModel(analyticalModel.Location);
 
             List<Panel> panels = adjacencyCluster.GetPanels();
-            if(panels != null || panels.Count != 0)
+            if(panels != null && panels.Count != 0)
             {
                 foreach(Panel panel in panels)
                 {
@@ -64,7 +64,7 @@ namespace SAM.Analytical.SolarCalculator
             SolarModel result = new SolarModel(buildingModel.Location);
 
             List<IPartition> partitions = buildingModel.GetPartitions();
-            if (partitions != null || partitions.Count != 0)
+            if (partitions != null && partitions.Count != 0)
             {
                 foreach (IPartition partition in partitions)
                 {
