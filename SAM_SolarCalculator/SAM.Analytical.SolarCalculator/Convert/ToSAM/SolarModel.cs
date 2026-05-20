@@ -1,4 +1,7 @@
-﻿using SAM.Geometry.Object.Spatial;
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
+
+using SAM.Geometry.Object.Spatial;
 using SAM.Geometry.SolarCalculator;
 using SAM.Weather;
 using SAM.Weather.SolarCalculator;
@@ -24,7 +27,7 @@ namespace SAM.Analytical.SolarCalculator
             SolarModel result = new SolarModel(analyticalModel.Location);
 
             List<Panel> panels = adjacencyCluster.GetPanels();
-            if(panels != null || panels.Count != 0)
+            if(panels != null && panels.Count != 0)
             {
                 foreach(Panel panel in panels)
                 {
@@ -64,7 +67,7 @@ namespace SAM.Analytical.SolarCalculator
             SolarModel result = new SolarModel(buildingModel.Location);
 
             List<IPartition> partitions = buildingModel.GetPartitions();
-            if (partitions != null || partitions.Count != 0)
+            if (partitions != null && partitions.Count != 0)
             {
                 foreach (IPartition partition in partitions)
                 {
