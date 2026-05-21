@@ -4,7 +4,6 @@ using System.Text.Json.Nodes;
 using SAM.Core;
 using SAM.Core.SolarCalculator;
 using SAM.Geometry.Object.Spatial;
-using SAM.Geometry.Spatial;
 using System.Collections.Generic;
 
 namespace SAM.Geometry.SolarCalculator
@@ -57,9 +56,9 @@ namespace SAM.Geometry.SolarCalculator
             return true;
         }
 
-        public bool Add(SolarFaceSimulationResult solarFaceSimulationResult, System.Guid linkedFace3DGuid)
+        public bool Add(ISolarSimulationResult solarSimulationResult, System.Guid linkedFace3DGuid)
         {
-            if (solarFaceSimulationResult == null)
+            if (solarSimulationResult == null)
             {
                 return false;
             }
@@ -69,7 +68,7 @@ namespace SAM.Geometry.SolarCalculator
                 solarRelationCluster = new SolarRelationCluster();
             }
 
-            bool result = solarRelationCluster.AddObject(solarFaceSimulationResult);
+            bool result = solarRelationCluster.AddObject(solarSimulationResult);
             if (!result)
             {
                 return result;
@@ -80,7 +79,7 @@ namespace SAM.Geometry.SolarCalculator
                 LinkedFace3D linkedFace3D = solarRelationCluster.GetObject<LinkedFace3D>(linkedFace3DGuid);
                 if (linkedFace3D != null)
                 {
-                    solarRelationCluster.AddRelation(solarFaceSimulationResult, linkedFace3D);
+                    solarRelationCluster.AddRelation(solarSimulationResult, linkedFace3D);
                 }
             }
 
@@ -95,6 +94,11 @@ namespace SAM.Geometry.SolarCalculator
         public List<SolarFaceSimulationResult> GetSolarFaceSimulationResults()
         {
             return solarRelationCluster?.GetObjects<SolarFaceSimulationResult>()?.ConvertAll(x => x == null ? null : new SolarFaceSimulationResult(x));
+        }
+
+        public List<TSolarSimulationResult> GetSolarSimulationResults<TSolarSimulationResult>() where TSolarSimulationResult : ISolarSimulationResult
+        {
+            return solarRelationCluster?.GetObjects<TSolarSimulationResult>()?.ConvertAll(x => Core.Query.Clone(x));
         }
 
         public override bool FromJsonObject(JsonObject jObject)

@@ -10,7 +10,7 @@ using System.Linq;
 
 namespace SAM.Geometry.SolarCalculator
 {
-    public class SolarFaceSimulationResult : Result, ISolarObject
+    public class SolarFaceSimulationResult : Result, ISolarSimulationResult
     {
         private Face3D face3D;
         private List<Tuple<DateTime, Radiation, List<Face3D>>> sunExposure;
