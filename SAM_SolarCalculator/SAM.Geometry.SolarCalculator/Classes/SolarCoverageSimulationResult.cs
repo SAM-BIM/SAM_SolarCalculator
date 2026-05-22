@@ -27,12 +27,24 @@ namespace SAM.Geometry.SolarCalculator
             }
         }
 
-        public SolarCoverageSimulationResult(SolarCoverageSimulationResult solarCoverageSimulationResult)
-            : base(solarCoverageSimulationResult)
+        public SolarCoverageSimulationResult(string name, string source, string reference, SolarCoverageSimulationResult solarCoverageSimulationResult)
+            : base(name, source, reference)
         {
             if(solarCoverageSimulationResult?.coverage != null)
             {
                 foreach(KeyValuePair<DateTime, float> keyValuePair in solarCoverageSimulationResult.coverage)
+                {
+                    coverage[keyValuePair.Key] = keyValuePair.Value;
+                }
+            }
+        }
+
+        public SolarCoverageSimulationResult(SolarCoverageSimulationResult solarCoverageSimulationResult)
+    : base(solarCoverageSimulationResult)
+        {
+            if (solarCoverageSimulationResult?.coverage != null)
+            {
+                foreach (KeyValuePair<DateTime, float> keyValuePair in solarCoverageSimulationResult.coverage)
                 {
                     coverage[keyValuePair.Key] = keyValuePair.Value;
                 }
