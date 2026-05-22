@@ -177,14 +177,17 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 }
 
                 Pair pair_B = pairs_B[bestIndex];
-                usedB.Add(bestIndex);
 
                 ComputeDeltaStats(pair_A.Result, pair_B.Result, out double meanAbs, out double maxAbs, out double rmse, out int overlap, out double sumAbs_Pair);
                 if (overlap == 0)
                 {
+                    // B face is not consumed — another A face with overlapping DateTimes
+                    // may still match it.
                     unmatched_A.Add(pair_A.LinkedFace3D);
                     continue;
                 }
+
+                usedB.Add(bestIndex);
 
                 matched_A.Add(pair_A.LinkedFace3D);
                 matched_B.Add(pair_B.LinkedFace3D);

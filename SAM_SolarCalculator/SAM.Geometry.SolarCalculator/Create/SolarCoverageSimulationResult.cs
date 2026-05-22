@@ -5,6 +5,7 @@ using SAM.Geometry.Object.Spatial;
 using SAM.Geometry.Spatial;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace SAM.Geometry.SolarCalculator
 {
@@ -102,7 +103,11 @@ namespace SAM.Geometry.SolarCalculator
             List<Tuple<DateTime, float>> coverage = new List<Tuple<DateTime, float>>(dateTimes.Count);
             foreach (DateTime dateTime in dateTimes)
             {
-                double litArea = solarFaceSimulationResult.GetSunExposureArea(dateTime);
+                // Use GetSunExposureFace3Ds so coverage is computed from geometry regardless of
+                // whether radiation was calculated (GetSunExposureArea returns 0 when
+                // Radiation is null even when lit polygons exist).
+                List<Face3D> litFaces = solarFaceSimulationResult.GetSunExposureFace3Ds(dateTime);
+                double litArea = litFaces == null ? 0 : litFaces.Sum(x => x?.GetArea() ?? 0);
                 float c = (float)Math.Max(0.0, Math.Min(1.0, litArea / totalArea));
                 coverage.Add(Tuple.Create(dateTime, c));
             }
