@@ -153,8 +153,12 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
 
             foreach (Pair pair_A in pairs_A)
             {
-                int bestIndex = -1;
-                double bestDistance = tolerance;
+                // Collect every still-unused B candidate inside the tolerance radius
+                // and walk them in nearest-first order. If the closest candidate has no
+                // overlapping DateTimes we fall through to the next nearest rather than
+                // immediately classifying pair_A as unmatched — handles duplicated /
+                // near-coincident geometry and mixed timestep sets correctly.
+                List<KeyValuePair<int, double>> candidates = new List<KeyValuePair<int, double>>();
                 for (int j = 0; j < pairs_B.Count; j++)
                 {
                     if (usedB.Contains(j))
@@ -163,40 +167,45 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                     }
 
                     double distance = pair_A.Centroid.Distance(pairs_B[j].Centroid);
-                    if (distance <= bestDistance)
+                    if (distance <= tolerance)
                     {
-                        bestDistance = distance;
-                        bestIndex = j;
+                        candidates.Add(new KeyValuePair<int, double>(j, distance));
                     }
                 }
+                candidates.Sort((a, b) => a.Value.CompareTo(b.Value));
 
-                if (bestIndex == -1)
+                bool matched = false;
+                foreach (KeyValuePair<int, double> candidate in candidates)
                 {
-                    unmatched_A.Add(pair_A.LinkedFace3D);
-                    continue;
+                    int candidateIndex = candidate.Key;
+                    Pair pair_B = pairs_B[candidateIndex];
+
+                    ComputeDeltaStats(pair_A.Result, pair_B.Result, out double meanAbs, out double maxAbs, out double rmse, out int overlap, out double sumAbs_Pair);
+                    if (overlap == 0)
+                    {
+                        // Nearest candidate has no shared DateTimes — try the next one.
+                        // The candidate stays in usedB? NO — leave it free so a later A
+                        // face with overlapping DateTimes can still claim it.
+                        continue;
+                    }
+
+                    usedB.Add(candidateIndex);
+                    matched_A.Add(pair_A.LinkedFace3D);
+                    matched_B.Add(pair_B.LinkedFace3D);
+                    meanAbsDeltas.Add(meanAbs);
+                    maxAbsDeltas.Add(maxAbs);
+                    rmses.Add(rmse);
+                    overlapCounts.Add(overlap);
+                    sumAbsDelta_All += sumAbs_Pair;
+                    sumOverlap_All += overlap;
+                    matched = true;
+                    break;
                 }
 
-                Pair pair_B = pairs_B[bestIndex];
-
-                ComputeDeltaStats(pair_A.Result, pair_B.Result, out double meanAbs, out double maxAbs, out double rmse, out int overlap, out double sumAbs_Pair);
-                if (overlap == 0)
+                if (!matched)
                 {
-                    // B face is not consumed — another A face with overlapping DateTimes
-                    // may still match it.
                     unmatched_A.Add(pair_A.LinkedFace3D);
-                    continue;
                 }
-
-                usedB.Add(bestIndex);
-
-                matched_A.Add(pair_A.LinkedFace3D);
-                matched_B.Add(pair_B.LinkedFace3D);
-                meanAbsDeltas.Add(meanAbs);
-                maxAbsDeltas.Add(maxAbs);
-                rmses.Add(rmse);
-                overlapCounts.Add(overlap);
-                sumAbsDelta_All += sumAbs_Pair;
-                sumOverlap_All += overlap;
             }
 
             double overallMeanAbsDelta = sumOverlap_All == 0 ? double.NaN : sumAbsDelta_All / sumOverlap_All;
