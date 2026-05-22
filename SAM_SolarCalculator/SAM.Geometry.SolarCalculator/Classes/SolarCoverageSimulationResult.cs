@@ -58,6 +58,45 @@ namespace SAM.Geometry.SolarCalculator
             }
         }
 
+        public List<float> Values
+        {
+            get
+            {
+                if (coverage == null)
+                {
+                    return null;
+                }
+
+                return coverage.Values.ToList();
+            }
+        }
+
+        public List<Tuple<DateTime, float>> Coverage
+        {
+            get
+            {
+                if (coverage == null)
+                {
+                    return null;
+                }
+
+                List<Tuple<DateTime, float>> result = new List<Tuple<DateTime, float>>(coverage.Count);
+                foreach (KeyValuePair<DateTime, float> keyValuePair in coverage)
+                {
+                    result.Add(Tuple.Create(keyValuePair.Key, keyValuePair.Value));
+                }
+                return result;
+            }
+        }
+
+        public int Count
+        {
+            get
+            {
+                return coverage?.Count ?? 0;
+            }
+        }
+
         public float this[DateTime dateTime]
         {
             get

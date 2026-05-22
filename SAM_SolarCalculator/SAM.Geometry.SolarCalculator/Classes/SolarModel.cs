@@ -96,6 +96,14 @@ namespace SAM.Geometry.SolarCalculator
             return solarRelationCluster?.GetObjects<SolarFaceSimulationResult>()?.ConvertAll(x => x == null ? null : new SolarFaceSimulationResult(x));
         }
 
+        public List<SolarCoverageSimulationResult> SolarCoverageSimulationResults
+        {
+            get
+            {
+                return solarRelationCluster?.GetObjects<SolarCoverageSimulationResult>()?.ConvertAll(x => x == null ? null : new SolarCoverageSimulationResult(x));
+            }
+        }
+
         public List<TSolarSimulationResult> GetSolarSimulationResults<TSolarSimulationResult>() where TSolarSimulationResult : ISolarSimulationResult
         {
             return solarRelationCluster?.GetObjects<TSolarSimulationResult>()?.ConvertAll(x => Core.Query.Clone(x));
