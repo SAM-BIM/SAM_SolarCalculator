@@ -774,6 +774,13 @@ namespace SAM.Weather.SolarCalculator
                 return false;
             }
 
+            // sunDirection points from sun toward surface; exclude back-facing surfaces (normal points same way as sun ray)
+            Vector3D normal = plane.Normal;
+            if (normal != null && normal.IsValid() && normal.DotProduct(sunDirection) > 0)
+            {
+                return false;
+            }
+
             Vector3D vector3D_Project = plane.Project(sunDirection);
             if (vector3D_Project == null || !vector3D_Project.IsValid() || vector3D_Project.Length <= tolerance_Distance)
             {
