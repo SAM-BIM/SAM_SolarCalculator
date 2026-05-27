@@ -56,6 +56,11 @@ namespace SAM.Geometry.SolarCalculator
             return true;
         }
 
+        public bool Add(SolarFaceSimulationResult solarFaceSimulationResult, System.Guid linkedFace3DGuid)
+        {
+            return Add((ISolarSimulationResult)solarFaceSimulationResult, linkedFace3DGuid);
+        }
+
         public bool Add(ISolarSimulationResult solarSimulationResult, System.Guid linkedFace3DGuid)
         {
             if (solarSimulationResult == null)
