@@ -179,7 +179,71 @@ namespace SAM.Weather.SolarCalculator
                 }
             }
 
-            foreach (LinkedFace3D linkedFace3D in LinkedFace3Ds)
+            AttachResults(solarModel, LinkedFace3Ds, dictionary_SunExposure);
+            return solarModel.GetSolarFaceSimulationResults();
+        }
+
+        /// <summary>
+        /// Coverage-only variant of <see cref="Simulate(SolarModel, Dictionary{DateTime, Vector3D}, bool, double, double, double, double, double, double)"/>.
+        /// Runs the same sun-visibility pipeline but emits <see cref="SolarCoverageSimulationResult"/>
+        /// (per-timestep lit-area / total-area ratio) and stores them on the SolarModel instead of
+        /// the heavier <see cref="SolarFaceSimulationResult"/>. Use this when you want to benchmark
+        /// against TAS-imported shade-coverage data and don't need the per-timestep lit polygons.
+        /// </summary>
+        public static List<SolarCoverageSimulationResult> Simulate_Coverage(this SolarModel solarModel, Dictionary<DateTime, Vector3D> directionDictionary, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, double sampleSize = double.NaN)
+        {
+            if (solarModel == null || directionDictionary == null)
+            {
+                return null;
+            }
+
+            // Pre-collect every timestep that passes the sun-above-horizon check so we
+            // can emit an all-zero coverage series for faces that are fully shaded across
+            // the entire run — keeping the per-face DateTime grid consistent with TAS.
+            List<DateTime> validDateTimes = new List<DateTime>();
+            foreach (KeyValuePair<DateTime, Vector3D> kvp in directionDictionary)
+            {
+                if (ValidSunDirection(kvp.Value, minHorizonAngle))
+                {
+                    validDateTimes.Add(kvp.Key);
+                }
+            }
+
+            Dictionary<Guid, List<Tuple<DateTime, Radiation, List<Face3D>>>> dictionary_SunExposure = ComputeSunExposure(solarModel, directionDictionary, false, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, sampleSize, out List<LinkedFace3D> LinkedFace3Ds);
+            if (dictionary_SunExposure == null)
+            {
+                return null;
+            }
+
+            AttachCoverageResults(solarModel, LinkedFace3Ds, dictionary_SunExposure, validDateTimes);
+            return solarModel.SolarCoverageSimulationResults;
+        }
+
+        public static List<SolarCoverageSimulationResult> Simulate_Coverage(this SolarModel solarModel, IEnumerable<DateTime> dateTimes, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, double sampleSize = double.NaN)
+        {
+            if (solarModel == null || dateTimes == null)
+            {
+                return null;
+            }
+
+            Core.Location location = solarModel.Location;
+            if (location == null)
+            {
+                return null;
+            }
+
+            Dictionary<DateTime, Vector3D> directionDictionary = new Dictionary<DateTime, Vector3D>();
+            foreach (DateTime dateTime in dateTimes)
+            {
+                directionDictionary[dateTime] = SAM.Geometry.SolarCalculator.Query.SunDirection(location, dateTime, false);
+            }
+
+            return Simulate_Coverage(solarModel, directionDictionary, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, sampleSize);
+        }
+
+        private static void AttachResults(SolarModel solarModel, List<LinkedFace3D> linkedFace3Ds, Dictionary<Guid, List<Tuple<DateTime, Radiation, List<Face3D>>>> dictionary_SunExposure)
+        {
+            foreach (LinkedFace3D linkedFace3D in linkedFace3Ds)
             {
                 if (!dictionary_SunExposure.TryGetValue(linkedFace3D.Guid, out List<Tuple<DateTime, Radiation, List<Face3D>>> sunExposure) || sunExposure == null || sunExposure.Count == 0)
                 {
@@ -194,8 +258,233 @@ namespace SAM.Weather.SolarCalculator
 
                 solarModel.Add(solarFaceSimulationResult, linkedFace3D.Guid);
             }
+        }
 
-            return solarModel.GetSolarFaceSimulationResults();
+        private static void AttachCoverageResults(SolarModel solarModel, List<LinkedFace3D> linkedFace3Ds, Dictionary<Guid, List<Tuple<DateTime, Radiation, List<Face3D>>>> dictionary_SunExposure, List<DateTime> allValidDateTimes = null)
+        {
+            foreach (LinkedFace3D linkedFace3D in linkedFace3Ds)
+            {
+                if (!dictionary_SunExposure.TryGetValue(linkedFace3D.Guid, out List<Tuple<DateTime, Radiation, List<Face3D>>> sunExposure) || sunExposure == null || sunExposure.Count == 0)
+                {
+                    // Emit a zero-coverage result for fully shaded faces so the per-face
+                    // DateTime grid is consistent with TAS-imported data for comparison.
+                    if (allValidDateTimes != null && allValidDateTimes.Count > 0)
+                    {
+                        List<Tuple<DateTime, Radiation, List<Face3D>>> zeroExposure = allValidDateTimes.ConvertAll(dt => Tuple.Create(dt, (Radiation)null, (List<Face3D>)null));
+                        SolarCoverageSimulationResult zeroCoverage = Geometry.SolarCalculator.Create.SolarCoverageSimulationResult(linkedFace3D, zeroExposure);
+                        if (zeroCoverage != null)
+                        {
+                            solarModel.Add(zeroCoverage, linkedFace3D.Guid);
+                        }
+                    }
+                    continue;
+                }
+
+                SolarCoverageSimulationResult solarCoverageSimulationResult = Geometry.SolarCalculator.Create.SolarCoverageSimulationResult(linkedFace3D, sunExposure);
+                if (solarCoverageSimulationResult == null)
+                {
+                    continue;
+                }
+
+                solarModel.Add(solarCoverageSimulationResult, linkedFace3D.Guid);
+            }
+        }
+
+        /// <summary>
+        /// Shared sun-visibility pipeline used by both <see cref="Simulate"/> and
+        /// <see cref="Simulate_Coverage"/>. Returns the raw per-face exposure map; callers
+        /// decide whether to materialise SolarFaceSimulationResult or SolarCoverageSimulationResult.
+        /// </summary>
+        private static Dictionary<Guid, List<Tuple<DateTime, Radiation, List<Face3D>>>> ComputeSunExposure(SolarModel solarModel, Dictionary<DateTime, Vector3D> directionDictionary, bool calctulateRadiation, double minHorizonAngle, double tolerance_Area, double tolerance_Snap, double tolerance_Angle, double tolerance_Distance, double sampleSize, out List<LinkedFace3D> linkedFace3Ds_Out)
+        {
+            linkedFace3Ds_Out = null;
+
+            if (solarModel == null || directionDictionary == null)
+            {
+                return null;
+            }
+
+            List<LinkedFace3D> LinkedFace3Ds = solarModel.GetLinkedFace3Ds();
+            if (LinkedFace3Ds == null)
+            {
+                return null;
+            }
+
+            linkedFace3Ds_Out = LinkedFace3Ds;
+
+            Dictionary<LinkedFace3D, List<LinkedFace3D>> dictionary_Merge = Geometry.SolarCalculator.Query.Merge(LinkedFace3Ds, tolerance_Snap, tolerance_Area, tolerance_Distance);
+            if (dictionary_Merge == null)
+            {
+                return null;
+            }
+
+            WeatherData weatherData = !calctulateRadiation ? null : solarModel.GetValue<WeatherData>(SolarModelParameter.WeatherData);
+
+            List<LinkedFace3D> LinkedFace3Ds_Merge = new List<LinkedFace3D>(dictionary_Merge.Keys);
+
+            Dictionary<Guid, LinkedFace3D> dictionary_LinkedFace3D_Merge = new Dictionary<Guid, LinkedFace3D>();
+            foreach (LinkedFace3D linkedFace3D_Merge in LinkedFace3Ds_Merge)
+            {
+                dictionary_LinkedFace3D_Merge[linkedFace3D_Merge.Guid] = linkedFace3D_Merge;
+            }
+
+            KeyValuePair<DateTime, Vector3D>[] directionKeyValuePairs = directionDictionary.ToArray();
+
+            List<Tuple<DateTime, List<LinkedFace3D>>> tuples;
+            if (!double.IsNaN(sampleSize) && sampleSize > tolerance_Distance)
+            {
+                List<SampleCell> sampleCells = SampleCells(dictionary_Merge, sampleSize, tolerance_Area, tolerance_Distance);
+                if (sampleCells == null || sampleCells.Count == 0)
+                {
+                    return new Dictionary<Guid, List<Tuple<DateTime, Radiation, List<Face3D>>>>();
+                }
+
+                tuples = Enumerable.Repeat<Tuple<DateTime, List<LinkedFace3D>>>(null, directionKeyValuePairs.Length).ToList();
+                Parallel.For(0, directionKeyValuePairs.Length, i =>
+                {
+                    DateTime dateTime = directionKeyValuePairs[i].Key;
+                    Vector3D sunDirection = directionKeyValuePairs[i].Value;
+                    if (!ValidSunDirection(sunDirection, minHorizonAngle))
+                    {
+                        return;
+                    }
+
+                    List<LinkedFace3D> linkedFace3Ds_ExposedToSun = ExposedSampleLinkedFace3Ds(sampleCells, LinkedFace3Ds_Merge, sunDirection, tolerance_Area, tolerance_Angle, tolerance_Distance);
+                    if (linkedFace3Ds_ExposedToSun == null || linkedFace3Ds_ExposedToSun.Count == 0)
+                    {
+                        return;
+                    }
+
+                    tuples[i] = new Tuple<DateTime, List<LinkedFace3D>>(dateTime, linkedFace3Ds_ExposedToSun);
+                });
+            }
+            else
+            {
+                tuples = Enumerable.Repeat<Tuple<DateTime, List<LinkedFace3D>>>(null, directionKeyValuePairs.Length).ToList();
+                Parallel.For(0, directionKeyValuePairs.Length, i =>
+                {
+                    DateTime dateTime = directionKeyValuePairs[i].Key;
+
+                    Vector3D sunDirection = directionKeyValuePairs[i].Value;
+                    if (sunDirection == null || !sunDirection.IsValid())
+                    {
+                        return;
+                    }
+
+                    if (sunDirection.Z > 0)
+                    {
+                        return;
+                    }
+
+                    double angle = Plane.WorldXY.Project(sunDirection).SmallestAngle(sunDirection);
+                    if (angle < minHorizonAngle)
+                    {
+                        return;
+                    }
+
+                    List<LinkedFace3D> linkedFace3Ds_ExposedToSun = Geometry.Object.Spatial.Query.VisibleLinkedFace3Ds(LinkedFace3Ds_Merge, sunDirection, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance);
+                    if (linkedFace3Ds_ExposedToSun == null || linkedFace3Ds_ExposedToSun.Count == 0)
+                    {
+                        return;
+                    }
+
+                    List<LinkedFace3D> LinkedFace3Ds_DateTime = new List<LinkedFace3D>();
+                    foreach (LinkedFace3D linkedFace3D_ExposedToSun in linkedFace3Ds_ExposedToSun)
+                    {
+                        if (!dictionary_LinkedFace3D_Merge.TryGetValue(linkedFace3D_ExposedToSun.Guid, out LinkedFace3D linkedFace3D_Merge))
+                        {
+                            continue;
+                        }
+
+                        if (!dictionary_Merge.TryGetValue(linkedFace3D_Merge, out List<LinkedFace3D> solarFaces_SolarModel) || solarFaces_SolarModel == null)
+                        {
+                            continue;
+                        }
+
+                        Face3D face3D_ExposedToSun = linkedFace3D_ExposedToSun.Face3D;
+                        Plane plane = face3D_ExposedToSun.GetPlane();
+                        if (plane == null)
+                        {
+                            continue;
+                        }
+
+                        Geometry.Planar.Face2D face2D_ExposedToSun = plane.Convert(face3D_ExposedToSun);
+                        if (face2D_ExposedToSun == null)
+                        {
+                            continue;
+                        }
+
+                        foreach (LinkedFace3D linkedFace3D_SolarModel in solarFaces_SolarModel)
+                        {
+                            Face3D face3D_SolarModel = linkedFace3D_SolarModel?.Face3D;
+                            if (face3D_SolarModel == null)
+                            {
+                                continue;
+                            }
+
+                            Geometry.Planar.Face2D face2D = plane.Convert(plane.Project(face3D_SolarModel));
+
+                            List<Geometry.Planar.Face2D> face2Ds_Intersection = Geometry.Planar.Query.Intersection(face2D, face2D_ExposedToSun, tolerance_Distance);
+                            if (face2Ds_Intersection == null || face2Ds_Intersection.Count == 0)
+                            {
+                                continue;
+                            }
+
+                            Plane plane_SolarModel = face3D_SolarModel.GetPlane();
+                            if (plane_SolarModel == null)
+                            {
+                                continue;
+                            }
+
+                            foreach (Geometry.Planar.Face2D face2D_Intersection in face2Ds_Intersection)
+                            {
+                                Face3D face3D = plane.Convert(face2D_Intersection);
+                                if (face3D == null)
+                                {
+                                    continue;
+                                }
+
+                                LinkedFace3Ds_DateTime.Add(new LinkedFace3D(linkedFace3D_SolarModel.Guid, plane_SolarModel.Project(face3D)));
+                            }
+                        }
+                    }
+
+                    tuples[i] = new Tuple<DateTime, List<LinkedFace3D>>(dateTime, LinkedFace3Ds_DateTime);
+                });
+            }
+
+            Dictionary<Guid, List<Tuple<DateTime, Radiation, List<Face3D>>>> dictionary_SunExposure = new Dictionary<Guid, List<Tuple<DateTime, Radiation, List<Face3D>>>>();
+            foreach (Tuple<DateTime, List<LinkedFace3D>> tuple in tuples)
+            {
+                if (tuple?.Item2 == null || tuple.Item2.Count == 0)
+                {
+                    continue;
+                }
+
+                foreach (IGrouping<Guid, LinkedFace3D> grouping in tuple.Item2.GroupBy(x => x.Guid))
+                {
+                    List<LinkedFace3D> linkedFace3Ds_Tuple = grouping.ToList();
+                    Radiation radiation = null;
+                    if (weatherData != null)
+                    {
+                        Plane plane = linkedFace3Ds_Tuple[0]?.Face3D?.GetPlane();
+                        if (plane != null)
+                        {
+                            radiation = Create.Radiation(weatherData, tuple.Item1, plane);
+                        }
+                    }
+
+                    if (!dictionary_SunExposure.TryGetValue(grouping.Key, out List<Tuple<DateTime, Radiation, List<Face3D>>> sunExposure))
+                    {
+                        sunExposure = new List<Tuple<DateTime, Radiation, List<Face3D>>>();
+                        dictionary_SunExposure[grouping.Key] = sunExposure;
+                    }
+
+                    sunExposure.Add(new Tuple<DateTime, Radiation, List<Face3D>>(tuple.Item1, radiation, linkedFace3Ds_Tuple.ConvertAll(x => x.Face3D)));
+                }
+            }
+
+            return dictionary_SunExposure;
         }
 
 

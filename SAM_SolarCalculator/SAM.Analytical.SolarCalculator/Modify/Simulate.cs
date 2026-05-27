@@ -95,6 +95,74 @@ namespace SAM.Analytical.SolarCalculator
             return solarFaceSimulationResults;
         }
 
+        /// <summary>
+        /// Coverage-only simulate: emits <see cref="SolarCoverageSimulationResult"/> instead of
+        /// <see cref="SolarFaceSimulationResult"/> and attaches them to the AnalyticalModel.
+        /// Designed for apples-to-apples comparison against TAS-imported shade coverage.
+        /// </summary>
+        public static List<SolarCoverageSimulationResult> Simulate_Coverage(this AnalyticalModel analyticalModel, IEnumerable<DateTime> dateTimes, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, double sampleSize = double.NaN)
+        {
+            if (analyticalModel == null || dateTimes == null)
+            {
+                return null;
+            }
+
+            Core.Location location = analyticalModel.Location;
+            if (location == null)
+            {
+                return null;
+            }
+
+            Dictionary<DateTime, Vector3D> directionDictionary = new Dictionary<DateTime, Vector3D>();
+            foreach (DateTime dateTime in dateTimes)
+            {
+                directionDictionary[dateTime] = Geometry.SolarCalculator.Query.SunDirection(location, dateTime, false);
+            }
+
+            return Simulate_Coverage(analyticalModel, directionDictionary, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, sampleSize);
+        }
+
+        public static List<SolarCoverageSimulationResult> Simulate_Coverage(this AnalyticalModel analyticalModel, Dictionary<DateTime, Vector3D> directionDictionary, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, double sampleSize = double.NaN)
+        {
+            if (analyticalModel == null || directionDictionary == null)
+            {
+                return null;
+            }
+
+            SolarModel solarModel = Convert.ToSAM_SolarModel(analyticalModel);
+            if (solarModel == null)
+            {
+                return null;
+            }
+
+            List<SolarCoverageSimulationResult> solarCoverageSimulationResults = Weather.SolarCalculator.Modify.Simulate_Coverage(solarModel, directionDictionary, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, sampleSize);
+
+            // Attach the populated SolarModel to the AnalyticalModel so downstream nodes
+            // (e.g. a comparison node) can pull it back out, regardless of whether the model
+            // was TAS-imported or SAM-computed — both paths land in the same parameter slot.
+            analyticalModel.SetValue(AnalyticalModelParameter.SolarModel, solarModel);
+
+            if (solarCoverageSimulationResults == null || solarCoverageSimulationResults.Count == 0)
+            {
+                return solarCoverageSimulationResults;
+            }
+
+            List<Panel> panels = analyticalModel.GetPanels();
+            foreach (SolarCoverageSimulationResult solarCoverageSimulationResult in solarCoverageSimulationResults)
+            {
+                Guid guid = Guid.Empty;
+                Panel panel = panels?.Find(x => x.Guid.ToString().Equals(solarCoverageSimulationResult.Reference));
+                if (panel != null)
+                {
+                    guid = panel.Guid;
+                }
+
+                analyticalModel.AddResult<Panel>(solarCoverageSimulationResult, guid);
+            }
+
+            return solarCoverageSimulationResults;
+        }
+
         public static List<SolarFaceSimulationResult> Simulate(this BuildingModel buildingModel, IEnumerable<DateTime> dateTimes, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, double sampleSize = double.NaN)
         {
             if (buildingModel == null || dateTimes == null)
