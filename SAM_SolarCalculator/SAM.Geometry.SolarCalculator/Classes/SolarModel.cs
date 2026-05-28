@@ -115,7 +115,7 @@ namespace SAM.Geometry.SolarCalculator
 
         public LinkedFace3D GetLinkedFace3D(ISolarSimulationResult solarSimulationResult)
         {
-            if(solarSimulationResult is null)
+            if(solarSimulationResult is null || solarRelationCluster is null)
             {
                 return null;
             }
