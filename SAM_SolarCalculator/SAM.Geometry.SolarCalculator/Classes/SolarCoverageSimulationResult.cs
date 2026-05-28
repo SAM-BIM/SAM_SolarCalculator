@@ -13,14 +13,14 @@ namespace SAM.Geometry.SolarCalculator
 {
     public class SolarCoverageSimulationResult : Result, ISolarSimulationResult
     {
-        private Dictionary<DateTime, float> coverage = new Dictionary<DateTime, float>();
+        private Dictionary<DateTime, double> coverage = new Dictionary<DateTime, double>();
 
-        public SolarCoverageSimulationResult(string name, string source, string reference, IEnumerable<Tuple<DateTime, float>> coverage)
+        public SolarCoverageSimulationResult(string name, string source, string reference, IEnumerable<Tuple<DateTime, double>> coverage)
             : base(name, source, reference)
         {
             if(coverage != null)
             {
-                foreach(Tuple<DateTime, float> tuple in coverage)
+                foreach(Tuple<DateTime, double> tuple in coverage)
                 {
                     this.coverage[tuple.Item1] = tuple.Item2;
                 }
@@ -32,7 +32,7 @@ namespace SAM.Geometry.SolarCalculator
         {
             if(solarCoverageSimulationResult?.coverage != null)
             {
-                foreach(KeyValuePair<DateTime, float> keyValuePair in solarCoverageSimulationResult.coverage)
+                foreach(KeyValuePair<DateTime, double> keyValuePair in solarCoverageSimulationResult.coverage)
                 {
                     coverage[keyValuePair.Key] = keyValuePair.Value;
                 }
@@ -44,7 +44,7 @@ namespace SAM.Geometry.SolarCalculator
         {
             if (solarCoverageSimulationResult?.coverage != null)
             {
-                foreach (KeyValuePair<DateTime, float> keyValuePair in solarCoverageSimulationResult.coverage)
+                foreach (KeyValuePair<DateTime, double> keyValuePair in solarCoverageSimulationResult.coverage)
                 {
                     coverage[keyValuePair.Key] = keyValuePair.Value;
                 }
@@ -70,7 +70,7 @@ namespace SAM.Geometry.SolarCalculator
             }
         }
 
-        public List<float> Values
+        public List<double> Values
         {
             get
             {
@@ -83,7 +83,7 @@ namespace SAM.Geometry.SolarCalculator
             }
         }
 
-        public List<Tuple<DateTime, float>> Coverage
+        public List<Tuple<DateTime, double>> Coverage
         {
             get
             {
@@ -92,8 +92,8 @@ namespace SAM.Geometry.SolarCalculator
                     return null;
                 }
 
-                List<Tuple<DateTime, float>> result = new List<Tuple<DateTime, float>>(coverage.Count);
-                foreach (KeyValuePair<DateTime, float> keyValuePair in coverage)
+                List<Tuple<DateTime, double>> result = new List<Tuple<DateTime, double>>(coverage.Count);
+                foreach (KeyValuePair<DateTime, double> keyValuePair in coverage)
                 {
                     result.Add(Tuple.Create(keyValuePair.Key, keyValuePair.Value));
                 }
@@ -109,7 +109,7 @@ namespace SAM.Geometry.SolarCalculator
             }
         }
 
-        public float this[DateTime dateTime]
+        public double this[DateTime dateTime]
         {
             get
             {
@@ -117,14 +117,14 @@ namespace SAM.Geometry.SolarCalculator
             }
         }
 
-        public float GetCoverage(DateTime dateTime)
+        public double GetCoverage(DateTime dateTime)
         {
-            if(coverage.TryGetValue(dateTime, out float result))
+            if(coverage.TryGetValue(dateTime, out double result))
             {
                 return result;
             }
 
-            return float.NaN;
+            return double.NaN;
         }
 
         public override bool FromJsonObject(JsonObject jObject)
@@ -134,7 +134,7 @@ namespace SAM.Geometry.SolarCalculator
 
             if(jObject.ContainsKey("Coverage"))
             {
-                coverage = new Dictionary<DateTime, float>();
+                coverage = new Dictionary<DateTime, double>();
 
                 JsonArray jArray_Coverage = jObject["Coverage"] as JsonArray;
                 if(jArray_Coverage != null)
@@ -148,7 +148,7 @@ namespace SAM.Geometry.SolarCalculator
                         }
 
                         DateTime dateTime = jArray[0]?.GetValue<DateTime>() ?? default;
-                        float value = jArray[1]?.GetValue<float>() ?? default;
+                        double value = jArray[1]?.GetValue<double>() ?? default;
 
                         coverage[dateTime] = value;
                     }
@@ -167,7 +167,7 @@ namespace SAM.Geometry.SolarCalculator
             if(coverage != null)
             {
                 JsonArray jArray_Coverage = new JsonArray();
-                foreach(KeyValuePair<DateTime, float> keyValuePair in coverage)
+                foreach(KeyValuePair<DateTime, double> keyValuePair in coverage)
                 {
                     JsonArray jArray = new JsonArray
                     {

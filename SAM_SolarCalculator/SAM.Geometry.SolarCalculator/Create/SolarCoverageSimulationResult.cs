@@ -41,7 +41,7 @@ namespace SAM.Geometry.SolarCalculator
                 return null;
             }
 
-            List<Tuple<DateTime, float>> coverage = new List<Tuple<DateTime, float>>();
+            List<Tuple<DateTime, double>> coverage = new List<Tuple<DateTime, double>>();
             foreach (Tuple<DateTime, Radiation, List<Face3D>> tuple in sunExposure)
             {
                 if (tuple == null)
@@ -63,7 +63,7 @@ namespace SAM.Geometry.SolarCalculator
                     }
                 }
 
-                float c = (float)Math.Max(0.0, Math.Min(1.0, litArea / totalArea));
+                double c = Math.Max(0.0, Math.Min(1.0, litArea / totalArea));
                 coverage.Add(Tuple.Create(tuple.Item1, c));
             }
 
@@ -100,7 +100,7 @@ namespace SAM.Geometry.SolarCalculator
                 return null;
             }
 
-            List<Tuple<DateTime, float>> coverage = new List<Tuple<DateTime, float>>(dateTimes.Count);
+            List<Tuple<DateTime, double>> coverage = new List<Tuple<DateTime, double>>(dateTimes.Count);
             foreach (DateTime dateTime in dateTimes)
             {
                 // Use GetSunExposureFace3Ds so coverage is computed from geometry regardless of
@@ -108,7 +108,7 @@ namespace SAM.Geometry.SolarCalculator
                 // Radiation is null even when lit polygons exist).
                 List<Face3D> litFaces = solarFaceSimulationResult.GetSunExposureFace3Ds(dateTime);
                 double litArea = litFaces == null ? 0 : litFaces.Sum(x => x?.GetArea() ?? 0);
-                float c = (float)Math.Max(0.0, Math.Min(1.0, litArea / totalArea));
+                double c = Math.Max(0.0, Math.Min(1.0, litArea / totalArea));
                 coverage.Add(Tuple.Create(dateTime, c));
             }
 

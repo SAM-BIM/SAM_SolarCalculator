@@ -5,6 +5,7 @@ using Grasshopper.Kernel;
 using SAM.Analytical.Grasshopper.SolarCalculator.Properties;
 using SAM.Core;
 using SAM.Core.Grasshopper;
+using SAM.Geometry.Grasshopper;
 using SAM.Geometry.Object.Spatial;
 using SAM.Geometry.SolarCalculator;
 using SAM.Geometry.Spatial;
@@ -23,7 +24,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// <summary>
         /// The latest version of this component
         /// </summary>
-        public override string LatestComponentVersion => "1.0.0";
+        public override string LatestComponentVersion => "1.1.0";
 
         /// <summary>
         /// Provides an Icon for the component.
@@ -34,7 +35,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
 
         public SAMAnalyticalCompareSolarCoverage()
           : base("SAMAnalytical.CompareSolarCoverage", "SAMAnalytical.CompareSolarCoverage",
-              "Compare SolarCoverageSimulationResults between two AnalyticalModels — typically one TAS-imported and one SAM-computed — to benchmark SAM's solar engine against TAS shade-proportion data.\nFaces are matched by Face3D centroid proximity within _tolerance_; unmatched faces are reported separately.\nPer matched pair, the per-DateTime delta (sam − tas) is computed and reduced to mean absolute, max absolute, and RMSE.",
+              "Compare SolarCoverageSimulationResults between two AnalyticalModels — typically one TAS-imported and one SAM-computed — to benchmark SAM's solar engine against TAS shade-proportion data.\nFaces are matched by Face3D.InternalPoint3D proximity within _tolerance_; unmatched faces are reported separately.\nTimestamps from both results are ceiling-rounded to the next whole hour and matched on (month, day, hour) ignoring year, so half-hour offsets and different base years align.\nPer matched pair, the per-hour delta (B − A) is reduced to mean absolute, max absolute, and RMSE.",
               "SAM", "Solar")
         {
         }
@@ -47,7 +48,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 result.Add(new GH_SAMParam(new GooAnalyticalModelParam() { Name = "_analyticalModel_A", NickName = "_analyticalModel_A", Description = "First AnalyticalModel (typically TAS-imported, with SolarModel attached via AnalyticalModelParameter.SolarModel)", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new GooAnalyticalModelParam() { Name = "_analyticalModel_B", NickName = "_analyticalModel_B", Description = "Second AnalyticalModel (typically SAM-computed via SAMAnalytical.SolarSimulation with _coverageOnly_ = true)", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
 
-                global::Grasshopper.Kernel.Parameters.Param_Number tolerance = new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "_tolerance_", NickName = "_tolerance_", Description = "Centroid-match distance tolerance in metres. A face from model A is paired with the nearest face in model B whose centroid is within this distance. Default 0.5 m.", Access = GH_ParamAccess.item };
+                global::Grasshopper.Kernel.Parameters.Param_Number tolerance = new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "_tolerance_", NickName = "_tolerance_", Description = "InternalPoint3D-match distance tolerance in metres. A face from model A is paired with the nearest face in model B whose InternalPoint3D is within this distance. Default 0.5 m.", Access = GH_ParamAccess.item };
                 tolerance.SetPersistentData(0.5);
                 result.Add(new GH_SAMParam(tolerance, ParamVisibility.Voluntary));
 
@@ -64,13 +65,13 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             get
             {
                 List<GH_SAMParam> result = new List<GH_SAMParam>();
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_GenericObject() { Name = "linkedFace3Ds_A", NickName = "linkedFace3Ds_A", Description = "LinkedFace3Ds from model A that were successfully matched", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_GenericObject() { Name = "linkedFace3Ds_B", NickName = "linkedFace3Ds_B", Description = "LinkedFace3Ds from model B paired 1:1 with linkedFace3Ds_A", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new GooSAMGeometryParam() { Name = "linkedFace3Ds_A", NickName = "linkedFace3Ds_A", Description = "Face3Ds (from LinkedFace3Ds in model A) that were successfully matched — previewable in the Rhino viewport", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new GooSAMGeometryParam() { Name = "linkedFace3Ds_B", NickName = "linkedFace3Ds_B", Description = "Face3Ds (from LinkedFace3Ds in model B) paired 1:1 with linkedFace3Ds_A — previewable in the Rhino viewport", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "meanAbsDelta", NickName = "meanAbsDelta", Description = "Mean absolute coverage difference per matched pair, averaged over overlapping DateTimes", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "maxAbsDelta", NickName = "maxAbsDelta", Description = "Max absolute coverage difference per matched pair", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "rmse", NickName = "rmse", Description = "Root-mean-square error of (B − A) per matched pair", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "overlapCount", NickName = "overlapCount", Description = "Number of DateTime keys present in BOTH coverage results, per matched pair", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_GenericObject() { Name = "unmatched_A", NickName = "unmatched_A", Description = "LinkedFace3Ds from model A that had no neighbour within _tolerance_ in model B", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "overlapCount", NickName = "overlapCount", Description = "Number of hour-of-year buckets present in BOTH coverage results after ceiling-to-hour alignment, per matched pair", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(new GooSAMGeometryParam() { Name = "unmatched_A", NickName = "unmatched_A", Description = "Face3Ds (from LinkedFace3Ds in model A) that had no neighbour within _tolerance_ in model B — previewable in the Rhino viewport", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "overallMeanAbsDelta", NickName = "overallMeanAbsDelta", Description = "Mean absolute delta across ALL matched pairs and ALL overlapping DateTimes — a single benchmark scalar", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Boolean() { Name = "successful", NickName = "successful", Description = "Successful?", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 return result.ToArray();
@@ -136,7 +137,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 return;
             }
 
-            // Match each pair from A to nearest (by centroid distance) in B, within tolerance.
+            // Match each pair from A to nearest (by InternalPoint3D distance) in B, within tolerance.
             // Each B face can only be claimed once — greedy first-come matching, which is fine
             // when models share geometry.
             HashSet<int> usedB = new HashSet<int>();
@@ -166,7 +167,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                         continue;
                     }
 
-                    double distance = pair_A.Centroid.Distance(pairs_B[j].Centroid);
+                    double distance = pair_A.InternalPoint3D.Distance(pairs_B[j].InternalPoint3D);
                     if (distance <= tolerance)
                     {
                         candidates.Add(new KeyValuePair<int, double>(j, distance));
@@ -211,10 +212,10 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             double overallMeanAbsDelta = sumOverlap_All == 0 ? double.NaN : sumAbsDelta_All / sumOverlap_All;
 
             index = Params.IndexOfOutputParam("linkedFace3Ds_A");
-            if (index != -1) dataAccess.SetDataList(index, matched_A);
+            if (index != -1) dataAccess.SetDataList(index, matched_A.ConvertAll(x => x?.Face3D));
 
             index = Params.IndexOfOutputParam("linkedFace3Ds_B");
-            if (index != -1) dataAccess.SetDataList(index, matched_B);
+            if (index != -1) dataAccess.SetDataList(index, matched_B.ConvertAll(x => x?.Face3D));
 
             index = Params.IndexOfOutputParam("meanAbsDelta");
             if (index != -1) dataAccess.SetDataList(index, meanAbsDeltas);
@@ -229,7 +230,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             if (index != -1) dataAccess.SetDataList(index, overlapCounts);
 
             index = Params.IndexOfOutputParam("unmatched_A");
-            if (index != -1) dataAccess.SetDataList(index, unmatched_A);
+            if (index != -1) dataAccess.SetDataList(index, unmatched_A.ConvertAll(x => x?.Face3D));
 
             index = Params.IndexOfOutputParam("overallMeanAbsDelta");
             if (index != -1) dataAccess.SetData(index, overallMeanAbsDelta);
@@ -241,7 +242,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         }
 
         /// <summary>
-        /// Build a list of (LinkedFace3D, centroid, SolarCoverageSimulationResult) tuples from a SolarModel.
+        /// Build a list of (LinkedFace3D, InternalPoint3D, SolarCoverageSimulationResult) tuples from a SolarModel.
         /// Match is by Reference == linkedFace3D.Guid.ToString() — the convention used by both
         /// the TAS-import path (Create.SolarModel) and the SAM coverage-simulate path.
         /// </summary>
@@ -266,10 +267,10 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 if (linkedFace3D?.Face3D == null) continue;
                 if (!dictionary_Result.TryGetValue(linkedFace3D.Guid.ToString(), out SolarCoverageSimulationResult coverageResult)) continue;
 
-                Point3D centroid = linkedFace3D.Face3D.GetCentroid();
-                if (centroid == null) continue;
+                Point3D internalPoint3D = linkedFace3D.Face3D.InternalPoint3D();
+                if (internalPoint3D == null) continue;
 
-                result.Add(new Pair(linkedFace3D, centroid, coverageResult));
+                result.Add(new Pair(linkedFace3D, internalPoint3D, coverageResult));
             }
 
             return result;
@@ -285,18 +286,17 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
 
             if (a == null || b == null) return;
 
-            List<DateTime> dateTimes_A = a.DateTimes;
-            if (dateTimes_A == null || dateTimes_A.Count == 0) return;
+            Dictionary<HourKey, double> map_A = BuildHourMap(a);
+            Dictionary<HourKey, double> map_B = BuildHourMap(b);
+            if (map_A.Count == 0 || map_B.Count == 0) return;
 
             double sumSq = 0;
             double max = 0;
-            foreach (DateTime dateTime in dateTimes_A)
+            foreach (KeyValuePair<HourKey, double> entry in map_A)
             {
-                float valueA = a[dateTime];
-                float valueB = b[dateTime];
-                if (float.IsNaN(valueA) || float.IsNaN(valueB)) continue;
+                if (!map_B.TryGetValue(entry.Key, out double valueB)) continue;
 
-                double diff = valueB - valueA;
+                double diff = valueB - entry.Value;
                 double absDiff = Math.Abs(diff);
                 sumAbs += absDiff;
                 sumSq += diff * diff;
@@ -313,16 +313,71 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
 
         private sealed class Pair
         {
-            public Pair(LinkedFace3D linkedFace3D, Point3D centroid, SolarCoverageSimulationResult result)
+            public Pair(LinkedFace3D linkedFace3D, Point3D internalPoint3D, SolarCoverageSimulationResult result)
             {
                 LinkedFace3D = linkedFace3D;
-                Centroid = centroid;
+                InternalPoint3D = internalPoint3D;
                 Result = result;
             }
 
             public LinkedFace3D LinkedFace3D { get; }
-            public Point3D Centroid { get; }
+            public Point3D InternalPoint3D { get; }
             public SolarCoverageSimulationResult Result { get; }
+        }
+
+        private readonly struct HourKey : IEquatable<HourKey>
+        {
+            public readonly byte Month;
+            public readonly byte Day;
+            public readonly byte Hour;
+
+            public HourKey(DateTime dt)
+            {
+                Month = (byte)dt.Month;
+                Day = (byte)dt.Day;
+                Hour = (byte)dt.Hour;
+            }
+
+            public bool Equals(HourKey other) => Month == other.Month && Day == other.Day && Hour == other.Hour;
+            public override bool Equals(object obj) => obj is HourKey other && Equals(other);
+            public override int GetHashCode() => (Month << 16) | (Day << 8) | Hour;
+        }
+
+        private static DateTime CeilingToHour(DateTime dt)
+        {
+            if (dt.Minute == 0 && dt.Second == 0 && dt.Millisecond == 0)
+            {
+                return dt;
+            }
+
+            // Truncate to the start of the current hour and add one, so X:30 -> (X+1):00.
+            // Year roll-over (Dec 31 23:30 -> Jan 1 00:00 next year) is fine — HourKey discards the year.
+            return new DateTime(dt.Year, dt.Month, dt.Day, dt.Hour, 0, 0, dt.Kind).AddHours(1);
+        }
+
+        private static Dictionary<HourKey, double> BuildHourMap(SolarCoverageSimulationResult result)
+        {
+            Dictionary<HourKey, double> map = new Dictionary<HourKey, double>();
+            if (result == null) return map;
+
+            List<Tuple<DateTime, double>> coverage = result.Coverage;
+            if (coverage == null) return map;
+
+            foreach (Tuple<DateTime, double> entry in coverage)
+            {
+                if (entry == null) continue;
+                if (double.IsNaN(entry.Item2)) continue;
+
+                HourKey key = new HourKey(CeilingToHour(entry.Item1));
+                // First-write-wins: if multiple raw timestamps round to the same hour bucket
+                // (sub-hour input), keep the earliest one. Annual sims have one value per hour.
+                if (!map.ContainsKey(key))
+                {
+                    map[key] = entry.Item2;
+                }
+            }
+
+            return map;
         }
     }
 }

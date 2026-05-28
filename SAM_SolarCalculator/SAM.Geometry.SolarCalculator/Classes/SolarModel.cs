@@ -141,7 +141,39 @@ namespace SAM.Geometry.SolarCalculator
         
         public List<TSolarSimulationResult> GetSolarSimulationResults<TSolarSimulationResult>() where TSolarSimulationResult : ISolarSimulationResult
         {
-            return solarRelationCluster?.GetObjects<TSolarSimulationResult>()?.ConvertAll(x => Core.Query.Clone(x));
+            List<TSolarSimulationResult> originals = solarRelationCluster?.GetObjects<TSolarSimulationResult>();
+            if (originals == null)
+            {
+                return null;
+            }
+
+            // Clone each result via its concrete type's copy constructor — matches the pattern
+            // already used by the typed SolarCoverageSimulationResults / GetSolarFaceSimulationResults
+            // accessors and avoids a reflection-based Core.Query.Clone round-trip.
+            List<TSolarSimulationResult> result = new List<TSolarSimulationResult>(originals.Count);
+            foreach (TSolarSimulationResult original in originals)
+            {
+                if (original == null)
+                {
+                    result.Add(default);
+                    continue;
+                }
+
+                switch (original)
+                {
+                    case SolarCoverageSimulationResult coverageResult:
+                        result.Add((TSolarSimulationResult)(ISolarSimulationResult)new SolarCoverageSimulationResult(coverageResult));
+                        break;
+                    case SolarFaceSimulationResult faceResult:
+                        result.Add((TSolarSimulationResult)(ISolarSimulationResult)new SolarFaceSimulationResult(faceResult));
+                        break;
+                    default:
+                        // Unknown subtype — fall back to reflection-based clone.
+                        result.Add(Core.Query.Clone(original));
+                        break;
+                }
+            }
+            return result;
         }
         
         public override JsonObject ToJsonObject()
