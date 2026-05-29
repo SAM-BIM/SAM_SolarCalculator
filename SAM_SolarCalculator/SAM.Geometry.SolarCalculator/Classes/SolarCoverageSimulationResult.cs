@@ -1,13 +1,13 @@
 ﻿// SPDX-License-Identifier: LGPL-3.0-or-later
 // Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
 
-using System.Text.Json.Nodes;
 using SAM.Core;
 using SAM.Core.SolarCalculator;
 using SAM.Geometry.Spatial;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json.Nodes;
 
 namespace SAM.Geometry.SolarCalculator
 {
@@ -55,6 +55,29 @@ namespace SAM.Geometry.SolarCalculator
             : base(jObject)
         {
 
+        }
+
+        public SolarCoverageSimulationResult(SolarCoverageSimulationResult solarCoverageSimulationResult, IEnumerable<DateTime> dateTimes)
+            : base(solarCoverageSimulationResult)
+        {
+            if (solarCoverageSimulationResult == null)
+            {
+                return;
+            }
+
+            if (solarCoverageSimulationResult.coverage != null)
+            {
+                coverage = new Dictionary<DateTime, double>();
+                foreach (KeyValuePair<DateTime, double> keyValuePair in solarCoverageSimulationResult.coverage)
+                {
+                    if (dateTimes != null && !dateTimes.Contains(keyValuePair.Key))
+                    {
+                        continue;
+                    }
+
+                    coverage[keyValuePair.Key] = keyValuePair.Value;
+                }
+            }
         }
 
         public List<DateTime> DateTimes

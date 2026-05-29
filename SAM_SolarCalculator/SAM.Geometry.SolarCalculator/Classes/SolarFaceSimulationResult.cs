@@ -98,15 +98,15 @@ namespace SAM.Geometry.SolarCalculator
 
             if (solarFaceSimulationResult.sunExposure != null)
             {
-                sunExposure = new List<Tuple<DateTime, Radiation, List<Spatial.Face3D>>>();
-                foreach (Tuple<DateTime, Radiation, List<Spatial.Face3D>> tuple in solarFaceSimulationResult.sunExposure)
+                sunExposure = new List<Tuple<DateTime, Radiation, List<Face3D>>>();
+                foreach (Tuple<DateTime, Radiation, List<Face3D>> tuple in solarFaceSimulationResult.sunExposure)
                 {
                     if(dateTimes != null && !dateTimes.Contains(tuple.Item1))
                     {
                         continue;
                     }
                     
-                    sunExposure.Add(new Tuple<DateTime, Radiation, List<Spatial.Face3D>>(tuple.Item1, tuple.Item2, tuple?.Item3 == null ? null : tuple.Item3.ConvertAll(x => new Spatial.Face3D(x))));
+                    sunExposure.Add(new Tuple<DateTime, Radiation, List<Face3D>>(tuple.Item1, tuple.Item2, tuple?.Item3 == null ? null : tuple.Item3.ConvertAll(x => new Spatial.Face3D(x))));
                 }
             }
         }
