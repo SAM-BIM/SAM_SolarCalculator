@@ -52,6 +52,22 @@ See the main repository for details:
 
 ---
 
+## Tests
+
+Macro/integration tests live in **[`SAM_SolarCalculator.Tests`](SAM_SolarCalculator.Tests/README.md)**
+(xUnit, .NET 8). They run against real exported `.sam` models and guard the
+SAM-vs-TAS solar-coverage benchmark (e.g. SAM reproduces TAS shading to ~0.9%).
+
+```bash
+dotnet test SAM_SolarCalculator/SAM_SolarCalculator.Tests
+```
+
+Run this before merging changes to the solar-calculation code. They are not yet
+wired into CI — see the [tests README](SAM_SolarCalculator.Tests/README.md#ci-current-status--best-practice)
+for how to add a `dotnet test` step so they run on every PR.
+
+---
+
 ## Licence
 
 This repository is free software licensed under the  
