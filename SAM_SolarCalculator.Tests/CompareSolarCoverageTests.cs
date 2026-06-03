@@ -17,8 +17,9 @@ namespace SAM.SolarCalculator.Tests
 {
     /// <summary>
     /// Macro tests over two real exported AnalyticalModels:
-    ///   ModelA.json                 = SAMAnalytical.FromTBD with _importSurfaceShades_ = true  (TAS shade surfaces)
-    ///   ModelB-SolarSimulation.json = SAMAnalytical.FromTBD (shades=false) -> SAMAnalytical.SolarSimulation
+    ///   ModelA.sam                 = SAMAnalytical.FromTBD with _importSurfaceShades_ = true  (TAS shade surfaces)
+    ///   ModelB-SolarSimulation.sam = SAMAnalytical.FromTBD (shades=false) -> SAMAnalytical.SolarSimulation
+    /// Fixtures are stored in SAM's native compressed .sam (zip) format and loaded via Convert.ToSAM.
     /// They reproduce the surface-set mismatch that motivated the _useModelSolarModel_ toggle on
     /// SAMAnalytical.SolarSimulation, and prove the toggle makes SAM evaluate the SAME surfaces as
     /// the TAS import (a 1:1 benchmark set) instead of the AdjacencyCluster-filtered panel set.
@@ -71,8 +72,8 @@ namespace SAM.SolarCalculator.Tests
         [Fact]
         public void Fixtures_have_mismatched_surface_sets()
         {
-            SolarModel solarModel_A = GetSolarModel(Load("ModelA.json"));
-            SolarModel solarModel_B = GetSolarModel(Load("ModelB-SolarSimulation.json"));
+            SolarModel solarModel_A = GetSolarModel(Load("ModelA.sam"));
+            SolarModel solarModel_B = GetSolarModel(Load("ModelB-SolarSimulation.sam"));
 
             Assert.NotNull(solarModel_A);
             Assert.NotNull(solarModel_B);
@@ -90,7 +91,7 @@ namespace SAM.SolarCalculator.Tests
         [Fact]
         public void UseModelSolarModel_recomputes_coverage_on_the_same_surfaces()
         {
-            AnalyticalModel analyticalModel = Load("ModelA.json");
+            AnalyticalModel analyticalModel = Load("ModelA.sam");
 
             SolarModel solarModel_TAS = GetSolarModel(analyticalModel);
             Assert.NotNull(solarModel_TAS);
@@ -122,7 +123,7 @@ namespace SAM.SolarCalculator.Tests
         [Fact]
         public void ClassifyPanels_accounts_for_every_Model_A_surface()
         {
-            AnalyticalModel analyticalModel_B = Load("ModelB-SolarSimulation.json");
+            AnalyticalModel analyticalModel_B = Load("ModelB-SolarSimulation.sam");
 
             // Classify Model B's analytical panels by the same rule the SolarModel builder uses.
             List<PanelSolarClassification> classifications = analyticalModel_B.ClassifyPanelsForSolarModel();
@@ -130,7 +131,7 @@ namespace SAM.SolarCalculator.Tests
             Assert.NotEmpty(classifications);
 
             // Map each of Model A's surfaces to the nearest Model B panel and tally the verdict.
-            SolarModel solarModel_A = GetSolarModel(Load("ModelA.json"));
+            SolarModel solarModel_A = GetSolarModel(Load("ModelA.sam"));
             Assert.NotNull(solarModel_A);
 
             int surfaces = 0, kept = 0, dropped = 0, noPanel = 0;
@@ -167,7 +168,7 @@ namespace SAM.SolarCalculator.Tests
         [Fact]
         public void ToSAM_SolarModel_matches_TAS_surface_set_one_to_one()
         {
-            AnalyticalModel analyticalModel = Load("ModelB-SolarSimulation.json");
+            AnalyticalModel analyticalModel = Load("ModelB-SolarSimulation.sam");
 
             SolarModel solarModel = analyticalModel.ToSAM_SolarModel();
             Assert.NotNull(solarModel);
@@ -181,7 +182,7 @@ namespace SAM.SolarCalculator.Tests
         [Fact]
         public void Default_path_now_covers_the_full_TAS_equivalent_surface_set()
         {
-            AnalyticalModel analyticalModel = Load("ModelA.json");
+            AnalyticalModel analyticalModel = Load("ModelA.sam");
 
             List<SolarCoverageSimulationResult> results =
                 analyticalModel.Simulate_Coverage(SampleDateTimes);
