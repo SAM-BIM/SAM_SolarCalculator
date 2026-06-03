@@ -47,6 +47,8 @@
     <None Update="ModelB-SolarSimulation.sam" CopyToOutputDirectory="PreserveNewest" />
     <None Update="ModelA-NoShade.sam" CopyToOutputDirectory="PreserveNewest" />
     <None Update="ModelB-NoShadeSolarSimulation.sam" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="ModelA-WithShade.sam" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="ModelB-WithShadeSolarSimulation.sam" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

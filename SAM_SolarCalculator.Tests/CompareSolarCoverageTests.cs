@@ -197,5 +197,140 @@ namespace SAM.SolarCalculator.Tests
             Assert.NotNull(results);
             Assert.Equal(ExpectedSurfaces_A, results.Count);
         }
+
+        // ---- With-Shade engine benchmark (matched shading on both sides) -------------------------------
+        // ModelA-WithShade.sam            = FromTBD(_importSurfaceShades_=true) -> TAS, 36 surfaces, source TAS, at origin.
+        // ModelB-WithShadeSolarSimulation = FromTBD(false) -> SolarSimulation -> SAM, 64 surfaces (8 + 28 windows
+        //                                   + 28 Shade occluders), drawn ~+25 m away in X.
+        // Locks in the live benchmark: after aligning B onto A by the non-Shade bounding box, all 36 TAS
+        // surfaces match a SAM surface 1:1, the 28 Shade occluders are unmatched (no TAS counterpart), and
+        // SAM agrees with TAS to well within tolerance (live overallMeanAbsDelta was 0.0088).
+
+        private struct HourKey : IEquatable<HourKey>
+        {
+            public readonly byte Month, Day, Hour;
+            public HourKey(DateTime dt)
+            {
+                DateTime c = (dt.Minute == 0 && dt.Second == 0 && dt.Millisecond == 0) ? dt : new DateTime(dt.Year, dt.Month, dt.Day, dt.Hour, 0, 0).AddHours(1);
+                Month = (byte)c.Month; Day = (byte)c.Day; Hour = (byte)c.Hour;
+            }
+            public bool Equals(HourKey o) => Month == o.Month && Day == o.Day && Hour == o.Hour;
+            public override bool Equals(object obj) => obj is HourKey o && Equals(o);
+            public override int GetHashCode() => (Month << 16) | (Day << 8) | Hour;
+        }
+
+        private static Dictionary<HourKey, double> HourMap(SolarCoverageSimulationResult r)
+        {
+            Dictionary<HourKey, double> m = new Dictionary<HourKey, double>();
+            if (r?.Coverage == null) return m;
+            foreach (Tuple<DateTime, double> t in r.Coverage)
+            {
+                if (t == null || double.IsNaN(t.Item2)) continue;
+                HourKey k = new HourKey(t.Item1);
+                if (!m.ContainsKey(k)) m[k] = t.Item2;
+            }
+            return m;
+        }
+
+        // (internalPoint, coverage result, isShade) for every surface that carries a coverage result.
+        private static List<Tuple<Point3D, SolarCoverageSimulationResult, bool>> ResultPairs(SolarModel solarModel, HashSet<Guid> shadeGuids)
+        {
+            Dictionary<string, SolarCoverageSimulationResult> byReference = new Dictionary<string, SolarCoverageSimulationResult>();
+            foreach (SolarCoverageSimulationResult r in solarModel.SolarCoverageSimulationResults ?? new List<SolarCoverageSimulationResult>())
+            {
+                if (r?.Reference != null) byReference[r.Reference] = r;
+            }
+
+            List<Tuple<Point3D, SolarCoverageSimulationResult, bool>> result = new List<Tuple<Point3D, SolarCoverageSimulationResult, bool>>();
+            foreach (LinkedFace3D lf in solarModel.GetLinkedFace3Ds() ?? new List<LinkedFace3D>())
+            {
+                if (lf?.Face3D == null) continue;
+                if (!byReference.TryGetValue(lf.Guid.ToString(), out SolarCoverageSimulationResult r)) continue;
+                Point3D p = lf.Face3D.InternalPoint3D();
+                if (p == null) continue;
+                result.Add(Tuple.Create(p, r, shadeGuids.Contains(lf.Guid)));
+            }
+            return result;
+        }
+
+        [Fact]
+        public void WithShade_SAM_matches_TAS_within_tolerance()
+        {
+            AnalyticalModel a = Load("ModelA-WithShade.sam");
+            AnalyticalModel b = Load("ModelB-WithShadeSolarSimulation.sam");
+
+            SolarModel smA = GetSolarModel(a);
+            SolarModel smB = GetSolarModel(b);
+            Assert.NotNull(smA);
+            Assert.NotNull(smB);
+            Assert.Equal(36, smA.GetLinkedFace3Ds().Count);
+            Assert.Equal(64, smB.GetLinkedFace3Ds().Count);
+
+            // 28 of B's surfaces are Shade occluders (TAS has none).
+            HashSet<Guid> shadeGuids = new HashSet<Guid>(
+                b.ClassifyPanelsForSolarModel().Where(c => c.PanelType == PanelType.Shade).Select(c => c.Guid));
+            List<Tuple<Point3D, SolarCoverageSimulationResult, bool>> pairsA = ResultPairs(smA, new HashSet<Guid>());
+            List<Tuple<Point3D, SolarCoverageSimulationResult, bool>> pairsB = ResultPairs(smB, shadeGuids);
+            Assert.Equal(36, pairsA.Count);
+            Assert.Equal(64, pairsB.Count);
+            Assert.Equal(28, pairsB.Count(x => x.Item3));
+
+            // Align B onto A by the min corner of the NON-Shade points (the models are a pure translation
+            // apart: TAS at origin, SAM drawn ~+25 m). Shade points are excluded so the offset comes from
+            // the common surfaces, not shade overhang.
+            double[] bbA = BBoxMin(pairsA.Where(x => !x.Item3).Select(x => x.Item1));
+            double[] bbB = BBoxMin(pairsB.Where(x => !x.Item3).Select(x => x.Item1));
+            double dx = bbA[0] - bbB[0], dy = bbA[1] - bbB[1], dz = bbA[2] - bbB[2];
+            Assert.True(Math.Abs(dx) > 1.0, "expected a real X offset between TAS and SAM models");
+
+            // Greedy nearest-neighbour 1:1 match (A -> aligned B) within 0.5 m, then per-hour mean abs delta.
+            const double tolerance = 0.5;
+            HashSet<int> usedB = new HashSet<int>();
+            int matched = 0;
+            double sumAbs = 0; int overlapAll = 0;
+            foreach (Tuple<Point3D, SolarCoverageSimulationResult, bool> pa in pairsA)
+            {
+                int best = -1; double bestDist = double.MaxValue;
+                for (int j = 0; j < pairsB.Count; j++)
+                {
+                    if (usedB.Contains(j)) continue;
+                    Point3D pb = pairsB[j].Item1;
+                    double d = pa.Item1.Distance(new Point3D(pb.X + dx, pb.Y + dy, pb.Z + dz));
+                    if (d <= tolerance && d < bestDist) { bestDist = d; best = j; }
+                }
+                if (best == -1) continue;
+                usedB.Add(best);
+                matched++;
+
+                Dictionary<HourKey, double> mapA = HourMap(pa.Item2);
+                Dictionary<HourKey, double> mapB = HourMap(pairsB[best].Item2);
+                foreach (KeyValuePair<HourKey, double> e in mapA)
+                {
+                    if (!mapB.TryGetValue(e.Key, out double vB)) continue;
+                    sumAbs += Math.Abs(vB - e.Value);
+                    overlapAll++;
+                }
+            }
+
+            // Every TAS surface matches a SAM surface 1:1; the 28 Shade occluders stay unmatched.
+            Assert.Equal(36, matched);
+            Assert.Equal(28, pairsB.Count - usedB.Count);
+
+            double overallMeanAbsDelta = overlapAll == 0 ? double.NaN : sumAbs / overlapAll;
+            // SAM reproduces TAS shading to well within tolerance (live run: 0.0088). Guard generously.
+            Assert.True(overlapAll > 0, "expected overlapping hours between matched pairs");
+            Assert.True(overallMeanAbsDelta < 0.02, $"SAM-vs-TAS overallMeanAbsDelta unexpectedly high: {overallMeanAbsDelta:0.0000}");
+        }
+
+        private static double[] BBoxMin(IEnumerable<Point3D> points)
+        {
+            double minX = double.MaxValue, minY = double.MaxValue, minZ = double.MaxValue;
+            foreach (Point3D p in points)
+            {
+                if (p == null) continue;
+                if (p.X < minX) minX = p.X; if (p.Y < minY) minY = p.Y; if (p.Z < minZ) minZ = p.Z;
+            }
+            return new double[] { minX, minY, minZ };
+        }
     }
 }
