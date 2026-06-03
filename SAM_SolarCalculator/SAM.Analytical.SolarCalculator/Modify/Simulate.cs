@@ -100,7 +100,7 @@ namespace SAM.Analytical.SolarCalculator
         /// <see cref="SolarFaceSimulationResult"/> and attaches them to the AnalyticalModel.
         /// Designed for apples-to-apples comparison against TAS-imported shade coverage.
         /// </summary>
-        public static List<SolarCoverageSimulationResult> Simulate_Coverage(this AnalyticalModel analyticalModel, IEnumerable<DateTime> dateTimes, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, double sampleSize = double.NaN)
+        public static List<SolarCoverageSimulationResult> Simulate_Coverage(this AnalyticalModel analyticalModel, IEnumerable<DateTime> dateTimes, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, double sampleSize = double.NaN, bool useModelSolarModel = false)
         {
             if (analyticalModel == null || dateTimes == null)
             {
@@ -119,17 +119,20 @@ namespace SAM.Analytical.SolarCalculator
                 directionDictionary[dateTime] = Geometry.SolarCalculator.Query.SunDirection(location, dateTime, false);
             }
 
-            return Simulate_Coverage(analyticalModel, directionDictionary, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, sampleSize);
+            return Simulate_Coverage(analyticalModel, directionDictionary, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, sampleSize, useModelSolarModel);
         }
 
-        public static List<SolarCoverageSimulationResult> Simulate_Coverage(this AnalyticalModel analyticalModel, Dictionary<DateTime, Vector3D> directionDictionary, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, double sampleSize = double.NaN)
+        public static List<SolarCoverageSimulationResult> Simulate_Coverage(this AnalyticalModel analyticalModel, Dictionary<DateTime, Vector3D> directionDictionary, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, double sampleSize = double.NaN, bool useModelSolarModel = false)
         {
             if (analyticalModel == null || directionDictionary == null)
             {
                 return null;
             }
 
-            SolarModel solarModel = Convert.ToSAM_SolarModel(analyticalModel);
+            // useModelSolarModel: recompute coverage on the SolarModel ALREADY attached to the model
+            // (e.g. the TAS-imported surfaces) instead of re-deriving panels from the AdjacencyCluster.
+            // Guarantees SAM evaluates the exact same faces as the imported model — a 1:1 benchmark set.
+            SolarModel solarModel = useModelSolarModel ? GeometryOnlySolarModel(analyticalModel) : Convert.ToSAM_SolarModel(analyticalModel);
             if (solarModel == null)
             {
                 return null;
@@ -161,6 +164,42 @@ namespace SAM.Analytical.SolarCalculator
             }
 
             return solarCoverageSimulationResults;
+        }
+
+        /// <summary>
+        /// Builds a fresh SolarModel that carries ONLY the geometry (LinkedFace3Ds) of the SolarModel
+        /// already attached to the AnalyticalModel under <see cref="AnalyticalModelParameter.SolarModel"/>
+        /// — e.g. the TAS-imported surfaces. Any existing results are intentionally dropped so that a
+        /// subsequent coverage simulation recomputes SAM coverage on the EXACT same faces, giving a
+        /// 1:1 benchmark surface set instead of the AdjacencyCluster-filtered panel set. Returns null
+        /// when no SolarModel is attached or it has no usable geometry.
+        /// </summary>
+        private static SolarModel GeometryOnlySolarModel(AnalyticalModel analyticalModel)
+        {
+            SolarModel existing = analyticalModel?.GetValue<SolarModel>(AnalyticalModelParameter.SolarModel);
+            if (existing == null)
+            {
+                return null;
+            }
+
+            List<Geometry.Object.Spatial.LinkedFace3D> linkedFace3Ds = existing.GetLinkedFace3Ds();
+            if (linkedFace3Ds == null || linkedFace3Ds.Count == 0)
+            {
+                return null;
+            }
+
+            SolarModel result = new SolarModel(analyticalModel.Location);
+            foreach (Geometry.Object.Spatial.LinkedFace3D linkedFace3D in linkedFace3Ds)
+            {
+                if (linkedFace3D?.Face3D == null)
+                {
+                    continue;
+                }
+
+                result.Add(linkedFace3D);
+            }
+
+            return result;
         }
 
         public static List<SolarFaceSimulationResult> Simulate(this BuildingModel buildingModel, IEnumerable<DateTime> dateTimes, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, double sampleSize = double.NaN)

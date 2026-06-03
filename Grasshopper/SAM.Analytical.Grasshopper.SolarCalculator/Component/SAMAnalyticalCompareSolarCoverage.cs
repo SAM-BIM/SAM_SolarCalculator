@@ -24,7 +24,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// <summary>
         /// The latest version of this component
         /// </summary>
-        public override string LatestComponentVersion => "1.1.0";
+        public override string LatestComponentVersion => "1.2.0";
 
         /// <summary>
         /// Provides an Icon for the component.
@@ -67,12 +67,14 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 List<GH_SAMParam> result = new List<GH_SAMParam>();
                 result.Add(new GH_SAMParam(new GooSAMGeometryParam() { Name = "linkedFace3Ds_A", NickName = "linkedFace3Ds_A", Description = "Face3Ds (from LinkedFace3Ds in model A) that were successfully matched — previewable in the Rhino viewport", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new GooSAMGeometryParam() { Name = "linkedFace3Ds_B", NickName = "linkedFace3Ds_B", Description = "Face3Ds (from LinkedFace3Ds in model B) paired 1:1 with linkedFace3Ds_A — previewable in the Rhino viewport", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "meanAbsDelta", NickName = "meanAbsDelta", Description = "Mean absolute coverage difference per matched pair, averaged over overlapping DateTimes", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "maxAbsDelta", NickName = "maxAbsDelta", Description = "Max absolute coverage difference per matched pair", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "rmse", NickName = "rmse", Description = "Root-mean-square error of (B − A) per matched pair", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "meanAbsDelta", NickName = "meanAbsDelta", Description = "Mean absolute coverage difference per matched pair, averaged over overlapping DateTimes (coverage is a 0–1 fraction; 0 = identical shading, →1 = complete mismatch)", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "maxAbsDelta", NickName = "maxAbsDelta", Description = "Max absolute coverage difference per matched pair (coverage is a 0–1 fraction; 0 = identical shading, →1 = complete mismatch)", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "rmse", NickName = "rmse", Description = "Root-mean-square error of (B − A) per matched pair (coverage is a 0–1 fraction; 0 = identical shading, →1 = complete mismatch)", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "overlapCount", NickName = "overlapCount", Description = "Number of hour-of-year buckets present in BOTH coverage results after ceiling-to-hour alignment, per matched pair", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(new GooSAMGeometryParam() { Name = "unmatched_A", NickName = "unmatched_A", Description = "Face3Ds (from LinkedFace3Ds in model A) that had no neighbour within _tolerance_ in model B — previewable in the Rhino viewport", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "overallMeanAbsDelta", NickName = "overallMeanAbsDelta", Description = "Mean absolute delta across ALL matched pairs and ALL overlapping DateTimes — a single benchmark scalar", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new GooSAMGeometryParam() { Name = "unmatched_B", NickName = "unmatched_B", Description = "Face3Ds (from LinkedFace3Ds in model B) that were never claimed by any model-A face (no neighbour within _tolerance_ with overlapping hours) — previewable in the Rhino viewport", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "overallMeanAbsDelta", NickName = "overallMeanAbsDelta", Description = "Mean absolute delta across ALL matched pairs and ALL overlapping DateTimes — a single benchmark scalar (coverage is a 0–1 fraction; 0 = identical shading, →1 = complete mismatch)", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "logs", NickName = "logs", Description = "Human-readable diagnostic report: face counts, matched/unmatched counts, tolerance, delta-quality histogram and overall benchmark stats. Read in a Panel.", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Boolean() { Name = "successful", NickName = "successful", Description = "Successful?", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 return result.ToArray();
             }
@@ -131,9 +133,19 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             List<Pair> pairs_A = ExtractPairs(solarModel_A);
             List<Pair> pairs_B = ExtractPairs(solarModel_B);
 
+            // Geometry-level diagnostic FIRST — compare ALL panels (LinkedFace3Ds) regardless of
+            // whether they carry a result. This separates "do the two models share the same panel
+            // geometry 1:1?" from "do the panels that have results agree?". A models that bake
+            // identically should align here at ~0 distance; any gap points at the geometry/import,
+            // not the result values.
+            List<string> logs = BuildGeometryReport(solarModel_A, solarModel_B, pairs_A.Count, pairs_B.Count, tolerance, out GeometryAlignmentResult geometry);
+
             if (pairs_A.Count == 0 || pairs_B.Count == 0)
             {
-                AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, "One or both SolarModels contain no SolarCoverageSimulationResults.");
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, "One or both SolarModels contain no SolarCoverageSimulationResults — only the geometry-alignment section of 'logs' is populated.");
+                logs.Add("--- No SolarCoverageSimulationResults on one or both models — results comparison skipped. ---");
+                index = Params.IndexOfOutputParam("logs");
+                if (index != -1) dataAccess.SetDataList(index, logs);
                 return;
             }
 
@@ -209,6 +221,16 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 }
             }
 
+            // B faces never claimed by any A face (no neighbour within tolerance with overlapping hours).
+            List<LinkedFace3D> unmatched_B = new List<LinkedFace3D>();
+            for (int j = 0; j < pairs_B.Count; j++)
+            {
+                if (!usedB.Contains(j))
+                {
+                    unmatched_B.Add(pairs_B[j].LinkedFace3D);
+                }
+            }
+
             double overallMeanAbsDelta = sumOverlap_All == 0 ? double.NaN : sumAbsDelta_All / sumOverlap_All;
 
             index = Params.IndexOfOutputParam("linkedFace3Ds_A");
@@ -232,13 +254,219 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             index = Params.IndexOfOutputParam("unmatched_A");
             if (index != -1) dataAccess.SetDataList(index, unmatched_A.ConvertAll(x => x?.Face3D));
 
+            index = Params.IndexOfOutputParam("unmatched_B");
+            if (index != -1) dataAccess.SetDataList(index, unmatched_B.ConvertAll(x => x?.Face3D));
+
             index = Params.IndexOfOutputParam("overallMeanAbsDelta");
             if (index != -1) dataAccess.SetData(index, overallMeanAbsDelta);
+
+            logs.AddRange(BuildResultsReport(matched_A.Count, unmatched_A.Count, unmatched_B.Count, meanAbsDeltas, rmses, overlapCounts, overallMeanAbsDelta, sumOverlap_All));
+            index = Params.IndexOfOutputParam("logs");
+            if (index != -1) dataAccess.SetDataList(index, logs);
+
+            AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, string.Format(System.Globalization.CultureInfo.InvariantCulture, "Geometry: {0}/{1} panels aligned (A unaligned {2}, B unaligned {3}). Results: matched {4}/{5} A-faces; overallMeanAbsDelta={6:0.0000}", geometry.Matched, Math.Max(geometry.TotalA, geometry.TotalB), geometry.UnmatchedA, geometry.UnmatchedB, matched_A.Count, pairs_A.Count, overallMeanAbsDelta));
 
             if (index_Successful != -1)
             {
                 dataAccess.SetData(index_Successful, matched_A.Count > 0);
             }
+        }
+
+        /// <summary>
+        /// Build the geometry-alignment section of the report. Compares EVERY LinkedFace3D (panel)
+        /// in the two SolarModels by InternalPoint3D proximity — independent of whether the panel
+        /// carries a result — so a model that bakes identically is confirmed 1:1 before any result
+        /// values are looked at. <see cref="GetInternalPoints"/> is deterministic, so identical
+        /// geometry aligns at ~0 distance.
+        /// </summary>
+        private static List<string> BuildGeometryReport(SolarModel solarModel_A, SolarModel solarModel_B, int resultsCount_A, int resultsCount_B, double tolerance, out GeometryAlignmentResult alignment)
+        {
+            System.Globalization.CultureInfo culture = System.Globalization.CultureInfo.InvariantCulture;
+            List<string> logs = new List<string>();
+
+            List<Point3D> points_A = GetInternalPoints(solarModel_A, out int total_A);
+            List<Point3D> points_B = GetInternalPoints(solarModel_B, out int total_B);
+
+            // Greedy nearest-neighbour 1:1 match by internal point — same scheme as the result
+            // matching, but over all panels and reduced to distance only.
+            HashSet<int> usedB = new HashSet<int>();
+            List<double> distances = new List<double>();
+            int matched = 0;
+            foreach (Point3D point_A in points_A)
+            {
+                int bestIndex = -1;
+                double bestDistance = double.MaxValue;
+                for (int j = 0; j < points_B.Count; j++)
+                {
+                    if (usedB.Contains(j)) continue;
+
+                    double distance = point_A.Distance(points_B[j]);
+                    if (distance <= tolerance && distance < bestDistance)
+                    {
+                        bestDistance = distance;
+                        bestIndex = j;
+                    }
+                }
+
+                if (bestIndex != -1)
+                {
+                    usedB.Add(bestIndex);
+                    distances.Add(bestDistance);
+                    matched++;
+                }
+            }
+
+            alignment = new GeometryAlignmentResult
+            {
+                TotalA = total_A,
+                TotalB = total_B,
+                Matched = matched,
+                UnmatchedA = points_A.Count - matched,
+                UnmatchedB = points_B.Count - matched
+            };
+
+            logs.Add("=== SAMAnalytical.CompareSolarCoverage ===");
+            logs.Add(string.Format(culture, "Tolerance: {0:0.###} m", tolerance));
+            logs.Add("--- Geometry alignment (ALL LinkedFace3Ds — independent of results) ---");
+            logs.Add(string.Format(culture, "Model A: {0} panels total  |  {1} with coverage results", total_A, resultsCount_A));
+            logs.Add(string.Format(culture, "Model B: {0} panels total  |  {1} with coverage results", total_B, resultsCount_B));
+            logs.Add(string.Format(culture, "Panels with a valid internal point: A {0}, B {1}", points_A.Count, points_B.Count));
+            logs.Add(string.Format(culture, "Panels matched 1:1 within {0:0.###} m: {1}", tolerance, matched));
+            logs.Add(string.Format(culture, "Geometry-unmatched A (no panel within tolerance in B): {0}", alignment.UnmatchedA));
+            logs.Add(string.Format(culture, "Geometry-unmatched B (no panel within tolerance in A): {0}", alignment.UnmatchedB));
+            if (distances.Count > 0)
+            {
+                double min = double.MaxValue, max = 0, sum = 0;
+                foreach (double distance in distances)
+                {
+                    if (distance < min) min = distance;
+                    if (distance > max) max = distance;
+                    sum += distance;
+                }
+                logs.Add(string.Format(culture, "Matched-panel internal-point distance min/mean/max: {0:0.0000} / {1:0.0000} / {2:0.0000} m", min, sum / distances.Count, max));
+            }
+
+            if (total_A != total_B)
+            {
+                logs.Add("NOTE: panel counts differ — the two models do NOT share the same geometry. Fix the geometry/import before trusting result deltas.");
+            }
+            else if (alignment.UnmatchedA == 0 && alignment.UnmatchedB == 0)
+            {
+                logs.Add("NOTE: geometry is 1:1 — any difference in 'with coverage results' counts is a RESULTS gap (e.g. SolarSimulation produced fewer results), not a geometry mismatch.");
+            }
+
+            return logs;
+        }
+
+        /// <summary>
+        /// Internal points for every LinkedFace3D in a SolarModel (regardless of results).
+        /// <paramref name="total"/> returns the raw panel count before null/degenerate faces are
+        /// dropped, so the report can distinguish "no panels" from "panels with no internal point".
+        /// </summary>
+        private static List<Point3D> GetInternalPoints(SolarModel solarModel, out int total)
+        {
+            total = 0;
+            List<Point3D> result = new List<Point3D>();
+            if (solarModel == null) return result;
+
+            List<LinkedFace3D> linkedFace3Ds = solarModel.GetLinkedFace3Ds();
+            if (linkedFace3Ds == null) return result;
+
+            total = linkedFace3Ds.Count;
+            foreach (LinkedFace3D linkedFace3D in linkedFace3Ds)
+            {
+                if (linkedFace3D?.Face3D == null) continue;
+
+                Point3D internalPoint3D = linkedFace3D.Face3D.InternalPoint3D();
+                if (internalPoint3D == null) continue;
+
+                result.Add(internalPoint3D);
+            }
+
+            return result;
+        }
+
+        private struct GeometryAlignmentResult
+        {
+            public int TotalA;
+            public int TotalB;
+            public int Matched;
+            public int UnmatchedA;
+            public int UnmatchedB;
+        }
+
+        /// <summary>
+        /// Build the results-comparison section of the report (per-pair delta distribution and
+        /// overall benchmark stats) so a benchmark run can be judged without reading the raw
+        /// number panels. The geometry section is produced separately by <see cref="BuildGeometryReport"/>.
+        /// </summary>
+        private static List<string> BuildResultsReport(int matchedCount, int unmatchedCount_A, int unmatchedCount_B, List<double> meanAbsDeltas, List<double> rmses, List<int> overlapCounts, double overallMeanAbsDelta, int sumOverlap_All)
+        {
+            System.Globalization.CultureInfo culture = System.Globalization.CultureInfo.InvariantCulture;
+            List<string> logs = new List<string>();
+
+            logs.Add("--- Results matching (faces that carry a coverage result) ---");
+            logs.Add(string.Format(culture, "Matched pairs: {0}", matchedCount));
+            logs.Add(string.Format(culture, "Unmatched A (no neighbour within tolerance / no time overlap): {0}", unmatchedCount_A));
+            logs.Add(string.Format(culture, "Unmatched B (never claimed): {0}", unmatchedCount_B));
+
+            // Per-pair meanAbsDelta values that are actually comparable (skip NaN — those pairs had no overlap).
+            List<double> validDeltas = new List<double>();
+            foreach (double value in meanAbsDeltas)
+            {
+                if (!double.IsNaN(value)) validDeltas.Add(value);
+            }
+
+            if (validDeltas.Count == 0)
+            {
+                logs.Add("--- No matched pairs with overlapping hours — no delta statistics available. ---");
+                return logs;
+            }
+
+            // Delta-quality histogram over per-pair meanAbsDelta.
+            int excellent = 0, good = 0, fair = 0, poor = 0;
+            foreach (double value in validDeltas)
+            {
+                if (value < 0.01) excellent++;
+                else if (value < 0.05) good++;
+                else if (value < 0.10) fair++;
+                else poor++;
+            }
+
+            int total = validDeltas.Count;
+            logs.Add("--- Delta distribution (mean abs coverage delta per pair) ---");
+            logs.Add(string.Format(culture, "< 0.01 (excellent): {0} pairs ({1:0.0}%)", excellent, 100.0 * excellent / total));
+            logs.Add(string.Format(culture, "0.01–0.05 (good): {0} pairs ({1:0.0}%)", good, 100.0 * good / total));
+            logs.Add(string.Format(culture, "0.05–0.10 (fair): {0} pairs ({1:0.0}%)", fair, 100.0 * fair / total));
+            logs.Add(string.Format(culture, "> 0.10 (poor): {0} pairs ({1:0.0}%)", poor, 100.0 * poor / total));
+
+            // Mean RMSE over valid pairs.
+            double sumRmse = 0;
+            int countRmse = 0;
+            foreach (double value in rmses)
+            {
+                if (!double.IsNaN(value)) { sumRmse += value; countRmse++; }
+            }
+            double meanRmse = countRmse == 0 ? double.NaN : sumRmse / countRmse;
+
+            // Median & max of per-pair meanAbsDelta.
+            List<double> sorted = new List<double>(validDeltas);
+            sorted.Sort();
+            double median = sorted.Count % 2 == 1
+                ? sorted[sorted.Count / 2]
+                : 0.5 * (sorted[sorted.Count / 2 - 1] + sorted[sorted.Count / 2]);
+            double maxDelta = sorted[sorted.Count - 1];
+
+            double avgOverlap = matchedCount == 0 ? 0 : (double)sumOverlap_All / matchedCount;
+
+            logs.Add("--- Overall ---");
+            logs.Add(string.Format(culture, "overallMeanAbsDelta: {0:0.0000}  (across {1} pairs, {2} overlapping hours)", overallMeanAbsDelta, matchedCount, sumOverlap_All));
+            logs.Add(string.Format(culture, "mean RMSE: {0:0.0000}", meanRmse));
+            logs.Add(string.Format(culture, "median meanAbsDelta: {0:0.0000}", median));
+            logs.Add(string.Format(culture, "max meanAbsDelta: {0:0.0000}  (worst matched pair)", maxDelta));
+            logs.Add(string.Format(culture, "avg overlap hours/pair: {0:0}", avgOverlap));
+
+            return logs;
         }
 
         /// <summary>

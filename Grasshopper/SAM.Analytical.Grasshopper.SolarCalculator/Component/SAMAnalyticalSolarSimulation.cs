@@ -21,7 +21,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// <summary>
         /// The latest version of this component
         /// </summary>
-        public override string LatestComponentVersion => "1.0.7";
+        public override string LatestComponentVersion => "1.0.8";
 
         /// <summary>
         /// Provides an Icon for the component.
@@ -79,6 +79,10 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 global::Grasshopper.Kernel.Parameters.Param_Boolean coverageOnlyBoolean = new global::Grasshopper.Kernel.Parameters.Param_Boolean() { Name = "_coverageOnly_", NickName = "_coverageOnly_", Description = "If true, only SolarCoverageSimulationResults are generated and attached to the AnalyticalModel (lighter result, matches the TAS shade-proportion format).\nIf false, the regular SolarFaceSimulationResults are produced.", Access = GH_ParamAccess.item };
                 coverageOnlyBoolean.SetPersistentData(false);
                 result.Add(new GH_SAMParam(coverageOnlyBoolean, ParamVisibility.Voluntary));
+
+                global::Grasshopper.Kernel.Parameters.Param_Boolean useModelSolarModelBoolean = new global::Grasshopper.Kernel.Parameters.Param_Boolean() { Name = "_useModelSolarModel_", NickName = "_useModelSolarModel_", Description = "Benchmark helper (requires _coverageOnly_ = true). If true, SAM recomputes coverage on the LinkedFace3Ds of the SolarModel ALREADY attached to the input AnalyticalModel (e.g. the surfaces imported by SAMAnalytical.FromTBD with _importSurfaceShades_ = true) instead of deriving its own panel set from the AdjacencyCluster.\nFeed the SAME TAS-imported model into both this node and SAMAnalytical.CompareSolarCoverage so both sides cover an identical 1:1 surface set.", Access = GH_ParamAccess.item };
+                useModelSolarModelBoolean.SetPersistentData(false);
+                result.Add(new GH_SAMParam(useModelSolarModelBoolean, ParamVisibility.Voluntary));
 
                 global::Grasshopper.Kernel.Parameters.Param_Boolean boolean = new global::Grasshopper.Kernel.Parameters.Param_Boolean() { Name = "_run", NickName = "_run", Description = "Run", Access = GH_ParamAccess.item };
                 boolean.SetPersistentData(false);
@@ -264,6 +268,31 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 }
             }
 
+            bool useModelSolarModel = false;
+            index = Params.IndexOfInputParam("_useModelSolarModel_");
+            if (index != -1)
+            {
+                bool useModelSolarModel_Temp = false;
+                if (dataAccess.GetData(index, ref useModelSolarModel_Temp))
+                {
+                    useModelSolarModel = useModelSolarModel_Temp;
+                }
+            }
+
+            if (useModelSolarModel)
+            {
+                if (!coverageOnly)
+                {
+                    AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, "_useModelSolarModel_ only applies when _coverageOnly_ = true — ignoring it and deriving panels from the AdjacencyCluster as usual.");
+                    useModelSolarModel = false;
+                }
+                else if (analyticalModel.GetValue<Geometry.SolarCalculator.SolarModel>(AnalyticalModelParameter.SolarModel) == null)
+                {
+                    AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "_useModelSolarModel_ = true but the input AnalyticalModel has no SolarModel attached. Import surfaces first (e.g. SAMAnalytical.FromTBD with _importSurfaceShades_ = true).");
+                    return;
+                }
+            }
+
             analyticalModel = new AnalyticalModel(analyticalModel);
 
             List<Geometry.SolarCalculator.SolarFaceSimulationResult> solarFaceSimulationResults = null;
@@ -272,7 +301,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
 
             if (coverageOnly)
             {
-                solarCoverageSimulationResults = Analytical.SolarCalculator.Modify.Simulate_Coverage(analyticalModel, dateTimes, minHorizonAngle: minHorizonAngle, tolerance_Angle: tolerance_Angle, sampleSize: sampleSize);
+                solarCoverageSimulationResults = Analytical.SolarCalculator.Modify.Simulate_Coverage(analyticalModel, dateTimes, minHorizonAngle: minHorizonAngle, tolerance_Angle: tolerance_Angle, sampleSize: sampleSize, useModelSolarModel: useModelSolarModel);
                 successful = solarCoverageSimulationResults != null;
             }
             else
