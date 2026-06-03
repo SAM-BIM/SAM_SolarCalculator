@@ -24,7 +24,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// <summary>
         /// The latest version of this component
         /// </summary>
-        public override string LatestComponentVersion => "1.2.0";
+        public override string LatestComponentVersion => "1.3.0";
 
         /// <summary>
         /// Provides an Icon for the component.
@@ -51,6 +51,10 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 global::Grasshopper.Kernel.Parameters.Param_Number tolerance = new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "_tolerance_", NickName = "_tolerance_", Description = "InternalPoint3D-match distance tolerance in metres. A face from model A is paired with the nearest face in model B whose InternalPoint3D is within this distance. Default 0.5 m.", Access = GH_ParamAccess.item };
                 tolerance.SetPersistentData(0.5);
                 result.Add(new GH_SAMParam(tolerance, ParamVisibility.Voluntary));
+
+                global::Grasshopper.Kernel.Parameters.Param_Boolean alignModels = new global::Grasshopper.Kernel.Parameters.Param_Boolean() { Name = "_alignModels_", NickName = "_alignModels_", Description = "If true, translate Model B onto Model A (by the min corner of their surface bounding boxes) before matching, so a model intentionally moved in Rhino still compares. Default false — leaving it off keeps position matching as a sanity check that flags misaligned inputs. Assumes a pure translation; the residual is absorbed by _tolerance_.", Access = GH_ParamAccess.item };
+                alignModels.SetPersistentData(false);
+                result.Add(new GH_SAMParam(alignModels, ParamVisibility.Voluntary));
 
                 global::Grasshopper.Kernel.Parameters.Param_Boolean run = new global::Grasshopper.Kernel.Parameters.Param_Boolean() { Name = "_run", NickName = "_run", Description = "Run", Access = GH_ParamAccess.item };
                 run.SetPersistentData(false);
@@ -121,6 +125,17 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 }
             }
 
+            bool alignModels = false;
+            index = Params.IndexOfInputParam("_alignModels_");
+            if (index != -1)
+            {
+                bool alignModels_Temp = false;
+                if (dataAccess.GetData(index, ref alignModels_Temp))
+                {
+                    alignModels = alignModels_Temp;
+                }
+            }
+
             SolarModel solarModel_A = analyticalModel_A.GetValue<SolarModel>(AnalyticalModelParameter.SolarModel);
             SolarModel solarModel_B = analyticalModel_B.GetValue<SolarModel>(AnalyticalModelParameter.SolarModel);
 
@@ -133,6 +148,21 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             List<Pair> pairs_A = ExtractPairs(solarModel_A);
             List<Pair> pairs_B = ExtractPairs(solarModel_B);
 
+            // Optional alignment: when the two models were moved apart in Rhino (e.g. one imported at the
+            // TBD origin, the other transformed for side-by-side viewing), translate Model B onto Model A
+            // by the min corner of their internal-point bounding boxes so they still compare. Only the
+            // MATCHING points are translated — output geometry stays where the user placed it. Off by
+            // default, so position matching remains a sanity check for genuinely misaligned inputs.
+            double alignDx = 0, alignDy = 0, alignDz = 0;
+            if (alignModels)
+            {
+                ComputeAlignmentOffset(solarModel_A, solarModel_B, out alignDx, out alignDy, out alignDz);
+                if (alignDx != 0 || alignDy != 0 || alignDz != 0)
+                {
+                    pairs_B = pairs_B.ConvertAll(p => new Pair(p.LinkedFace3D, new Point3D(p.InternalPoint3D.X + alignDx, p.InternalPoint3D.Y + alignDy, p.InternalPoint3D.Z + alignDz), p.Result));
+                }
+            }
+
             // Geometry-level diagnostic FIRST — compare ALL panels (LinkedFace3Ds) regardless of
             // whether they carry a result. This separates "do the two models share the same panel
             // geometry 1:1?" from "do the panels that have results agree?". A models that bake
@@ -144,7 +174,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             // unmatched-B occluders rather than a geometry error.
             int shadeSurfaces_B = CountShadeSurfaces(analyticalModel_B, solarModel_B);
 
-            List<string> logs = BuildGeometryReport(solarModel_A, solarModel_B, pairs_A.Count, pairs_B.Count, tolerance, shadeSurfaces_B, out GeometryAlignmentResult geometry);
+            List<string> logs = BuildGeometryReport(solarModel_A, solarModel_B, pairs_A.Count, pairs_B.Count, tolerance, shadeSurfaces_B, alignDx, alignDy, alignDz, out GeometryAlignmentResult geometry);
 
             // Only when some Model A surfaces have no 1:1 match in Model B is the panel-level breakdown
             // meaningful — it explains WHY SAM dropped them (internal / non-sun-exposed / no panel). On a
@@ -299,13 +329,23 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// values are looked at. <see cref="GetInternalPoints"/> is deterministic, so identical
         /// geometry aligns at ~0 distance.
         /// </summary>
-        private static List<string> BuildGeometryReport(SolarModel solarModel_A, SolarModel solarModel_B, int resultsCount_A, int resultsCount_B, double tolerance, int shadeSurfaces_B, out GeometryAlignmentResult alignment)
+        private static List<string> BuildGeometryReport(SolarModel solarModel_A, SolarModel solarModel_B, int resultsCount_A, int resultsCount_B, double tolerance, int shadeSurfaces_B, double alignDx, double alignDy, double alignDz, out GeometryAlignmentResult alignment)
         {
             System.Globalization.CultureInfo culture = System.Globalization.CultureInfo.InvariantCulture;
             List<string> logs = new List<string>();
 
             List<Point3D> points_A = GetInternalPoints(solarModel_A, out int total_A);
             List<Point3D> points_B = GetInternalPoints(solarModel_B, out int total_B);
+
+            // Apply the optional Model B -> Model A alignment translation to the matching points only.
+            bool aligned = alignDx != 0 || alignDy != 0 || alignDz != 0;
+            if (aligned)
+            {
+                for (int i = 0; i < points_B.Count; i++)
+                {
+                    points_B[i] = new Point3D(points_B[i].X + alignDx, points_B[i].Y + alignDy, points_B[i].Z + alignDz);
+                }
+            }
 
             // Greedy nearest-neighbour 1:1 match by internal point — same scheme as the result
             // matching, but over all panels and reduced to distance only.
@@ -348,6 +388,10 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             logs.Add("=== SAMAnalytical.CompareSolarCoverage ===");
             logs.Add(string.Format(culture, "Tolerance: {0:0.###} m", tolerance));
             logs.Add("--- Geometry alignment (ALL LinkedFace3Ds — independent of results) ---");
+            if (aligned)
+            {
+                logs.Add(string.Format(culture, "_alignModels_ = true: Model B translated by ({0:0.###}, {1:0.###}, {2:0.###}) m onto Model A before matching (output geometry is unchanged).", alignDx, alignDy, alignDz));
+            }
             logs.Add(string.Format(culture, "Model A: {0} panels total  |  {1} with coverage results", total_A, resultsCount_A));
             logs.Add(string.Format(culture, "Model B: {0} panels total  |  {1} with coverage results", total_B, resultsCount_B));
             logs.Add(string.Format(culture, "Panels with a valid internal point: A {0}, B {1}", points_A.Count, points_B.Count));
@@ -412,6 +456,31 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Translation (added to Model B's points) that puts the min corner of Model B's internal-point
+        /// bounding box onto Model A's, so a model moved in Rhino still matches. Assumes a pure rigid
+        /// translation; any residual (e.g. shade panels extending Model B's box) is absorbed by the
+        /// match tolerance. Returns zeros when either model has no internal points.
+        /// </summary>
+        private static void ComputeAlignmentOffset(SolarModel solarModel_A, SolarModel solarModel_B, out double dx, out double dy, out double dz)
+        {
+            dx = 0; dy = 0; dz = 0;
+
+            List<Point3D> points_A = GetInternalPoints(solarModel_A, out int totalA);
+            List<Point3D> points_B = GetInternalPoints(solarModel_B, out int totalB);
+            if (points_A.Count == 0 || points_B.Count == 0)
+            {
+                return;
+            }
+
+            double ax = double.MaxValue, ay = double.MaxValue, az = double.MaxValue;
+            double bx = double.MaxValue, by = double.MaxValue, bz = double.MaxValue;
+            foreach (Point3D p in points_A) { if (p.X < ax) ax = p.X; if (p.Y < ay) ay = p.Y; if (p.Z < az) az = p.Z; }
+            foreach (Point3D p in points_B) { if (p.X < bx) bx = p.X; if (p.Y < by) by = p.Y; if (p.Z < bz) bz = p.Z; }
+
+            dx = ax - bx; dy = ay - by; dz = az - bz;
         }
 
         private struct GeometryAlignmentResult
