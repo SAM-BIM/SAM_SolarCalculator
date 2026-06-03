@@ -138,7 +138,13 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             // geometry 1:1?" from "do the panels that have results agree?". A models that bake
             // identically should align here at ~0 distance; any gap points at the geometry/import,
             // not the result values.
-            List<string> logs = BuildGeometryReport(solarModel_A, solarModel_B, pairs_A.Count, pairs_B.Count, tolerance, out GeometryAlignmentResult geometry);
+            // SAM imports a TBD's shading as separate PanelType.Shade panels, which enter Model B's
+            // SolarModel as occluder surfaces; TAS has no shade surfaces (it bakes the shade effect into
+            // each exposed surface's proportion). Count them so the report can flag them as expected
+            // unmatched-B occluders rather than a geometry error.
+            int shadeSurfaces_B = CountShadeSurfaces(analyticalModel_B, solarModel_B);
+
+            List<string> logs = BuildGeometryReport(solarModel_A, solarModel_B, pairs_A.Count, pairs_B.Count, tolerance, shadeSurfaces_B, out GeometryAlignmentResult geometry);
 
             // Only when some Model A surfaces have no 1:1 match in Model B is the panel-level breakdown
             // meaningful — it explains WHY SAM dropped them (internal / non-sun-exposed / no panel). On a
@@ -293,7 +299,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// values are looked at. <see cref="GetInternalPoints"/> is deterministic, so identical
         /// geometry aligns at ~0 distance.
         /// </summary>
-        private static List<string> BuildGeometryReport(SolarModel solarModel_A, SolarModel solarModel_B, int resultsCount_A, int resultsCount_B, double tolerance, out GeometryAlignmentResult alignment)
+        private static List<string> BuildGeometryReport(SolarModel solarModel_A, SolarModel solarModel_B, int resultsCount_A, int resultsCount_B, double tolerance, int shadeSurfaces_B, out GeometryAlignmentResult alignment)
         {
             System.Globalization.CultureInfo culture = System.Globalization.CultureInfo.InvariantCulture;
             List<string> logs = new List<string>();
@@ -360,13 +366,21 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 logs.Add(string.Format(culture, "Matched-panel internal-point distance min/mean/max: {0:0.0000} / {1:0.0000} / {2:0.0000} m", min, sum / distances.Count, max));
             }
 
-            if (total_A != total_B)
+            if (shadeSurfaces_B > 0)
             {
-                logs.Add("NOTE: panel counts differ — the two models do NOT share the same geometry. Fix the geometry/import before trusting result deltas.");
+                logs.Add(string.Format(culture, "Model B includes {0} PanelType.Shade occluder surface(s) — SAM imports the TBD's shading as separate Shade panels, whereas TAS bakes the shade effect into each exposed surface's proportion (no shade surfaces). These have no Model A counterpart, so they are expected to be unmatched-B and are excluded from the matched-pair benchmark.", shadeSurfaces_B));
             }
-            else if (alignment.UnmatchedA == 0 && alignment.UnmatchedB == 0)
+
+            // When Model B carries extra Shade occluders, the count difference is expected — don't
+            // raise the "models don't share geometry" alarm if the surplus is fully explained by them.
+            int unexplainedExtraB = (total_B - total_A) - shadeSurfaces_B;
+            if (total_A != total_B && unexplainedExtraB > 0)
             {
-                logs.Add("NOTE: geometry is 1:1 — any difference in 'with coverage results' counts is a RESULTS gap (e.g. SolarSimulation produced fewer results), not a geometry mismatch.");
+                logs.Add("NOTE: panel counts differ beyond the Shade occluders — the two models do NOT share the same geometry. Fix the geometry/import before trusting result deltas.");
+            }
+            else if (alignment.UnmatchedA == 0 && (alignment.UnmatchedB - shadeSurfaces_B) <= 0)
+            {
+                logs.Add("NOTE: every Model A surface matches Model B 1:1 (any remaining unmatched-B are Shade occluders) — differences are a RESULTS gap, not a geometry mismatch.");
             }
 
             return logs;
@@ -407,6 +421,57 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             public int Matched;
             public int UnmatchedA;
             public int UnmatchedB;
+        }
+
+        /// <summary>
+        /// Count the SolarModel's LinkedFace3Ds that come from PanelType.Shade panels — SAM imports a
+        /// TBD's shading as separate Shade panels that enter the SolarModel as occluder surfaces. Matched
+        /// by Guid (ToSAM_SolarModel keys a panel's LinkedFace3D by panel.Guid). Returns 0 when the model
+        /// has no AdjacencyCluster, no Shade panels, or no SolarModel.
+        /// </summary>
+        private static int CountShadeSurfaces(AnalyticalModel analyticalModel, SolarModel solarModel)
+        {
+            if (analyticalModel == null || solarModel == null)
+            {
+                return 0;
+            }
+
+            List<Analytical.SolarCalculator.PanelSolarClassification> classifications = Analytical.SolarCalculator.Query.ClassifyPanelsForSolarModel(analyticalModel);
+            if (classifications == null)
+            {
+                return 0;
+            }
+
+            HashSet<Guid> shadeGuids = new HashSet<Guid>();
+            foreach (Analytical.SolarCalculator.PanelSolarClassification classification in classifications)
+            {
+                if (classification.PanelType == PanelType.Shade)
+                {
+                    shadeGuids.Add(classification.Guid);
+                }
+            }
+
+            if (shadeGuids.Count == 0)
+            {
+                return 0;
+            }
+
+            List<LinkedFace3D> linkedFace3Ds = solarModel.GetLinkedFace3Ds();
+            if (linkedFace3Ds == null)
+            {
+                return 0;
+            }
+
+            int count = 0;
+            foreach (LinkedFace3D linkedFace3D in linkedFace3Ds)
+            {
+                if (linkedFace3D != null && shadeGuids.Contains(linkedFace3D.Guid))
+                {
+                    count++;
+                }
+            }
+
+            return count;
         }
 
         /// <summary>
