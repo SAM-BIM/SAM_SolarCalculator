@@ -165,31 +165,32 @@ namespace SAM.SolarCalculator.Tests
         private const int ExpectedApertures = 14;
 
         [Fact]
-        public void ToSAM_SolarModel_includes_window_apertures()
+        public void ToSAM_SolarModel_matches_TAS_surface_set_one_to_one()
         {
             AnalyticalModel analyticalModel = Load("ModelB-SolarSimulation.json");
 
             SolarModel solarModel = analyticalModel.ToSAM_SolarModel();
             Assert.NotNull(solarModel);
 
-            // Opaque exposed panels (8) plus their window openings (14): SAM now shades glazing too.
-            Assert.Equal(ExpectedSurfaces_B + ExpectedApertures, solarModel.GetLinkedFace3Ds().Count);
+            // 8 opaque exposed panels + per window an opening AND an inset glazing pane (14 each),
+            // mirroring the TAS import's two-surface-per-window representation: 8 + 14 + 14 = 36.
+            Assert.Equal(ExpectedSurfaces_B + 2 * ExpectedApertures, solarModel.GetLinkedFace3Ds().Count);
+            Assert.Equal(ExpectedSurfaces_A, solarModel.GetLinkedFace3Ds().Count);
         }
 
         [Fact]
-        public void Default_path_covers_only_the_filtered_panels()
+        public void Default_path_now_covers_the_full_TAS_equivalent_surface_set()
         {
             AnalyticalModel analyticalModel = Load("ModelA.json");
 
             List<SolarCoverageSimulationResult> results =
                 analyticalModel.Simulate_Coverage(SampleDateTimes);
 
-            // Without the toggle, the same model derives its surface set from the AdjacencyCluster
-            // filter — strictly fewer surfaces than the TAS import carries.
+            // With apertures included, the standalone (no-toggle) path now produces a coverage result
+            // for every one of the 36 surfaces — opaque panels, window openings and glazing panes —
+            // matching the TAS import 1:1.
             Assert.NotNull(results);
-            Assert.True(
-                results.Count < ExpectedSurfaces_A,
-                "Expected the default panel-derived path to cover fewer surfaces than the TAS import.");
+            Assert.Equal(ExpectedSurfaces_A, results.Count);
         }
     }
 }

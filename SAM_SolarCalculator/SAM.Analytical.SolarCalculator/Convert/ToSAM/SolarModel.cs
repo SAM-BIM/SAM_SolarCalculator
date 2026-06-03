@@ -46,23 +46,43 @@ namespace SAM.Analytical.SolarCalculator
                     LinkedFace3D linkedFace3D = new LinkedFace3D(panel.Guid, panel.Face3D);
                     result.Add(linkedFace3D);
 
-                    // Include the panel's window openings as their own surfaces so SAM shades glazing
-                    // too — the dominant solar-gain surfaces, and what TAS reports shade proportion for
-                    // per window. Use the aperture's external edge (the full opening rectangle); the
-                    // Aperture.Face3D itself is the frame ring (a polygon with the pane cut out).
+                    // Include the panel's windows as their own surfaces so SAM shades glazing too —
+                    // the dominant solar-gain surfaces. Mirror TAS, which reports shade proportion per
+                    // window as TWO coplanar surfaces: the outer opening and the inset glazing pane.
+                    // Emitting both keeps SAM's surface set 1:1 with the TAS import. (Aperture.Face3D
+                    // itself is the frame ring — a polygon with the pane cut out — so it is not used.)
                     List<Aperture> apertures = panel.Apertures;
                     if (apertures != null)
                     {
                         foreach (Aperture aperture in apertures)
                         {
-                            IClosedPlanar3D externalEdge3D = aperture?.GetExternalEdge3D();
-                            if (externalEdge3D == null)
+                            if (aperture == null)
                             {
                                 continue;
                             }
 
-                            Face3D apertureFace3D = new Face3D(externalEdge3D);
-                            result.Add(new LinkedFace3D(aperture.Guid, apertureFace3D));
+                            // Window opening (outer boundary) — matches the TAS per-window opening surface.
+                            IClosedPlanar3D externalEdge3D = aperture.GetExternalEdge3D();
+                            if (externalEdge3D != null)
+                            {
+                                result.Add(new LinkedFace3D(aperture.Guid, new Face3D(externalEdge3D)));
+                            }
+
+                            // Glazing pane(s) — matches the TAS inset glazing surface. Fresh Guids so each
+                            // pane is a distinct coverage surface (the aperture Guid is used by the opening).
+                            List<Face3D> paneFace3Ds = aperture.GetPaneFace3Ds();
+                            if (paneFace3Ds != null)
+                            {
+                                foreach (Face3D paneFace3D in paneFace3Ds)
+                                {
+                                    if (paneFace3D == null)
+                                    {
+                                        continue;
+                                    }
+
+                                    result.Add(new LinkedFace3D(System.Guid.NewGuid(), paneFace3D));
+                                }
+                            }
                         }
                     }
                 }
