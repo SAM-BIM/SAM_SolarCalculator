@@ -100,7 +100,7 @@ namespace SAM.SolarCalculator.Tests
             Assert.Equal(ExpectedSurfaces_A, surfaceCount);
 
             List<SolarCoverageSimulationResult> results =
-                analyticalModel.Simulate_Coverage(SampleDateTimes, useModelSolarModel: true);
+                analyticalModel.Simulate_Coverage(SampleDateTimes, SAM.Core.Tolerance.Angle, SAM.Core.Tolerance.MacroDistance, SAM.Core.Tolerance.MacroDistance, SAM.Core.Tolerance.Angle, SAM.Core.Tolerance.Distance, double.NaN, true);
 
             // SAM coverage now exists for the SAME surface set as the TAS import (1:1), not the
             // 8-panel AdjacencyCluster-filtered set.
@@ -182,7 +182,7 @@ namespace SAM.SolarCalculator.Tests
             AnalyticalModel analyticalModel = Load("ModelA.json");
 
             List<SolarCoverageSimulationResult> results =
-                analyticalModel.Simulate_Coverage(SampleDateTimes, useModelSolarModel: false);
+                analyticalModel.Simulate_Coverage(SampleDateTimes);
 
             // Without the toggle, the same model derives its surface set from the AdjacencyCluster
             // filter — strictly fewer surfaces than the TAS import carries.

@@ -125,7 +125,7 @@ namespace SAM.Analytical.SolarCalculator
         /// is true, SAM recomputes coverage on the SolarModel already attached to the AnalyticalModel
         /// (e.g. the TAS-imported surfaces); otherwise it derives panels from the AdjacencyCluster as usual.
         /// </summary>
-        public static List<SolarCoverageSimulationResult> Simulate_Coverage(this AnalyticalModel analyticalModel, IEnumerable<DateTime> dateTimes, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, double sampleSize = double.NaN, bool useModelSolarModel = false)
+        public static List<SolarCoverageSimulationResult> Simulate_Coverage(this AnalyticalModel analyticalModel, IEnumerable<DateTime> dateTimes, double minHorizonAngle, double tolerance_Area, double tolerance_Snap, double tolerance_Angle, double tolerance_Distance, double sampleSize, bool useModelSolarModel)
         {
             if (analyticalModel == null || dateTimes == null)
             {
@@ -152,7 +152,7 @@ namespace SAM.Analytical.SolarCalculator
         /// overload. When <paramref name="useModelSolarModel"/> is true, reuses the attached SolarModel's
         /// geometry instead of the AdjacencyCluster-derived panel set.
         /// </summary>
-        public static List<SolarCoverageSimulationResult> Simulate_Coverage(this AnalyticalModel analyticalModel, Dictionary<DateTime, Vector3D> directionDictionary, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, double sampleSize = double.NaN, bool useModelSolarModel = false)
+        public static List<SolarCoverageSimulationResult> Simulate_Coverage(this AnalyticalModel analyticalModel, Dictionary<DateTime, Vector3D> directionDictionary, double minHorizonAngle, double tolerance_Area, double tolerance_Snap, double tolerance_Angle, double tolerance_Distance, double sampleSize, bool useModelSolarModel)
         {
             if (analyticalModel == null || directionDictionary == null)
             {

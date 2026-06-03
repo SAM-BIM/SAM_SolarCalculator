@@ -301,7 +301,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
 
             if (coverageOnly)
             {
-                solarCoverageSimulationResults = Analytical.SolarCalculator.Modify.Simulate_Coverage(analyticalModel, dateTimes, minHorizonAngle: minHorizonAngle, tolerance_Angle: tolerance_Angle, sampleSize: sampleSize, useModelSolarModel: useModelSolarModel);
+                solarCoverageSimulationResults = Analytical.SolarCalculator.Modify.Simulate_Coverage(analyticalModel, dateTimes, minHorizonAngle, Core.Tolerance.MacroDistance, Core.Tolerance.MacroDistance, tolerance_Angle, Core.Tolerance.Distance, sampleSize, useModelSolarModel);
                 successful = solarCoverageSimulationResults != null;
             }
             else
