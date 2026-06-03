@@ -170,15 +170,18 @@ namespace SAM.Analytical.SolarCalculator
 
             List<SolarCoverageSimulationResult> solarCoverageSimulationResults = Weather.SolarCalculator.Modify.Simulate_Coverage(solarModel, directionDictionary, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, sampleSize);
 
+            if (solarCoverageSimulationResults == null || solarCoverageSimulationResults.Count == 0)
+            {
+                // No results (e.g. every requested hour is below minHorizonAngle, or no usable
+                // sun-exposed faces). Leave any existing SolarModel — notably a TAS import under
+                // useModelSolarModel — untouched rather than overwriting it with an unpopulated one.
+                return solarCoverageSimulationResults;
+            }
+
             // Attach the populated SolarModel to the AnalyticalModel so downstream nodes
             // (e.g. a comparison node) can pull it back out, regardless of whether the model
             // was TAS-imported or SAM-computed — both paths land in the same parameter slot.
             analyticalModel.SetValue(AnalyticalModelParameter.SolarModel, solarModel);
-
-            if (solarCoverageSimulationResults == null || solarCoverageSimulationResults.Count == 0)
-            {
-                return solarCoverageSimulationResults;
-            }
 
             List<Panel> panels = analyticalModel.GetPanels();
             foreach (SolarCoverageSimulationResult solarCoverageSimulationResult in solarCoverageSimulationResults)
