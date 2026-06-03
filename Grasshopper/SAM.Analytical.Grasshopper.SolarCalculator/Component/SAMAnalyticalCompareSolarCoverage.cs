@@ -140,10 +140,13 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             // not the result values.
             List<string> logs = BuildGeometryReport(solarModel_A, solarModel_B, pairs_A.Count, pairs_B.Count, tolerance, out GeometryAlignmentResult geometry);
 
-            // Explain the surface gap: classify Model B's analytical panels by the same rule SAM's
-            // SolarModel builder uses, and map Model A's surfaces onto them to show why each A surface
-            // is kept or dropped (internal / non-sun-exposed / no panel) on the SAM side.
-            logs.AddRange(BuildModelBSelectionReport(analyticalModel_B, solarModel_A, tolerance));
+            // Only when some Model A surfaces have no 1:1 match in Model B is the panel-level breakdown
+            // meaningful — it explains WHY SAM dropped them (internal / non-sun-exposed / no panel). On a
+            // clean 1:1 match it would just print noise (windows are apertures, not panels), so skip it.
+            if (geometry.UnmatchedA > 0)
+            {
+                logs.AddRange(BuildModelBSelectionReport(analyticalModel_B, solarModel_A, tolerance));
+            }
 
             if (pairs_A.Count == 0 || pairs_B.Count == 0)
             {
@@ -167,6 +170,8 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             List<LinkedFace3D> unmatched_A = new List<LinkedFace3D>();
 
             double sumAbsDelta_All = 0;
+            double sumSignedDelta_All = 0;
+            double sumValues_All = 0;
             int sumOverlap_All = 0;
 
             foreach (Pair pair_A in pairs_A)
@@ -198,7 +203,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                     int candidateIndex = candidate.Key;
                     Pair pair_B = pairs_B[candidateIndex];
 
-                    ComputeDeltaStats(pair_A.Result, pair_B.Result, out double meanAbs, out double maxAbs, out double rmse, out int overlap, out double sumAbs_Pair);
+                    ComputeDeltaStats(pair_A.Result, pair_B.Result, out double meanAbs, out double maxAbs, out double rmse, out int overlap, out double sumAbs_Pair, out double sumSigned_Pair, out double sumValues_Pair);
                     if (overlap == 0)
                     {
                         // Nearest candidate has no shared DateTimes — try the next one.
@@ -215,6 +220,8 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                     rmses.Add(rmse);
                     overlapCounts.Add(overlap);
                     sumAbsDelta_All += sumAbs_Pair;
+                    sumSignedDelta_All += sumSigned_Pair;
+                    sumValues_All += sumValues_Pair;
                     sumOverlap_All += overlap;
                     matched = true;
                     break;
@@ -265,7 +272,9 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             index = Params.IndexOfOutputParam("overallMeanAbsDelta");
             if (index != -1) dataAccess.SetData(index, overallMeanAbsDelta);
 
-            logs.AddRange(BuildResultsReport(matched_A.Count, unmatched_A.Count, unmatched_B.Count, meanAbsDeltas, rmses, overlapCounts, overallMeanAbsDelta, sumOverlap_All));
+            double overallSignedDelta = sumOverlap_All == 0 ? double.NaN : sumSignedDelta_All / sumOverlap_All;
+            double overallMeanSum = sumOverlap_All == 0 ? double.NaN : sumValues_All / sumOverlap_All;
+            logs.AddRange(BuildResultsReport(matched_A.Count, unmatched_A.Count, unmatched_B.Count, meanAbsDeltas, rmses, overlapCounts, overallMeanAbsDelta, overallSignedDelta, overallMeanSum, sumOverlap_All));
             index = Params.IndexOfOutputParam("logs");
             if (index != -1) dataAccess.SetDataList(index, logs);
 
@@ -510,7 +519,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// overall benchmark stats) so a benchmark run can be judged without reading the raw
         /// number panels. The geometry section is produced separately by <see cref="BuildGeometryReport"/>.
         /// </summary>
-        private static List<string> BuildResultsReport(int matchedCount, int unmatchedCount_A, int unmatchedCount_B, List<double> meanAbsDeltas, List<double> rmses, List<int> overlapCounts, double overallMeanAbsDelta, int sumOverlap_All)
+        private static List<string> BuildResultsReport(int matchedCount, int unmatchedCount_A, int unmatchedCount_B, List<double> meanAbsDeltas, List<double> rmses, List<int> overlapCounts, double overallMeanAbsDelta, double overallSignedDelta, double overallMeanSum, int sumOverlap_All)
         {
             System.Globalization.CultureInfo culture = System.Globalization.CultureInfo.InvariantCulture;
             List<string> logs = new List<string>();
@@ -571,6 +580,8 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
 
             logs.Add("--- Overall ---");
             logs.Add(string.Format(culture, "overallMeanAbsDelta: {0:0.0000}  (across {1} pairs, {2} overlapping hours)", overallMeanAbsDelta, matchedCount, sumOverlap_All));
+            logs.Add(string.Format(culture, "overallSignedDelta (B-A): {0:+0.0000;-0.0000;0.0000}  (>0 = B reads higher than A; |signed| approaching |abs| = one-directional bias)", overallSignedDelta));
+            logs.Add(string.Format(culture, "mean(A+B): {0:0.0000}  (~1.0 suggests a lit/shade convention flip between the two; ~2x the mean coverage if same convention)", overallMeanSum));
             logs.Add(string.Format(culture, "mean RMSE: {0:0.0000}", meanRmse));
             logs.Add(string.Format(culture, "median meanAbsDelta: {0:0.0000}", median));
             logs.Add(string.Format(culture, "max meanAbsDelta: {0:0.0000}  (worst matched pair)", maxDelta));
@@ -614,13 +625,15 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             return result;
         }
 
-        private static void ComputeDeltaStats(SolarCoverageSimulationResult a, SolarCoverageSimulationResult b, out double meanAbs, out double maxAbs, out double rmse, out int overlap, out double sumAbs)
+        private static void ComputeDeltaStats(SolarCoverageSimulationResult a, SolarCoverageSimulationResult b, out double meanAbs, out double maxAbs, out double rmse, out int overlap, out double sumAbs, out double sumSigned, out double sumValues)
         {
             meanAbs = double.NaN;
             maxAbs = double.NaN;
             rmse = double.NaN;
             overlap = 0;
             sumAbs = 0;
+            sumSigned = 0;
+            sumValues = 0;
 
             if (a == null || b == null) return;
 
@@ -637,6 +650,8 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 double diff = valueB - entry.Value;
                 double absDiff = Math.Abs(diff);
                 sumAbs += absDiff;
+                sumSigned += diff;                  // signed (B - A): >0 means B reads higher than A
+                sumValues += valueB + entry.Value;  // for the convention check (mean(A+B) ~ 1 => lit/shade flip)
                 sumSq += diff * diff;
                 if (absDiff > max) max = absDiff;
                 overlap++;
