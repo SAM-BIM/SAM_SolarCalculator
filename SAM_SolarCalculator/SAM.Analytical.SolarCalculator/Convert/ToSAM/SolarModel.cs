@@ -3,6 +3,7 @@
 
 using SAM.Geometry.Object.Spatial;
 using SAM.Geometry.SolarCalculator;
+using SAM.Geometry.Spatial;
 using SAM.Weather;
 using SAM.Weather.SolarCalculator;
 using System.Collections.Generic;
@@ -44,6 +45,26 @@ namespace SAM.Analytical.SolarCalculator
 
                     LinkedFace3D linkedFace3D = new LinkedFace3D(panel.Guid, panel.Face3D);
                     result.Add(linkedFace3D);
+
+                    // Include the panel's window openings as their own surfaces so SAM shades glazing
+                    // too — the dominant solar-gain surfaces, and what TAS reports shade proportion for
+                    // per window. Use the aperture's external edge (the full opening rectangle); the
+                    // Aperture.Face3D itself is the frame ring (a polygon with the pane cut out).
+                    List<Aperture> apertures = panel.Apertures;
+                    if (apertures != null)
+                    {
+                        foreach (Aperture aperture in apertures)
+                        {
+                            IClosedPlanar3D externalEdge3D = aperture?.GetExternalEdge3D();
+                            if (externalEdge3D == null)
+                            {
+                                continue;
+                            }
+
+                            Face3D apertureFace3D = new Face3D(externalEdge3D);
+                            result.Add(new LinkedFace3D(aperture.Guid, apertureFace3D));
+                        }
+                    }
                 }
 
             }

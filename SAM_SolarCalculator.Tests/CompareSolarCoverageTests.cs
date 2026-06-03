@@ -161,6 +161,21 @@ namespace SAM.SolarCalculator.Tests
             Assert.True(dropped + noPanel > 0, "diagnostic should explain why some Model A surfaces are not in SAM's SolarModel");
         }
 
+        // 14 window apertures across the 8 exposed panels of the committed fixture.
+        private const int ExpectedApertures = 14;
+
+        [Fact]
+        public void ToSAM_SolarModel_includes_window_apertures()
+        {
+            AnalyticalModel analyticalModel = Load("ModelB-SolarSimulation.json");
+
+            SolarModel solarModel = analyticalModel.ToSAM_SolarModel();
+            Assert.NotNull(solarModel);
+
+            // Opaque exposed panels (8) plus their window openings (14): SAM now shades glazing too.
+            Assert.Equal(ExpectedSurfaces_B + ExpectedApertures, solarModel.GetLinkedFace3Ds().Count);
+        }
+
         [Fact]
         public void Default_path_covers_only_the_filtered_panels()
         {
