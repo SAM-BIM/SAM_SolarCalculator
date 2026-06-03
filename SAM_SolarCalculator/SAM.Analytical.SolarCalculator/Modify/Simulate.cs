@@ -100,6 +100,31 @@ namespace SAM.Analytical.SolarCalculator
         /// <see cref="SolarFaceSimulationResult"/> and attaches them to the AnalyticalModel.
         /// Designed for apples-to-apples comparison against TAS-imported shade coverage.
         /// </summary>
+        /// <remarks>
+        /// Binary-compatibility overload: preserves the original pre-<c>useModelSolarModel</c>
+        /// signature so plugins/apps already compiled against it keep resolving at runtime
+        /// (appending the optional flag in-place would be a binary break — MissingMethodException).
+        /// Delegates with <c>useModelSolarModel = false</c>.
+        /// </remarks>
+        public static List<SolarCoverageSimulationResult> Simulate_Coverage(this AnalyticalModel analyticalModel, IEnumerable<DateTime> dateTimes, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, double sampleSize = double.NaN)
+        {
+            return Simulate_Coverage(analyticalModel, dateTimes, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, sampleSize, false);
+        }
+
+        /// <remarks>
+        /// Binary-compatibility overload — see the IEnumerable&lt;DateTime&gt; overload above. Delegates
+        /// with <c>useModelSolarModel = false</c>.
+        /// </remarks>
+        public static List<SolarCoverageSimulationResult> Simulate_Coverage(this AnalyticalModel analyticalModel, Dictionary<DateTime, Vector3D> directionDictionary, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, double sampleSize = double.NaN)
+        {
+            return Simulate_Coverage(analyticalModel, directionDictionary, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, sampleSize, false);
+        }
+
+        /// <summary>
+        /// Coverage-only simulate with control over the surface set. When <paramref name="useModelSolarModel"/>
+        /// is true, SAM recomputes coverage on the SolarModel already attached to the AnalyticalModel
+        /// (e.g. the TAS-imported surfaces); otherwise it derives panels from the AdjacencyCluster as usual.
+        /// </summary>
         public static List<SolarCoverageSimulationResult> Simulate_Coverage(this AnalyticalModel analyticalModel, IEnumerable<DateTime> dateTimes, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, double sampleSize = double.NaN, bool useModelSolarModel = false)
         {
             if (analyticalModel == null || dateTimes == null)
@@ -122,6 +147,11 @@ namespace SAM.Analytical.SolarCalculator
             return Simulate_Coverage(analyticalModel, directionDictionary, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, sampleSize, useModelSolarModel);
         }
 
+        /// <summary>
+        /// Coverage-only simulate with control over the surface set — see the IEnumerable&lt;DateTime&gt;
+        /// overload. When <paramref name="useModelSolarModel"/> is true, reuses the attached SolarModel's
+        /// geometry instead of the AdjacencyCluster-derived panel set.
+        /// </summary>
         public static List<SolarCoverageSimulationResult> Simulate_Coverage(this AnalyticalModel analyticalModel, Dictionary<DateTime, Vector3D> directionDictionary, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, double sampleSize = double.NaN, bool useModelSolarModel = false)
         {
             if (analyticalModel == null || directionDictionary == null)
