@@ -140,6 +140,11 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             // not the result values.
             List<string> logs = BuildGeometryReport(solarModel_A, solarModel_B, pairs_A.Count, pairs_B.Count, tolerance, out GeometryAlignmentResult geometry);
 
+            // Explain the surface gap: classify Model B's analytical panels by the same rule SAM's
+            // SolarModel builder uses, and map Model A's surfaces onto them to show why each A surface
+            // is kept or dropped (internal / non-sun-exposed / no panel) on the SAM side.
+            logs.AddRange(BuildModelBSelectionReport(analyticalModel_B, solarModel_A, tolerance));
+
             if (pairs_A.Count == 0 || pairs_B.Count == 0)
             {
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, "One or both SolarModels contain no SolarCoverageSimulationResults — only the geometry-alignment section of 'logs' is populated.");
@@ -393,6 +398,111 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             public int Matched;
             public int UnmatchedA;
             public int UnmatchedB;
+        }
+
+        /// <summary>
+        /// Explain the surface-set gap: classify Model B's analytical panels by the same rule SAM's
+        /// SolarModel builder uses (single-space AND sun-exposed PanelType), then map each of Model A's
+        /// SolarModel surfaces to the nearest Model B panel within tolerance and tally why it is kept or
+        /// dropped. Tells the user whether the surfaces SAM omits are dropped as internal, by PanelType,
+        /// or are simply absent from Model B.
+        /// </summary>
+        private static List<string> BuildModelBSelectionReport(AnalyticalModel analyticalModel_B, SolarModel solarModel_A, double tolerance)
+        {
+            System.Globalization.CultureInfo culture = System.Globalization.CultureInfo.InvariantCulture;
+            List<string> logs = new List<string>();
+
+            List<Analytical.SolarCalculator.PanelSolarClassification> classifications = analyticalModel_B == null ? null : Analytical.SolarCalculator.Query.ClassifyPanelsForSolarModel(analyticalModel_B);
+            if (classifications == null || classifications.Count == 0)
+            {
+                logs.Add("--- Model B surface selection ---");
+                logs.Add("Model B has no AdjacencyCluster panels to classify — selection breakdown unavailable.");
+                return logs;
+            }
+
+            int totalPanels = classifications.Count;
+            int wouldEnter = 0;
+            foreach (Analytical.SolarCalculator.PanelSolarClassification classification in classifications)
+            {
+                if (classification.Kept) wouldEnter++;
+            }
+
+            // Map each Model A surface to the nearest Model B panel within tolerance and tally the verdict.
+            List<LinkedFace3D> faces_A = solarModel_A?.GetLinkedFace3Ds() ?? new List<LinkedFace3D>();
+            int kept = 0, droppedInternal = 0, droppedPanelType = 0, noPanel = 0;
+            Dictionary<string, int> droppedPanelTypeHistogram = new Dictionary<string, int>();
+            int surfaces_A = 0;
+
+            foreach (LinkedFace3D face_A in faces_A)
+            {
+                Point3D point_A = face_A?.Face3D?.InternalPoint3D();
+                if (point_A == null) continue;
+                surfaces_A++;
+
+                Analytical.SolarCalculator.PanelSolarClassification nearest = null;
+                double bestDistance = double.MaxValue;
+                foreach (Analytical.SolarCalculator.PanelSolarClassification classification in classifications)
+                {
+                    if (classification.InternalPoint3D == null) continue;
+
+                    double distance = point_A.Distance(classification.InternalPoint3D);
+                    if (distance <= tolerance && distance < bestDistance)
+                    {
+                        bestDistance = distance;
+                        nearest = classification;
+                    }
+                }
+
+                if (nearest == null)
+                {
+                    noPanel++;
+                }
+                else if (nearest.Kept)
+                {
+                    kept++;
+                }
+                else if (nearest.DropReason == Analytical.SolarCalculator.PanelSolarClassification.Reason_Internal)
+                {
+                    droppedInternal++;
+                    AddToHistogram(droppedPanelTypeHistogram, nearest.PanelType.ToString());
+                }
+                else
+                {
+                    droppedPanelType++;
+                    AddToHistogram(droppedPanelTypeHistogram, nearest.PanelType.ToString());
+                }
+            }
+
+            logs.Add("--- Model B surface selection (why SAM keeps only some of Model A's surfaces) ---");
+            logs.Add(string.Format(culture, "Model B AdjacencyCluster: {0} panels total; would enter SolarModel (single-space + sun-exposed): {1}", totalPanels, wouldEnter));
+            logs.Add(string.Format(culture, "Mapping each of Model A's {0} surfaces to the nearest Model B panel within {1:0.###} m:", surfaces_A, tolerance));
+            logs.Add(string.Format(culture, "  kept (single-space + sun-exposed PanelType): {0}", kept));
+            logs.Add(string.Format(culture, "  dropped - internal (>= 2 spaces): {0}", droppedInternal));
+            logs.Add(string.Format(culture, "  dropped - non-sun-exposed PanelType: {0}", droppedPanelType));
+            logs.Add(string.Format(culture, "  no Model B panel within tolerance: {0}", noPanel));
+            if (droppedPanelTypeHistogram.Count > 0)
+            {
+                List<string> parts = new List<string>();
+                foreach (KeyValuePair<string, int> entry in droppedPanelTypeHistogram)
+                {
+                    parts.Add(string.Format(culture, "{0}x{1}", entry.Value, entry.Key));
+                }
+                logs.Add("  dropped PanelTypes: " + string.Join(", ", parts));
+            }
+
+            return logs;
+        }
+
+        private static void AddToHistogram(Dictionary<string, int> histogram, string key)
+        {
+            if (histogram.TryGetValue(key, out int count))
+            {
+                histogram[key] = count + 1;
+            }
+            else
+            {
+                histogram[key] = 1;
+            }
         }
 
         /// <summary>

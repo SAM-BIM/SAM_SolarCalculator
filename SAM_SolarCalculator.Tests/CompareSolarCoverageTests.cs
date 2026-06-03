@@ -120,6 +120,48 @@ namespace SAM.SolarCalculator.Tests
         }
 
         [Fact]
+        public void ClassifyPanels_accounts_for_every_Model_A_surface()
+        {
+            AnalyticalModel analyticalModel_B = Load("ModelB-SolarSimulation.json");
+
+            // Classify Model B's analytical panels by the same rule the SolarModel builder uses.
+            List<PanelSolarClassification> classifications = analyticalModel_B.ClassifyPanelsForSolarModel();
+            Assert.NotNull(classifications);
+            Assert.NotEmpty(classifications);
+
+            // Map each of Model A's surfaces to the nearest Model B panel and tally the verdict.
+            SolarModel solarModel_A = GetSolarModel(Load("ModelA.json"));
+            Assert.NotNull(solarModel_A);
+
+            int surfaces = 0, kept = 0, dropped = 0, noPanel = 0;
+            foreach (LinkedFace3D face_A in solarModel_A.GetLinkedFace3Ds())
+            {
+                Point3D point_A = face_A?.Face3D?.InternalPoint3D();
+                if (point_A == null) continue;
+                surfaces++;
+
+                PanelSolarClassification nearest = null;
+                double best = double.MaxValue;
+                foreach (PanelSolarClassification c in classifications)
+                {
+                    if (c.InternalPoint3D == null) continue;
+                    double distance = point_A.Distance(c.InternalPoint3D);
+                    if (distance <= 0.5 && distance < best) { best = distance; nearest = c; }
+                }
+
+                if (nearest == null) noPanel++;
+                else if (nearest.Kept) kept++;
+                else dropped++;
+            }
+
+            // Accounting integrity: every Model A surface is explained — kept, dropped, or absent —
+            // and the gap (surfaces SAM omits) is non-empty, i.e. the diagnostic explains the mismatch.
+            Assert.Equal(ExpectedSurfaces_A, surfaces);
+            Assert.Equal(surfaces, kept + dropped + noPanel);
+            Assert.True(dropped + noPanel > 0, "diagnostic should explain why some Model A surfaces are not in SAM's SolarModel");
+        }
+
+        [Fact]
         public void Default_path_covers_only_the_filtered_panels()
         {
             AnalyticalModel analyticalModel = Load("ModelA.json");
