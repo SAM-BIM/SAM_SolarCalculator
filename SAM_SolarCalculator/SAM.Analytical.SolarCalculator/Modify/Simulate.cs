@@ -162,7 +162,10 @@ namespace SAM.Analytical.SolarCalculator
             // useModelSolarModel: recompute coverage on the SolarModel ALREADY attached to the model
             // (e.g. the TAS-imported surfaces) instead of re-deriving panels from the AdjacencyCluster.
             // Guarantees SAM evaluates the exact same faces as the imported model — a 1:1 benchmark set.
-            SolarModel solarModel = useModelSolarModel ? GeometryOnlySolarModel(analyticalModel) : Convert.ToSAM_SolarModel(analyticalModel);
+            // Coverage path includes window apertures (the regular face-simulation path does not — see
+            // ToSAM_SolarModel(AnalyticalModel, bool)). When reusing an already-attached SolarModel, its
+            // surfaces (e.g. a TAS import) are taken as-is.
+            SolarModel solarModel = useModelSolarModel ? GeometryOnlySolarModel(analyticalModel) : Convert.ToSAM_SolarModel(analyticalModel, true);
             if (solarModel == null)
             {
                 return null;

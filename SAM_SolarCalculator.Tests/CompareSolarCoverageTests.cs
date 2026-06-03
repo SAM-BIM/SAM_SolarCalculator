@@ -166,17 +166,21 @@ namespace SAM.SolarCalculator.Tests
         private const int ExpectedApertures = 14;
 
         [Fact]
-        public void ToSAM_SolarModel_matches_TAS_surface_set_one_to_one()
+        public void ToSAM_SolarModel_includeApertures_matches_TAS_surface_set_one_to_one()
         {
             AnalyticalModel analyticalModel = Load("ModelB-SolarSimulation.sam");
 
-            SolarModel solarModel = analyticalModel.ToSAM_SolarModel();
-            Assert.NotNull(solarModel);
+            // includeApertures = true (the coverage path): 8 opaque exposed panels + per window an opening
+            // AND an inset glazing pane (14 each), mirroring the TAS import: 8 + 14 + 14 = 36.
+            SolarModel withApertures = analyticalModel.ToSAM_SolarModel(true);
+            Assert.NotNull(withApertures);
+            Assert.Equal(ExpectedSurfaces_B + 2 * ExpectedApertures, withApertures.GetLinkedFace3Ds().Count);
+            Assert.Equal(ExpectedSurfaces_A, withApertures.GetLinkedFace3Ds().Count);
 
-            // 8 opaque exposed panels + per window an opening AND an inset glazing pane (14 each),
-            // mirroring the TAS import's two-surface-per-window representation: 8 + 14 + 14 = 36.
-            Assert.Equal(ExpectedSurfaces_B + 2 * ExpectedApertures, solarModel.GetLinkedFace3Ds().Count);
-            Assert.Equal(ExpectedSurfaces_A, solarModel.GetLinkedFace3Ds().Count);
+            // Default (panels only) — the regular face-simulation path is unaffected by the aperture change.
+            SolarModel panelsOnly = analyticalModel.ToSAM_SolarModel();
+            Assert.NotNull(panelsOnly);
+            Assert.Equal(ExpectedSurfaces_B, panelsOnly.GetLinkedFace3Ds().Count);
         }
 
         [Fact]

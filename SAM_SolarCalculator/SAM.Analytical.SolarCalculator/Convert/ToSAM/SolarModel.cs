@@ -12,7 +12,24 @@ namespace SAM.Analytical.SolarCalculator
 {
     public static partial class Convert
     {
+        /// <summary>
+        /// Builds a SolarModel from the model's sun-exposed, single-space panels. Original signature —
+        /// panels only, no apertures — so existing callers (notably the regular SolarFaceSimulation path,
+        /// which relates results back to panels by Guid) are unaffected. Delegates with includeApertures = false.
+        /// </summary>
         public static SolarModel ToSAM_SolarModel(this AnalyticalModel analyticalModel)
+        {
+            return ToSAM_SolarModel(analyticalModel, false);
+        }
+
+        /// <summary>
+        /// SolarModel from sun-exposed, single-space panels, optionally also adding each panel's window
+        /// apertures as their own surfaces. Apertures are emitted ONLY for the coverage/TAS-comparison path
+        /// (where per-window shade proportion matters and surfaces are matched by geometry); the regular
+        /// face-simulation path keeps panels only, because it relates results back to panels by Guid and
+        /// aperture surfaces would come back orphaned (Guid.Empty).
+        /// </summary>
+        public static SolarModel ToSAM_SolarModel(this AnalyticalModel analyticalModel, bool includeApertures)
         {
             if(analyticalModel == null)
             {
@@ -45,6 +62,11 @@ namespace SAM.Analytical.SolarCalculator
 
                     LinkedFace3D linkedFace3D = new LinkedFace3D(panel.Guid, panel.Face3D);
                     result.Add(linkedFace3D);
+
+                    if (!includeApertures)
+                    {
+                        continue;
+                    }
 
                     // Include the panel's windows as their own surfaces so SAM shades glazing too —
                     // the dominant solar-gain surfaces. Mirror TAS, which reports shade proportion per
