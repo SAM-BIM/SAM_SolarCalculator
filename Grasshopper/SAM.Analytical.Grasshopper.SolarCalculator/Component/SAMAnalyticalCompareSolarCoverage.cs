@@ -148,15 +148,30 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             List<Pair> pairs_A = ExtractPairs(solarModel_A);
             List<Pair> pairs_B = ExtractPairs(solarModel_B);
 
+            // SAM imports a TBD's shading as separate PanelType.Shade panels, which enter Model B's
+            // SolarModel as occluder surfaces; TAS has no shade surfaces (it bakes the shade effect into
+            // each exposed surface's proportion). Count them so the report can flag them as expected
+            // unmatched-B occluders rather than a geometry error.
+            int shadeSurfaces_B = CountShadeSurfaces(analyticalModel_B, solarModel_B);
+
+            // Bounding boxes of the COMPARABLE (non-Shade) surfaces only. Shade occluders extend Model B's
+            // box and would skew both the alignment offset (shifting common faces to the wrong place) and
+            // the rotation check, so they are excluded here. Box size is translation-invariant, so it also
+            // serves as a rotation/scale signal (see the report).
+            double[] bbox_A = BoundingBox(NonShadeInternalPoints(analyticalModel_A, solarModel_A));
+            double[] bbox_B = BoundingBox(NonShadeInternalPoints(analyticalModel_B, solarModel_B));
+
             // Optional alignment: when the two models were moved apart in Rhino (e.g. one imported at the
             // TBD origin, the other transformed for side-by-side viewing), translate Model B onto Model A
-            // by the min corner of their internal-point bounding boxes so they still compare. Only the
-            // MATCHING points are translated — output geometry stays where the user placed it. Off by
-            // default, so position matching remains a sanity check for genuinely misaligned inputs.
+            // by the min corner of their NON-Shade bounding boxes so they still compare. Only the MATCHING
+            // points are translated — output geometry stays where the user placed it. Off by default, so
+            // position matching remains a sanity check for genuinely misaligned inputs.
             double alignDx = 0, alignDy = 0, alignDz = 0;
-            if (alignModels)
+            if (alignModels && bbox_A != null && bbox_B != null)
             {
-                ComputeAlignmentOffset(solarModel_A, solarModel_B, out alignDx, out alignDy, out alignDz);
+                alignDx = bbox_A[0] - bbox_B[0];
+                alignDy = bbox_A[1] - bbox_B[1];
+                alignDz = bbox_A[2] - bbox_B[2];
                 if (alignDx != 0 || alignDy != 0 || alignDz != 0)
                 {
                     pairs_B = pairs_B.ConvertAll(p => new Pair(p.LinkedFace3D, new Point3D(p.InternalPoint3D.X + alignDx, p.InternalPoint3D.Y + alignDy, p.InternalPoint3D.Z + alignDz), p.Result));
@@ -168,13 +183,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             // geometry 1:1?" from "do the panels that have results agree?". A models that bake
             // identically should align here at ~0 distance; any gap points at the geometry/import,
             // not the result values.
-            // SAM imports a TBD's shading as separate PanelType.Shade panels, which enter Model B's
-            // SolarModel as occluder surfaces; TAS has no shade surfaces (it bakes the shade effect into
-            // each exposed surface's proportion). Count them so the report can flag them as expected
-            // unmatched-B occluders rather than a geometry error.
-            int shadeSurfaces_B = CountShadeSurfaces(analyticalModel_B, solarModel_B);
-
-            List<string> logs = BuildGeometryReport(solarModel_A, solarModel_B, pairs_A.Count, pairs_B.Count, tolerance, shadeSurfaces_B, alignDx, alignDy, alignDz, out GeometryAlignmentResult geometry);
+            List<string> logs = BuildGeometryReport(solarModel_A, solarModel_B, pairs_A.Count, pairs_B.Count, tolerance, shadeSurfaces_B, bbox_A, bbox_B, alignDx, alignDy, alignDz, out GeometryAlignmentResult geometry);
 
             // Only when some Model A surfaces have no 1:1 match in Model B is the panel-level breakdown
             // meaningful — it explains WHY SAM dropped them (internal / non-sun-exposed / no panel). On a
@@ -329,7 +338,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// values are looked at. <see cref="GetInternalPoints"/> is deterministic, so identical
         /// geometry aligns at ~0 distance.
         /// </summary>
-        private static List<string> BuildGeometryReport(SolarModel solarModel_A, SolarModel solarModel_B, int resultsCount_A, int resultsCount_B, double tolerance, int shadeSurfaces_B, double alignDx, double alignDy, double alignDz, out GeometryAlignmentResult alignment)
+        private static List<string> BuildGeometryReport(SolarModel solarModel_A, SolarModel solarModel_B, int resultsCount_A, int resultsCount_B, double tolerance, int shadeSurfaces_B, double[] bbox_A, double[] bbox_B, double alignDx, double alignDy, double alignDz, out GeometryAlignmentResult alignment)
         {
             System.Globalization.CultureInfo culture = System.Globalization.CultureInfo.InvariantCulture;
             List<string> logs = new List<string>();
@@ -410,6 +419,23 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 logs.Add(string.Format(culture, "Matched-panel internal-point distance min/mean/max: {0:0.0000} / {1:0.0000} / {2:0.0000} m", min, sum / distances.Count, max));
             }
 
+            // Bounding box (comparable, non-Shade surfaces) of each model — bounds reveal an offset,
+            // and box SIZE (translation-invariant) reveals a rotation/scale a translation can't fix.
+            if (bbox_A != null && bbox_B != null)
+            {
+                logs.Add(string.Format(culture, "Model A bounds (non-Shade): X[{0:0.0}..{1:0.0}] Y[{2:0.0}..{3:0.0}] Z[{4:0.0}..{5:0.0}]  size ({6:0.0}, {7:0.0}, {8:0.0})", bbox_A[0], bbox_A[3], bbox_A[1], bbox_A[4], bbox_A[2], bbox_A[5], bbox_A[3] - bbox_A[0], bbox_A[4] - bbox_A[1], bbox_A[5] - bbox_A[2]));
+                logs.Add(string.Format(culture, "Model B bounds (non-Shade): X[{0:0.0}..{1:0.0}] Y[{2:0.0}..{3:0.0}] Z[{4:0.0}..{5:0.0}]  size ({6:0.0}, {7:0.0}, {8:0.0})", bbox_B[0], bbox_B[3], bbox_B[1], bbox_B[4], bbox_B[2], bbox_B[5], bbox_B[3] - bbox_B[0], bbox_B[4] - bbox_B[1], bbox_B[5] - bbox_B[2]));
+
+                double dSizeX = Math.Abs((bbox_A[3] - bbox_A[0]) - (bbox_B[3] - bbox_B[0]));
+                double dSizeY = Math.Abs((bbox_A[4] - bbox_A[1]) - (bbox_B[4] - bbox_B[1]));
+                double dSizeZ = Math.Abs((bbox_A[5] - bbox_A[2]) - (bbox_B[5] - bbox_B[2]));
+                double sizeTolerance = Math.Max(tolerance, 0.5);
+                if (dSizeX > sizeTolerance || dSizeY > sizeTolerance || dSizeZ > sizeTolerance)
+                {
+                    logs.Add(string.Format(culture, "WARNING: bounding-box sizes differ by ({0:0.0}, {1:0.0}, {2:0.0}) m — the models are likely ROTATED or SCALED relative to each other. A translation (incl. _alignModels_) cannot fix this; re-orient them to the same coordinate frame.", dSizeX, dSizeY, dSizeZ));
+                }
+            }
+
             if (shadeSurfaces_B > 0)
             {
                 logs.Add(string.Format(culture, "Model B includes {0} PanelType.Shade occluder surface(s) — SAM imports the TBD's shading as separate Shade panels, whereas TAS bakes the shade effect into each exposed surface's proportion (no shade surfaces). These have no Model A counterpart, so they are expected to be unmatched-B and are excluded from the matched-pair benchmark.", shadeSurfaces_B));
@@ -464,23 +490,75 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// translation; any residual (e.g. shade panels extending Model B's box) is absorbed by the
         /// match tolerance. Returns zeros when either model has no internal points.
         /// </summary>
-        private static void ComputeAlignmentOffset(SolarModel solarModel_A, SolarModel solarModel_B, out double dx, out double dy, out double dz)
+        /// <summary>
+        /// Axis-aligned bounding box of a point set as {minX, minY, minZ, maxX, maxY, maxZ}, or null when
+        /// empty. Used for the alignment offset (min corner) and the rotation/scale check (size).
+        /// </summary>
+        private static double[] BoundingBox(List<Point3D> points)
         {
-            dx = 0; dy = 0; dz = 0;
-
-            List<Point3D> points_A = GetInternalPoints(solarModel_A, out int totalA);
-            List<Point3D> points_B = GetInternalPoints(solarModel_B, out int totalB);
-            if (points_A.Count == 0 || points_B.Count == 0)
+            if (points == null || points.Count == 0)
             {
-                return;
+                return null;
             }
 
-            double ax = double.MaxValue, ay = double.MaxValue, az = double.MaxValue;
-            double bx = double.MaxValue, by = double.MaxValue, bz = double.MaxValue;
-            foreach (Point3D p in points_A) { if (p.X < ax) ax = p.X; if (p.Y < ay) ay = p.Y; if (p.Z < az) az = p.Z; }
-            foreach (Point3D p in points_B) { if (p.X < bx) bx = p.X; if (p.Y < by) by = p.Y; if (p.Z < bz) bz = p.Z; }
+            double minX = double.MaxValue, minY = double.MaxValue, minZ = double.MaxValue;
+            double maxX = -double.MaxValue, maxY = -double.MaxValue, maxZ = -double.MaxValue;
+            foreach (Point3D p in points)
+            {
+                if (p == null) continue;
+                if (p.X < minX) minX = p.X; if (p.Y < minY) minY = p.Y; if (p.Z < minZ) minZ = p.Z;
+                if (p.X > maxX) maxX = p.X; if (p.Y > maxY) maxY = p.Y; if (p.Z > maxZ) maxZ = p.Z;
+            }
 
-            dx = ax - bx; dy = ay - by; dz = az - bz;
+            return new double[] { minX, minY, minZ, maxX, maxY, maxZ };
+        }
+
+        /// <summary>
+        /// Guids of the model's PanelType.Shade panels (occluders SAM adds that TAS has no surface for).
+        /// </summary>
+        private static HashSet<Guid> ShadePanelGuids(AnalyticalModel analyticalModel)
+        {
+            HashSet<Guid> result = new HashSet<Guid>();
+            if (analyticalModel == null) return result;
+
+            List<Analytical.SolarCalculator.PanelSolarClassification> classifications = Analytical.SolarCalculator.Query.ClassifyPanelsForSolarModel(analyticalModel);
+            if (classifications == null) return result;
+
+            foreach (Analytical.SolarCalculator.PanelSolarClassification classification in classifications)
+            {
+                if (classification.PanelType == PanelType.Shade)
+                {
+                    result.Add(classification.Guid);
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Internal points of the comparable surfaces only — every LinkedFace3D EXCEPT those that come
+        /// from a PanelType.Shade panel. Used for the alignment offset and rotation check so shade
+        /// occluders (which Model A lacks) don't skew the result.
+        /// </summary>
+        private static List<Point3D> NonShadeInternalPoints(AnalyticalModel analyticalModel, SolarModel solarModel)
+        {
+            List<Point3D> result = new List<Point3D>();
+            if (solarModel == null) return result;
+
+            HashSet<Guid> shadeGuids = ShadePanelGuids(analyticalModel);
+            List<LinkedFace3D> linkedFace3Ds = solarModel.GetLinkedFace3Ds();
+            if (linkedFace3Ds == null) return result;
+
+            foreach (LinkedFace3D linkedFace3D in linkedFace3Ds)
+            {
+                if (linkedFace3D?.Face3D == null) continue;
+                if (shadeGuids.Contains(linkedFace3D.Guid)) continue;
+
+                Point3D internalPoint3D = linkedFace3D.Face3D.InternalPoint3D();
+                if (internalPoint3D != null) result.Add(internalPoint3D);
+            }
+
+            return result;
         }
 
         private struct GeometryAlignmentResult
@@ -505,21 +583,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 return 0;
             }
 
-            List<Analytical.SolarCalculator.PanelSolarClassification> classifications = Analytical.SolarCalculator.Query.ClassifyPanelsForSolarModel(analyticalModel);
-            if (classifications == null)
-            {
-                return 0;
-            }
-
-            HashSet<Guid> shadeGuids = new HashSet<Guid>();
-            foreach (Analytical.SolarCalculator.PanelSolarClassification classification in classifications)
-            {
-                if (classification.PanelType == PanelType.Shade)
-                {
-                    shadeGuids.Add(classification.Guid);
-                }
-            }
-
+            HashSet<Guid> shadeGuids = ShadePanelGuids(analyticalModel);
             if (shadeGuids.Count == 0)
             {
                 return 0;
