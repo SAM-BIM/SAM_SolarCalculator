@@ -170,18 +170,19 @@ namespace SAM.Analytical.SolarCalculator
 
             List<SolarCoverageSimulationResult> solarCoverageSimulationResults = Weather.SolarCalculator.Modify.Simulate_Coverage(solarModel, directionDictionary, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, sampleSize);
 
+            // Attach the freshly-simulated SolarModel so downstream nodes (e.g. a comparison node) read
+            // THIS run's result. Done unconditionally — even when the run produced no coverage (e.g. every
+            // requested hour below minHorizonAngle): the new model then carries the simulated geometry with
+            // no coverage results, which honestly reflects "no coverage" and, crucially, never leaves a
+            // prior/stale SolarModel (e.g. a TAS import) attached for downstream to misread as this run's
+            // output. The original import is preserved by the caller, which clones the model before
+            // simulating (see SAMAnalytical.SolarSimulation).
+            analyticalModel.SetValue(AnalyticalModelParameter.SolarModel, solarModel);
+
             if (solarCoverageSimulationResults == null || solarCoverageSimulationResults.Count == 0)
             {
-                // No results (e.g. every requested hour is below minHorizonAngle, or no usable
-                // sun-exposed faces). Leave any existing SolarModel — notably a TAS import under
-                // useModelSolarModel — untouched rather than overwriting it with an unpopulated one.
                 return solarCoverageSimulationResults;
             }
-
-            // Attach the populated SolarModel to the AnalyticalModel so downstream nodes
-            // (e.g. a comparison node) can pull it back out, regardless of whether the model
-            // was TAS-imported or SAM-computed — both paths land in the same parameter slot.
-            analyticalModel.SetValue(AnalyticalModelParameter.SolarModel, solarModel);
 
             List<Panel> panels = analyticalModel.GetPanels();
             foreach (SolarCoverageSimulationResult solarCoverageSimulationResult in solarCoverageSimulationResults)
