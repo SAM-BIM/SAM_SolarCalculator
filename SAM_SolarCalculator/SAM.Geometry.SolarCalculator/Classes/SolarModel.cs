@@ -36,6 +36,14 @@ namespace SAM.Geometry.SolarCalculator
             }
         }
 
+        public List<SolarCoverageSimulationResult> SolarCoverageSimulationResults
+        {
+            get
+            {
+                return solarRelationCluster?.GetObjects<SolarCoverageSimulationResult>()?.ConvertAll(x => x == null ? null : new SolarCoverageSimulationResult(x));
+            }
+        }
+
         public bool Add(LinkedFace3D linkedFace3D)
         {
             if(linkedFace3D == null)
@@ -90,29 +98,6 @@ namespace SAM.Geometry.SolarCalculator
 
             return result;
         }
-        
-        public List<LinkedFace3D> GetLinkedFace3Ds()
-        {
-            return solarRelationCluster?.GetObjects<LinkedFace3D>()?.ConvertAll(x => x == null ? null : new LinkedFace3D(x));
-        }
-
-        public List<SolarFaceSimulationResult> GetSolarFaceSimulationResults()
-        {
-            return solarRelationCluster?.GetObjects<SolarFaceSimulationResult>()?.ConvertAll(x => x == null ? null : new SolarFaceSimulationResult(x));
-        }
-
-        public List<SolarCoverageSimulationResult> SolarCoverageSimulationResults
-        {
-            get
-            {
-                return solarRelationCluster?.GetObjects<SolarCoverageSimulationResult>()?.ConvertAll(x => x == null ? null : new SolarCoverageSimulationResult(x));
-            }
-        }
-
-        public List<TSolarSimulationResult> GetSolarSimulationResults<TSolarSimulationResult>() where TSolarSimulationResult : ISolarSimulationResult
-        {
-            return solarRelationCluster?.GetObjects<TSolarSimulationResult>()?.ConvertAll(x => Core.Query.Clone(x));
-        }
 
         public override bool FromJsonObject(JsonObject jObject)
         {
@@ -128,6 +113,69 @@ namespace SAM.Geometry.SolarCalculator
             return true;
         }
 
+        public LinkedFace3D GetLinkedFace3D(ISolarSimulationResult solarSimulationResult)
+        {
+            if(solarSimulationResult is null || solarRelationCluster is null)
+            {
+                return null;
+            }
+
+            List<LinkedFace3D> linkedFace3Ds = solarRelationCluster.GetRelatedObjects<LinkedFace3D>(solarSimulationResult);
+            if(linkedFace3Ds is null || linkedFace3Ds.Count == 0)
+            {
+                return null;
+            }
+
+            return Core.Query.Clone(linkedFace3Ds.Find(x => x != null));
+        }
+
+        public List<LinkedFace3D> GetLinkedFace3Ds()
+        {
+            return solarRelationCluster?.GetObjects<LinkedFace3D>()?.ConvertAll(x => x == null ? null : new LinkedFace3D(x));
+        }
+
+        public List<SolarFaceSimulationResult> GetSolarFaceSimulationResults()
+        {
+            return solarRelationCluster?.GetObjects<SolarFaceSimulationResult>()?.ConvertAll(x => x == null ? null : new SolarFaceSimulationResult(x));
+        }
+        
+        public List<TSolarSimulationResult> GetSolarSimulationResults<TSolarSimulationResult>() where TSolarSimulationResult : ISolarSimulationResult
+        {
+            List<TSolarSimulationResult> originals = solarRelationCluster?.GetObjects<TSolarSimulationResult>();
+            if (originals == null)
+            {
+                return null;
+            }
+
+            // Clone each result via its concrete type's copy constructor — matches the pattern
+            // already used by the typed SolarCoverageSimulationResults / GetSolarFaceSimulationResults
+            // accessors and avoids a reflection-based Core.Query.Clone round-trip.
+            List<TSolarSimulationResult> result = new List<TSolarSimulationResult>(originals.Count);
+            foreach (TSolarSimulationResult original in originals)
+            {
+                if (original == null)
+                {
+                    result.Add(default);
+                    continue;
+                }
+
+                switch (original)
+                {
+                    case SolarCoverageSimulationResult coverageResult:
+                        result.Add((TSolarSimulationResult)(ISolarSimulationResult)new SolarCoverageSimulationResult(coverageResult));
+                        break;
+                    case SolarFaceSimulationResult faceResult:
+                        result.Add((TSolarSimulationResult)(ISolarSimulationResult)new SolarFaceSimulationResult(faceResult));
+                        break;
+                    default:
+                        // Unknown subtype — fall back to reflection-based clone.
+                        result.Add(Core.Query.Clone(original));
+                        break;
+                }
+            }
+            return result;
+        }
+        
         public override JsonObject ToJsonObject()
         {
             JsonObject jObject = base.ToJsonObject();
