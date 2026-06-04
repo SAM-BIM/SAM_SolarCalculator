@@ -198,6 +198,37 @@ namespace SAM.SolarCalculator.Tests
             Assert.Equal(ExpectedSurfaces_A, results.Count);
         }
 
+        [Fact]
+        public void Simulate_Coverage_attaches_pane_and_frame_results_to_apertures()
+        {
+            // ModelB-SolarSimulation.sam is a SAM (non-TAS-import) model whose apertures are NOT
+            // registered as top-level cluster objects, so it exercises the robust register-then-relate
+            // overload — not merely apertures that happened to be pre-registered by a TAS import.
+            AnalyticalModel analyticalModel = Load("ModelB-SolarSimulation.sam");
+            Assert.Equal(ExpectedApertures, analyticalModel.GetApertures().Count);
+
+            List<SolarCoverageSimulationResult> results = analyticalModel.Simulate_Coverage(SampleDateTimes);
+            Assert.NotNull(results);
+            Assert.Equal(ExpectedSurfaces_A, results.Count); // 8 panels + 14 openings + 14 panes
+
+            // Every aperture now carries a "… -pane" AND a "… -frame" coverage result, related back to
+            // the Aperture object (previously these fell through to Guid.Empty and were orphaned). The
+            // "-pane"/"-frame" names match the TAS-import convention that UpdateShading reads.
+            int paneApertures = 0;
+            int frameApertures = 0;
+            foreach (Aperture aperture in analyticalModel.GetApertures())
+            {
+                List<SolarCoverageSimulationResult> apertureResults = analyticalModel.GetResults<SolarCoverageSimulationResult>(aperture);
+                Assert.NotNull(apertureResults);
+
+                if (apertureResults.Any(x => x?.Name != null && x.Name.EndsWith("-pane"))) paneApertures++;
+                if (apertureResults.Any(x => x?.Name != null && x.Name.EndsWith("-frame"))) frameApertures++;
+            }
+
+            Assert.Equal(ExpectedApertures, paneApertures);
+            Assert.Equal(ExpectedApertures, frameApertures);
+        }
+
         // ---- With-Shade engine benchmark (matched shading on both sides) -------------------------------
         // ModelA-WithShade.sam            = FromTBD(_importSurfaceShades_=true) -> TAS, 36 surfaces, source TAS, at origin.
         // ModelB-WithShadeSolarSimulation = FromTBD(false) -> SolarSimulation -> SAM, 64 surfaces (8 + 28 windows

@@ -10,6 +10,13 @@ namespace SAM.Analytical.SolarCalculator
 {
     public static partial class Modify
     {
+        // Aperture coverage-result name suffixes. MUST mirror SAM.Analytical.Tas.Query.Sufix so the
+        // SAM-recomputed "… -pane"/"… -frame" results match the TAS-import names that UpdateShading
+        // reads via Name.EndsWith(...). Duplicated (not referenced) because SAM_SolarCalculator cannot
+        // depend on SAM_Tas — that would be a circular dependency.
+        private const string PaneSufix = "-pane";
+        private const string FrameSufix = "-frame";
+
         public static List<SolarFaceSimulationResult> Simulate(this AnalyticalModel analyticalModel, IEnumerable<DateTime> dateTimes, bool merge = false, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, double sampleSize = double.NaN)
         {
             if(analyticalModel == null || dateTimes == null)
@@ -187,17 +194,78 @@ namespace SAM.Analytical.SolarCalculator
                 return solarCoverageSimulationResults;
             }
 
+            // Classify each coverage result and relate it to its source object so downstream code
+            // (e.g. SAM.Analytical.Tas.Modify.UpdateShading) reads SAM-recomputed coverage exactly the
+            // way it reads TAS-imported coverage. Panels relate by their own Guid; apertures get a
+            // "… -frame" result (the whole window-opening surface — its LinkedFace3D.Guid == aperture.Guid)
+            // and a "… -pane" result (the inset glazing surface — a fresh Guid back-referenced to the
+            // aperture in ToSAM_SolarModel). Mirrors Modify.CopyResults' naming/relation on the TAS side.
             List<Panel> panels = analyticalModel.GetPanels();
+
+            List<Aperture> apertures = analyticalModel.GetApertures();
+            Dictionary<string, Aperture> apertureByGuid = new Dictionary<string, Aperture>();
+            if (apertures != null)
+            {
+                foreach (Aperture aperture in apertures)
+                {
+                    if (aperture != null)
+                    {
+                        apertureByGuid[aperture.Guid.ToString()] = aperture;
+                    }
+                }
+            }
+
+            // Map each pane surface's (fresh) LinkedFace3D.Guid to its owning aperture, via the
+            // aperture-Guid reference stamped on the pane LinkedFace3D in ToSAM_SolarModel.
+            Dictionary<string, Aperture> apertureByPaneSurfaceGuid = new Dictionary<string, Aperture>();
+            List<Geometry.Object.Spatial.LinkedFace3D> linkedFace3Ds = solarModel.GetLinkedFace3Ds();
+            if (linkedFace3Ds != null)
+            {
+                foreach (Geometry.Object.Spatial.LinkedFace3D linkedFace3D in linkedFace3Ds)
+                {
+                    if (linkedFace3D?.Reference == null)
+                    {
+                        continue;
+                    }
+
+                    if (apertureByGuid.TryGetValue(linkedFace3D.Reference, out Aperture aperture) && aperture != null)
+                    {
+                        apertureByPaneSurfaceGuid[linkedFace3D.Guid.ToString()] = aperture;
+                    }
+                }
+            }
+
             foreach (SolarCoverageSimulationResult solarCoverageSimulationResult in solarCoverageSimulationResults)
             {
-                Guid guid = Guid.Empty;
-                Panel panel = panels?.Find(x => x.Guid.ToString().Equals(solarCoverageSimulationResult.Reference));
+                string reference = solarCoverageSimulationResult.Reference;
+
+                // Wall/roof panel.
+                Panel panel = reference == null ? null : panels?.Find(x => x.Guid.ToString().Equals(reference));
                 if (panel != null)
                 {
-                    guid = panel.Guid;
+                    analyticalModel.AddResult<Panel>(solarCoverageSimulationResult, panel.Guid);
+                    continue;
                 }
 
-                analyticalModel.AddResult<Panel>(solarCoverageSimulationResult, guid);
+                // Aperture opening surface -> frame.
+                if (reference != null && apertureByGuid.TryGetValue(reference, out Aperture apertureFrame))
+                {
+                    SolarCoverageSimulationResult frameResult = new SolarCoverageSimulationResult(string.Format("{0} {1}", apertureFrame.Name, FrameSufix), solarCoverageSimulationResult.Source, apertureFrame.Guid.ToString(), solarCoverageSimulationResult);
+                    analyticalModel.AddResult<Aperture>(frameResult, apertureFrame);
+                    continue;
+                }
+
+                // Aperture glazing pane surface -> pane.
+                if (reference != null && apertureByPaneSurfaceGuid.TryGetValue(reference, out Aperture aperturePane))
+                {
+                    SolarCoverageSimulationResult paneResult = new SolarCoverageSimulationResult(string.Format("{0} {1}", aperturePane.Name, PaneSufix), solarCoverageSimulationResult.Source, aperturePane.Guid.ToString(), solarCoverageSimulationResult);
+                    analyticalModel.AddResult<Aperture>(paneResult, aperturePane);
+                    continue;
+                }
+
+                // Unmatched (e.g. useModelSolarModel = true reuses TAS surfaces whose Guids match
+                // neither a panel nor an aperture): keep the result but without a relation, as before.
+                analyticalModel.AddResult<Panel>(solarCoverageSimulationResult, Guid.Empty);
             }
 
             return solarCoverageSimulationResults;
