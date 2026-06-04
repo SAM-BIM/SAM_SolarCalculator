@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Xunit;
+using Xunit.Abstractions;
 using SAM.Core;
 using SAM.Analytical;
 using SAM.Analytical.SolarCalculator;
@@ -362,6 +363,131 @@ namespace SAM.SolarCalculator.Tests
                 if (p.X < minX) minX = p.X; if (p.Y < minY) minY = p.Y; if (p.Z < minZ) minZ = p.Z;
             }
             return new double[] { minX, minY, minZ };
+        }
+
+        // ---- Option-2 round-trip localisation -----------------------------------------------------------
+        // ModelB-WithShadeViaTBD.sam = ModelB SolarSimulation -> SAMAnalytical.TBD (ToTBD) -> SAMAnalytical.FromTBD.
+        // The DIRECT path (ModelB-WithShadeSolarSimulation, option 1) already matches the TAS benchmark
+        // ModelA-WithShade to ~0.009 (WithShade_SAM_matches_TAS_within_tolerance). The live node shows the
+        // VIA-TBD path (option 2) at ~0.106 even though the SAM->TBD->SAM storage is lossless (SAM_ToTBD.log
+        // round-trip = 0.0008). This test reproduces the gap from saved models (no TAS COM) and breaks the
+        // per-pair delta down by surface area-class — wall (area > 5) / pane (0.5..5) / frame-ring (< 0.5) —
+        // to localise WHICH surfaces carry it (hypothesis: the thin frame-rings).
+        // No-op until the fixture is exported from Rhino and committed.
+
+        private readonly ITestOutputHelper output;
+
+        public CompareSolarCoverageTests(ITestOutputHelper output)
+        {
+            this.output = output;
+        }
+
+        private static string AreaClass(double area)
+        {
+            if (area < 0.5) return "ring";
+            if (area <= 5.0) return "pane";
+            return "wall";
+        }
+
+        // (internalPoint, area, coverage result) for every coverage-bearing surface in the SolarModel.
+        private static List<Tuple<Point3D, double, SolarCoverageSimulationResult>> AreaPairs(SolarModel solarModel)
+        {
+            Dictionary<string, SolarCoverageSimulationResult> byReference = new Dictionary<string, SolarCoverageSimulationResult>();
+            foreach (SolarCoverageSimulationResult r in solarModel.SolarCoverageSimulationResults ?? new List<SolarCoverageSimulationResult>())
+            {
+                if (r?.Reference != null) byReference[r.Reference] = r;
+            }
+
+            List<Tuple<Point3D, double, SolarCoverageSimulationResult>> result = new List<Tuple<Point3D, double, SolarCoverageSimulationResult>>();
+            foreach (LinkedFace3D lf in solarModel.GetLinkedFace3Ds() ?? new List<LinkedFace3D>())
+            {
+                if (lf?.Face3D == null) continue;
+                if (!byReference.TryGetValue(lf.Guid.ToString(), out SolarCoverageSimulationResult r)) continue;
+                Point3D p = lf.Face3D.InternalPoint3D();
+                if (p == null) continue;
+                result.Add(Tuple.Create(p, lf.Face3D.GetArea(), r));
+            }
+            return result;
+        }
+
+        [Fact]
+        public void ViaTBD_roundtrip_delta_breakdown_by_surface_class()
+        {
+            string pathB = Path.Combine(AppContext.BaseDirectory, "ModelB-WithShadeViaTBD.sam");
+            if (!File.Exists(pathB))
+            {
+                output.WriteLine("SKIP: ModelB-WithShadeViaTBD.sam not present yet — export the option-2 FromTBD output into the test folder.");
+                return;
+            }
+
+            SolarModel smA = GetSolarModel(Load("ModelA-WithShade.sam"));
+            SolarModel smB = GetSolarModel(Load("ModelB-WithShadeViaTBD.sam"));
+            Assert.NotNull(smA);
+            Assert.NotNull(smB);
+
+            List<Tuple<Point3D, double, SolarCoverageSimulationResult>> pairsA = AreaPairs(smA);
+            List<Tuple<Point3D, double, SolarCoverageSimulationResult>> pairsB = AreaPairs(smB);
+            output.WriteLine($"A surfaces={pairsA.Count}  B surfaces={pairsB.Count}");
+
+            // Align B onto A by the min corner (pure translation, as the node does).
+            double[] bbA = BBoxMin(pairsA.Select(x => x.Item1));
+            double[] bbB = BBoxMin(pairsB.Select(x => x.Item1));
+            double dx = bbA[0] - bbB[0], dy = bbA[1] - bbB[1], dz = bbA[2] - bbB[2];
+
+            const double tolerance = 0.5;
+            HashSet<int> usedB = new HashSet<int>();
+
+            // Per area-class accumulators: sum of |delta| and overlapping-hour count.
+            Dictionary<string, double> sumAbsByClass = new Dictionary<string, double> { ["wall"] = 0, ["pane"] = 0, ["ring"] = 0 };
+            Dictionary<string, int> hoursByClass = new Dictionary<string, int> { ["wall"] = 0, ["pane"] = 0, ["ring"] = 0 };
+            Dictionary<string, int> pairsByClass = new Dictionary<string, int> { ["wall"] = 0, ["pane"] = 0, ["ring"] = 0 };
+
+            double sumAbsAll = 0; int hoursAll = 0; int matched = 0;
+
+            foreach (Tuple<Point3D, double, SolarCoverageSimulationResult> pa in pairsA)
+            {
+                int best = -1; double bestDist = double.MaxValue;
+                for (int j = 0; j < pairsB.Count; j++)
+                {
+                    if (usedB.Contains(j)) continue;
+                    Point3D pb = pairsB[j].Item1;
+                    double d = pa.Item1.Distance(new Point3D(pb.X + dx, pb.Y + dy, pb.Z + dz));
+                    if (d <= tolerance && d < bestDist) { bestDist = d; best = j; }
+                }
+                if (best == -1) continue;
+                usedB.Add(best);
+                matched++;
+
+                // Classify by the larger of the two areas so a ring paired to a ring counts as "ring".
+                string cls = AreaClass(Math.Max(pa.Item2, pairsB[best].Item2));
+
+                Dictionary<HourKey, double> mapA = HourMap(pa.Item3);
+                Dictionary<HourKey, double> mapB = HourMap(pairsB[best].Item3);
+                double pairSumAbs = 0; int pairHours = 0;
+                foreach (KeyValuePair<HourKey, double> e in mapA)
+                {
+                    if (!mapB.TryGetValue(e.Key, out double vB)) continue;
+                    double ad = Math.Abs(vB - e.Value);
+                    pairSumAbs += ad; pairHours++;
+                }
+
+                sumAbsByClass[cls] += pairSumAbs; hoursByClass[cls] += pairHours; pairsByClass[cls]++;
+                sumAbsAll += pairSumAbs; hoursAll += pairHours;
+
+                double pairMean = pairHours == 0 ? double.NaN : pairSumAbs / pairHours;
+                output.WriteLine($"  [{cls}] areaA={pa.Item2:0.###} areaB={pairsB[best].Item2:0.###} centroid={pa.Item1} hours={pairHours} meanAbs={pairMean:0.0000}");
+            }
+
+            output.WriteLine("--- Per area-class ---");
+            foreach (string cls in new[] { "wall", "pane", "ring" })
+            {
+                double mean = hoursByClass[cls] == 0 ? double.NaN : sumAbsByClass[cls] / hoursByClass[cls];
+                output.WriteLine($"  {cls}: pairs={pairsByClass[cls]} hours={hoursByClass[cls]} meanAbsDelta={mean:0.0000}");
+            }
+            double overall = hoursAll == 0 ? double.NaN : sumAbsAll / hoursAll;
+            output.WriteLine($"overall meanAbsDelta={overall:0.0000}  matched={matched}");
+
+            Assert.True(matched > 0, "expected at least one matched A/B pair");
         }
     }
 }
