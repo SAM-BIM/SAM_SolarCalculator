@@ -369,15 +369,13 @@ namespace SAM.SolarCalculator.Tests
             return new double[] { minX, minY, minZ };
         }
 
-        // ---- Option-2 round-trip localisation -----------------------------------------------------------
-        // ModelB-WithShadeViaTBD.sam = ModelB SolarSimulation -> SAMAnalytical.TBD (ToTBD) -> SAMAnalytical.FromTBD.
-        // The DIRECT path (ModelB-WithShadeSolarSimulation, option 1) already matches the TAS benchmark
-        // ModelA-WithShade to ~0.009 (WithShade_SAM_matches_TAS_within_tolerance). The live node shows the
-        // VIA-TBD path (option 2) at ~0.106 even though the SAM->TBD->SAM storage is lossless (SAM_ToTBD.log
-        // round-trip = 0.0008). This test reproduces the gap from saved models (no TAS COM) and breaks the
-        // per-pair delta down by surface area-class — wall (area > 5) / pane (0.5..5) / frame-ring (< 0.5) —
-        // to localise WHICH surfaces carry it (hypothesis: the thin frame-rings).
-        // No-op until the fixture is exported from Rhino and committed.
+        // ---- Option-2 (via-TBD) round-trip regression ---------------------------------------------------
+        // ModelB-SAMToTasFromTas.sam = ModelB SolarSimulation -> SAMAnalytical.TBD (ToTBD) -> SAMAnalytical.FromTBD,
+        // compared against the TAS benchmark ModelA-Tas. This path used to read back one hour EARLY (the
+        // entire ~0.106 CompareSolarCoverage gap); the SAM_Tas shade-slot fix (write hour H at slot H, not
+        // H-1) brought it to ~0.016, matching the direct path. The test breaks the per-pair delta down by
+        // surface area-class (wall > 5 / pane 0.5..5 / ring < 0.5) and asserts the round-trip stays healthy
+        // (< 0.02). No-op only if the fixture is absent.
 
         private readonly ITestOutputHelper output;
 
@@ -491,7 +489,11 @@ namespace SAM.SolarCalculator.Tests
             double overall = hoursAll == 0 ? double.NaN : sumAbsAll / hoursAll;
             output.WriteLine($"overall meanAbsDelta={overall:0.0000}  matched={matched}");
 
-            Assert.True(matched > 0, "expected at least one matched A/B pair");
+            Assert.Equal(36, matched);
+            // After the SAM_Tas shade-slot fix (write hour H at slot H, not H-1) the via-TBD round-trip
+            // matches the TAS benchmark to ~0.016 — the same quality as the direct path. Guard against a
+            // regression of the 1-hour offset, which drove this to ~0.106.
+            Assert.True(overall < 0.02, $"via-TBD round-trip regressed: overall meanAbsDelta {overall:0.0000} (expected < 0.02 after the hour-slot fix)");
         }
 
         // Linear hour index with the year forced to a common non-leap value, so A and B align on
@@ -511,12 +513,11 @@ namespace SAM.SolarCalculator.Tests
             return result;
         }
 
-        // FINDING (ModelB-SAMToTasFromTas): the delta minimises at a B shift of -1 hour (0.0164, == the
-        // direct-path quality), and the raw series shows B[h] == A[h+1] — i.e. the SAM->ToTBD->FromTBD
-        // coverage lands one hour EARLY vs the TAS-native benchmark. That 1-hour offset is the entire
-        // ~0.106 gap (not geometry/rings/storage). Root cause is an hour-index off-by-one in the SAM
-        // shade write/read path (UpdateShading/WriteImportedCoverageShades 'Hour-1' vs Create.SolarModel
-        // 'AddHours(1..24)') surfacing through the full save/reopen — to be fixed in SAM_Tas.
+        // This probe localised the original ~0.106 gap: before the SAM_Tas fix the delta minimised at a
+        // B shift of -1 hour (B[h] == A[h+1]) — the via-TBD coverage landed one hour EARLY vs TAS, the
+        // entire gap (not geometry/rings/storage). Root cause: WriteImportedCoverageShades wrote hour H to
+        // slot H-1, which reads back at H-1 through FromTBD's read-write open. Fixed by writing at slot H;
+        // the delta now minimises at shift 0 (asserted below).
         [Fact]
         public void ViaTBD_hour_shift_probe()
         {
@@ -560,6 +561,7 @@ namespace SAM.SolarCalculator.Tests
 
             output.WriteLine($"matched pairs={matchedMaps.Count}");
             output.WriteLine("shift(h) | overlap | overallMeanAbsDelta");
+            Dictionary<int, double> deltaByShift = new Dictionary<int, double>();
             for (int shift = -3; shift <= 3; shift++)
             {
                 double sumAbs = 0; int hours = 0;
@@ -572,6 +574,7 @@ namespace SAM.SolarCalculator.Tests
                     }
                 }
                 double mean = hours == 0 ? double.NaN : sumAbs / hours;
+                deltaByShift[shift] = mean;
                 output.WriteLine($"  {shift,2}     | {hours,6} | {mean:0.0000}");
             }
 
@@ -593,6 +596,10 @@ namespace SAM.SolarCalculator.Tests
             }
 
             Assert.NotEmpty(matchedMaps);
+            // The hours align 1:1 with TAS, so no whole-hour shift should beat the unshifted score.
+            // (Before the SAM_Tas shade-slot fix the minimum was at -1h; this guards the fix.)
+            Assert.True(deltaByShift[0] < deltaByShift[-1] && deltaByShift[0] < deltaByShift[1],
+                $"via-TBD coverage is hour-shifted vs TAS: delta(0)={deltaByShift[0]:0.0000} should be below delta(-1)={deltaByShift[-1]:0.0000} and delta(+1)={deltaByShift[1]:0.0000}");
         }
     }
 }
