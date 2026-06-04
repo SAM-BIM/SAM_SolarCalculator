@@ -43,9 +43,13 @@ namespace SAM.SolarCalculator.Tests
             new DateTime(2018, 6, 21, 15, 0, 0),
         };
 
+        // Test fixtures live under SAM_SolarCalculator.Tests/Fixtures/ and are copied (preserving that
+        // subfolder) next to the test assembly via the csproj's Fixtures\*.sam copy rule.
+        private static readonly string FixturesDirectory = Path.Combine(AppContext.BaseDirectory, "Fixtures");
+
         private static AnalyticalModel Load(string fileName)
         {
-            string path = Path.Combine(AppContext.BaseDirectory, fileName);
+            string path = Path.Combine(FixturesDirectory, fileName);
             Assert.True(File.Exists(path), $"Test fixture missing: {path}");
 
             List<AnalyticalModel> analyticalModels = SAM.Core.Convert.ToSAM<AnalyticalModel>(path);
@@ -413,7 +417,7 @@ namespace SAM.SolarCalculator.Tests
         [Fact]
         public void ViaTBD_roundtrip_delta_breakdown_by_surface_class()
         {
-            string pathB = Path.Combine(AppContext.BaseDirectory, "ModelB-SAMToTasFromTas.sam");
+            string pathB = Path.Combine(FixturesDirectory, "ModelB-SAMToTasFromTas.sam");
             if (!File.Exists(pathB))
             {
                 output.WriteLine("SKIP: ModelB-SAMToTasFromTas.sam not present yet — export the option-2 FromTBD output into the test folder.");
@@ -516,7 +520,7 @@ namespace SAM.SolarCalculator.Tests
         [Fact]
         public void ViaTBD_hour_shift_probe()
         {
-            string pathB = Path.Combine(AppContext.BaseDirectory, "ModelB-SAMToTasFromTas.sam");
+            string pathB = Path.Combine(FixturesDirectory, "ModelB-SAMToTasFromTas.sam");
             if (!File.Exists(pathB))
             {
                 output.WriteLine("SKIP: ModelB-SAMToTasFromTas.sam not present yet.");
