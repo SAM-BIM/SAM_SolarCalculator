@@ -264,23 +264,48 @@ namespace SAM.Weather.SolarCalculator
         {
             foreach (LinkedFace3D linkedFace3D in linkedFace3Ds)
             {
-                if (!dictionary_SunExposure.TryGetValue(linkedFace3D.Guid, out List<Tuple<DateTime, Radiation, List<Face3D>>> sunExposure) || sunExposure == null || sunExposure.Count == 0)
+                dictionary_SunExposure.TryGetValue(linkedFace3D.Guid, out List<Tuple<DateTime, Radiation, List<Face3D>>> sunExposure);
+
+                // Build the coverage series over EVERY valid timestep: the lit entry where the face is
+                // exposed, and an explicit zero-coverage entry where it is fully shaded. This keeps the
+                // per-face DateTime grid complete and consistent with TAS — without it, a face that
+                // alternates lit/shaded would record only its lit timesteps, leaving the shaded ones as
+                // gaps (NaN) that CompareSolarCoverage then skips, biasing the comparison. Handles all
+                // cases uniformly: fully shaded (all zero), partially shaded (mix), fully lit (all lit).
+                List<Tuple<DateTime, Radiation, List<Face3D>>> exposure;
+                if (allValidDateTimes != null && allValidDateTimes.Count > 0)
                 {
-                    // Emit a zero-coverage result for fully shaded faces so the per-face
-                    // DateTime grid is consistent with TAS-imported data for comparison.
-                    if (allValidDateTimes != null && allValidDateTimes.Count > 0)
+                    Dictionary<DateTime, Tuple<DateTime, Radiation, List<Face3D>>> litByDateTime = new Dictionary<DateTime, Tuple<DateTime, Radiation, List<Face3D>>>();
+                    if (sunExposure != null)
                     {
-                        List<Tuple<DateTime, Radiation, List<Face3D>>> zeroExposure = allValidDateTimes.ConvertAll(dt => Tuple.Create(dt, (Radiation)null, (List<Face3D>)null));
-                        SolarCoverageSimulationResult zeroCoverage = Geometry.SolarCalculator.Create.SolarCoverageSimulationResult(linkedFace3D, zeroExposure);
-                        if (zeroCoverage != null)
+                        foreach (Tuple<DateTime, Radiation, List<Face3D>> entry in sunExposure)
                         {
-                            solarModel.Add(zeroCoverage, linkedFace3D.Guid);
+                            if (entry != null && !litByDateTime.ContainsKey(entry.Item1))
+                            {
+                                litByDateTime[entry.Item1] = entry;
+                            }
                         }
                     }
-                    continue;
+
+                    exposure = new List<Tuple<DateTime, Radiation, List<Face3D>>>(allValidDateTimes.Count);
+                    foreach (DateTime dateTime in allValidDateTimes)
+                    {
+                        exposure.Add(litByDateTime.TryGetValue(dateTime, out Tuple<DateTime, Radiation, List<Face3D>> lit)
+                            ? lit
+                            : Tuple.Create(dateTime, (Radiation)null, (List<Face3D>)null));
+                    }
+                }
+                else
+                {
+                    // No valid-timestep grid supplied — fall back to the lit entries only (legacy behaviour).
+                    if (sunExposure == null || sunExposure.Count == 0)
+                    {
+                        continue;
+                    }
+                    exposure = sunExposure;
                 }
 
-                SolarCoverageSimulationResult solarCoverageSimulationResult = Geometry.SolarCalculator.Create.SolarCoverageSimulationResult(linkedFace3D, sunExposure);
+                SolarCoverageSimulationResult solarCoverageSimulationResult = Geometry.SolarCalculator.Create.SolarCoverageSimulationResult(linkedFace3D, exposure);
                 if (solarCoverageSimulationResult == null)
                 {
                     continue;
