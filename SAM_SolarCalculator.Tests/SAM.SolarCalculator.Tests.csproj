@@ -41,14 +41,10 @@
   </ItemGroup>
 
   <!-- Real exported AnalyticalModels used as macro-test fixtures, stored in SAM's native
-       compressed .sam (zip) format — ~40x smaller than the raw JSON, loaded via Convert.ToSAM. -->
+       compressed .sam (zip) format — ~40x smaller than the raw JSON, loaded via Convert.ToSAM.
+       Kept under Fixtures/ and copied (preserving that subfolder) next to the test assembly. -->
   <ItemGroup>
-    <None Update="ModelA.sam" CopyToOutputDirectory="PreserveNewest" />
-    <None Update="ModelB-SolarSimulation.sam" CopyToOutputDirectory="PreserveNewest" />
-    <None Update="ModelA-NoShade.sam" CopyToOutputDirectory="PreserveNewest" />
-    <None Update="ModelB-NoShadeSolarSimulation.sam" CopyToOutputDirectory="PreserveNewest" />
-    <None Update="ModelA-WithShade.sam" CopyToOutputDirectory="PreserveNewest" />
-    <None Update="ModelB-WithShadeSolarSimulation.sam" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\*.sam" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

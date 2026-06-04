@@ -83,7 +83,12 @@ jobs:
             # Current sow branch: base_ref on PR events, ref_name on push events.
             $sowRef = if ($baseRef -match '^sow/') { $baseRef } elseif ($refName -match '^sow/') { $refName } else { '' }
             if ($sowRef -and $sowRef -ne $headRef) { $candidates += $sowRef }
-            $candidates += 'sow/2026-Q2'
+            # Quarterly integration fallback — but NOT when building the default branch directly (a plain
+            # push to master/main with no PR head). There, dependencies must come from their own default
+            # branch, not from quarterly code, otherwise master CI silently builds against sow/** and masks
+            # integration/branch-skew issues.
+            $isDefaultBranchBuild = (-not $headRef) -and ($refName -eq 'master' -or $refName -eq 'main')
+            if (-not $isDefaultBranchBuild) { $candidates += 'sow/2026-Q2' }
             $cloned = $false
             foreach ($cand in $candidates) {
               $has = (git ls-remote --heads "https://github.com/$org/$r.git" $cand 2>$null | Out-String).Trim()

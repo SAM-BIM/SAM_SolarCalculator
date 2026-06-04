@@ -92,6 +92,10 @@ namespace SAM.Analytical.SolarCalculator
 
                             // Glazing pane(s) — matches the TAS inset glazing surface. Fresh Guids so each
                             // pane is a distinct coverage surface (the aperture Guid is used by the opening).
+                            // The owning aperture.Guid is stamped as the LinkedFace3D reference so the
+                            // pane's coverage result can be routed back to its Aperture as a "… -pane"
+                            // result (see Modify.Simulate_Coverage); reference is metadata only — geometry
+                            // and the fresh Guid are unchanged, so the TAS 1:1 benchmark is unaffected.
                             List<Face3D> paneFace3Ds = aperture.GetPaneFace3Ds();
                             if (paneFace3Ds != null)
                             {
@@ -102,7 +106,7 @@ namespace SAM.Analytical.SolarCalculator
                                         continue;
                                     }
 
-                                    result.Add(new LinkedFace3D(System.Guid.NewGuid(), paneFace3D));
+                                    result.Add(new LinkedFace3D(System.Guid.NewGuid(), paneFace3D, aperture.Guid.ToString()));
                                 }
                             }
                         }

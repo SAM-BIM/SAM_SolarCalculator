@@ -264,23 +264,48 @@ namespace SAM.Weather.SolarCalculator
         {
             foreach (LinkedFace3D linkedFace3D in linkedFace3Ds)
             {
-                if (!dictionary_SunExposure.TryGetValue(linkedFace3D.Guid, out List<Tuple<DateTime, Radiation, List<Face3D>>> sunExposure) || sunExposure == null || sunExposure.Count == 0)
+                dictionary_SunExposure.TryGetValue(linkedFace3D.Guid, out List<Tuple<DateTime, Radiation, List<Face3D>>> sunExposure);
+
+                // Build the coverage series over EVERY valid timestep: the lit entry where the face is
+                // exposed, and an explicit zero-coverage entry where it is fully shaded. This keeps the
+                // per-face DateTime grid complete and consistent with TAS — without it, a face that
+                // alternates lit/shaded would record only its lit timesteps, leaving the shaded ones as
+                // gaps (NaN) that CompareSolarCoverage then skips, biasing the comparison. Handles all
+                // cases uniformly: fully shaded (all zero), partially shaded (mix), fully lit (all lit).
+                List<Tuple<DateTime, Radiation, List<Face3D>>> exposure;
+                if (allValidDateTimes != null && allValidDateTimes.Count > 0)
                 {
-                    // Emit a zero-coverage result for fully shaded faces so the per-face
-                    // DateTime grid is consistent with TAS-imported data for comparison.
-                    if (allValidDateTimes != null && allValidDateTimes.Count > 0)
+                    Dictionary<DateTime, Tuple<DateTime, Radiation, List<Face3D>>> litByDateTime = new Dictionary<DateTime, Tuple<DateTime, Radiation, List<Face3D>>>();
+                    if (sunExposure != null)
                     {
-                        List<Tuple<DateTime, Radiation, List<Face3D>>> zeroExposure = allValidDateTimes.ConvertAll(dt => Tuple.Create(dt, (Radiation)null, (List<Face3D>)null));
-                        SolarCoverageSimulationResult zeroCoverage = Geometry.SolarCalculator.Create.SolarCoverageSimulationResult(linkedFace3D, zeroExposure);
-                        if (zeroCoverage != null)
+                        foreach (Tuple<DateTime, Radiation, List<Face3D>> entry in sunExposure)
                         {
-                            solarModel.Add(zeroCoverage, linkedFace3D.Guid);
+                            if (entry != null && !litByDateTime.ContainsKey(entry.Item1))
+                            {
+                                litByDateTime[entry.Item1] = entry;
+                            }
                         }
                     }
-                    continue;
+
+                    exposure = new List<Tuple<DateTime, Radiation, List<Face3D>>>(allValidDateTimes.Count);
+                    foreach (DateTime dateTime in allValidDateTimes)
+                    {
+                        exposure.Add(litByDateTime.TryGetValue(dateTime, out Tuple<DateTime, Radiation, List<Face3D>> lit)
+                            ? lit
+                            : Tuple.Create(dateTime, (Radiation)null, (List<Face3D>)null));
+                    }
+                }
+                else
+                {
+                    // No valid-timestep grid supplied — fall back to the lit entries only (legacy behaviour).
+                    if (sunExposure == null || sunExposure.Count == 0)
+                    {
+                        continue;
+                    }
+                    exposure = sunExposure;
                 }
 
-                SolarCoverageSimulationResult solarCoverageSimulationResult = Geometry.SolarCalculator.Create.SolarCoverageSimulationResult(linkedFace3D, sunExposure);
+                SolarCoverageSimulationResult solarCoverageSimulationResult = Geometry.SolarCalculator.Create.SolarCoverageSimulationResult(linkedFace3D, exposure);
                 if (solarCoverageSimulationResult == null)
                 {
                     continue;
@@ -616,6 +641,18 @@ namespace SAM.Weather.SolarCalculator
                 return null;
             }
 
+            // Which merged faces are front-facing (can receive sun) for this sun direction. A sample cell
+            // is lit only when its ray first hits its OWN merged face AND that face is front-facing; a hit
+            // on a back-facing face (kept as an occluder) means the cell is shaded, not lit.
+            HashSet<Guid> solarCandidateGuids = new HashSet<Guid>();
+            foreach (ProjectedFace projectedFace in projectedFaces)
+            {
+                if (projectedFace?.IsSolarCandidate == true && projectedFace.LinkedFace3D != null)
+                {
+                    solarCandidateGuids.Add(projectedFace.LinkedFace3D.Guid);
+                }
+            }
+
             STRtree<int> index = new STRtree<int>();
             for (int i = 0; i < projectedFaces.Count; i++)
             {
@@ -694,7 +731,7 @@ namespace SAM.Weather.SolarCalculator
                     continue;
                 }
 
-                if (tuples_Intersection[0].Item1.Guid == sampleCell.MergedGuid)
+                if (tuples_Intersection[0].Item1.Guid == sampleCell.MergedGuid && solarCandidateGuids.Contains(sampleCell.MergedGuid))
                 {
                     result.Add(new LinkedFace3D(sampleCell.Guid, sampleCell.Face3D));
                 }
@@ -737,10 +774,16 @@ namespace SAM.Weather.SolarCalculator
             foreach (LinkedFace3D linkedFace3D in linkedFace3Ds)
             {
                 Face3D face3D = linkedFace3D?.Face3D;
-                if (face3D == null || !IsSolarCandidate(face3D, sunDirection, tolerance_Angle, tolerance_Distance))
+                if (face3D == null)
                 {
                     continue;
                 }
+
+                // Include EVERY face as a ray-cast candidate — occlusion is geometric and independent of
+                // orientation, so a back-facing wall/shade must still be able to block the ray. The
+                // orientation test only decides whether the HIT face can itself RECEIVE sun (front-facing),
+                // which is recorded on the ProjectedFace and checked when a sample cell hits its own face.
+                bool isSolarCandidate = IsSolarCandidate(face3D, sunDirection, tolerance_Angle, tolerance_Distance);
 
                 Face3D face3D_Project = plane.Project(face3D, vector3D, tolerance_Distance);
                 if (face3D_Project == null || !face3D_Project.IsValid())
@@ -760,7 +803,7 @@ namespace SAM.Weather.SolarCalculator
                     continue;
                 }
 
-                result.Add(new ProjectedFace(linkedFace3D, face2D, boundingBox2D));
+                result.Add(new ProjectedFace(linkedFace3D, face2D, boundingBox2D, isSolarCandidate));
             }
 
             return result;
@@ -855,12 +898,10 @@ namespace SAM.Weather.SolarCalculator
                         continue;
                     }
 
-                    Geometry.Planar.Point2D point2D_Centre = new Geometry.Planar.Point2D(x + (0.5 * width), y + (0.5 * height));
-                    if (!face2D.Inside(point2D_Centre, tolerance_Distance) && !face2D.On(point2D_Centre, tolerance_Distance))
-                    {
-                        continue;
-                    }
-
+                    // Do NOT reject the cell by whether its centre is inside the face: for concave or
+                    // triangular faces a cell can overlap the face (area above tolerance) while its centre
+                    // lies outside. Let the clipping below decide — cells that don't overlap produce an
+                    // empty intersection and are dropped, so no valid sunlit area is lost.
                     Geometry.Planar.Rectangle2D rectangle2D = new Geometry.Planar.Rectangle2D(new Geometry.Planar.Point2D(x, y), width, height);
                     Geometry.Planar.Face2D face2D_Cell = rectangle2D;
 
@@ -979,11 +1020,12 @@ namespace SAM.Weather.SolarCalculator
 
         private class ProjectedFace
         {
-            public ProjectedFace(LinkedFace3D linkedFace3D, Geometry.Planar.Face2D face2D, Geometry.Planar.BoundingBox2D boundingBox2D)
+            public ProjectedFace(LinkedFace3D linkedFace3D, Geometry.Planar.Face2D face2D, Geometry.Planar.BoundingBox2D boundingBox2D, bool isSolarCandidate)
             {
                 LinkedFace3D = linkedFace3D;
                 Face2D = face2D;
                 BoundingBox2D = boundingBox2D;
+                IsSolarCandidate = isSolarCandidate;
             }
 
             public LinkedFace3D LinkedFace3D { get; }
@@ -991,6 +1033,10 @@ namespace SAM.Weather.SolarCalculator
             public Geometry.Planar.Face2D Face2D { get; }
 
             public Geometry.Planar.BoundingBox2D BoundingBox2D { get; }
+
+            // True when this face is oriented to receive direct sun (front-facing). Occluders are kept
+            // regardless of orientation; only a HIT on a front-facing face counts the sample cell as lit.
+            public bool IsSolarCandidate { get; }
         }
 
         private class SampleCell

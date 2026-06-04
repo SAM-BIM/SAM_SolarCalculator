@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Xunit;
+using Xunit.Abstractions;
 using SAM.Core;
 using SAM.Analytical;
 using SAM.Analytical.SolarCalculator;
@@ -42,9 +43,13 @@ namespace SAM.SolarCalculator.Tests
             new DateTime(2018, 6, 21, 15, 0, 0),
         };
 
+        // Test fixtures live under SAM_SolarCalculator.Tests/Fixtures/ and are copied (preserving that
+        // subfolder) next to the test assembly via the csproj's Fixtures\*.sam copy rule.
+        private static readonly string FixturesDirectory = Path.Combine(AppContext.BaseDirectory, "Fixtures");
+
         private static AnalyticalModel Load(string fileName)
         {
-            string path = Path.Combine(AppContext.BaseDirectory, fileName);
+            string path = Path.Combine(FixturesDirectory, fileName);
             Assert.True(File.Exists(path), $"Test fixture missing: {path}");
 
             List<AnalyticalModel> analyticalModels = SAM.Core.Convert.ToSAM<AnalyticalModel>(path);
@@ -198,6 +203,37 @@ namespace SAM.SolarCalculator.Tests
             Assert.Equal(ExpectedSurfaces_A, results.Count);
         }
 
+        [Fact]
+        public void Simulate_Coverage_attaches_pane_and_frame_results_to_apertures()
+        {
+            // ModelB-SolarSimulation.sam is a SAM (non-TAS-import) model whose apertures are NOT
+            // registered as top-level cluster objects, so it exercises the robust register-then-relate
+            // overload — not merely apertures that happened to be pre-registered by a TAS import.
+            AnalyticalModel analyticalModel = Load("ModelB-SolarSimulation.sam");
+            Assert.Equal(ExpectedApertures, analyticalModel.GetApertures().Count);
+
+            List<SolarCoverageSimulationResult> results = analyticalModel.Simulate_Coverage(SampleDateTimes);
+            Assert.NotNull(results);
+            Assert.Equal(ExpectedSurfaces_A, results.Count); // 8 panels + 14 openings + 14 panes
+
+            // Every aperture now carries a "… -pane" AND a "… -frame" coverage result, related back to
+            // the Aperture object (previously these fell through to Guid.Empty and were orphaned). The
+            // "-pane"/"-frame" names match the TAS-import convention that UpdateShading reads.
+            int paneApertures = 0;
+            int frameApertures = 0;
+            foreach (Aperture aperture in analyticalModel.GetApertures())
+            {
+                List<SolarCoverageSimulationResult> apertureResults = analyticalModel.GetResults<SolarCoverageSimulationResult>(aperture);
+                Assert.NotNull(apertureResults);
+
+                if (apertureResults.Any(x => x?.Name != null && x.Name.EndsWith("-pane"))) paneApertures++;
+                if (apertureResults.Any(x => x?.Name != null && x.Name.EndsWith("-frame"))) frameApertures++;
+            }
+
+            Assert.Equal(ExpectedApertures, paneApertures);
+            Assert.Equal(ExpectedApertures, frameApertures);
+        }
+
         // ---- With-Shade engine benchmark (matched shading on both sides) -------------------------------
         // ModelA-WithShade.sam            = FromTBD(_importSurfaceShades_=true) -> TAS, 36 surfaces, source TAS, at origin.
         // ModelB-WithShadeSolarSimulation = FromTBD(false) -> SolarSimulation -> SAM, 64 surfaces (8 + 28 windows
@@ -331,6 +367,239 @@ namespace SAM.SolarCalculator.Tests
                 if (p.X < minX) minX = p.X; if (p.Y < minY) minY = p.Y; if (p.Z < minZ) minZ = p.Z;
             }
             return new double[] { minX, minY, minZ };
+        }
+
+        // ---- Option-2 (via-TBD) round-trip regression ---------------------------------------------------
+        // ModelB-SAMToTasFromTas.sam = ModelB SolarSimulation -> SAMAnalytical.TBD (ToTBD) -> SAMAnalytical.FromTBD,
+        // compared against the TAS benchmark ModelA-Tas. This path used to read back one hour EARLY (the
+        // entire ~0.106 CompareSolarCoverage gap); the SAM_Tas shade-slot fix (write hour H at slot H, not
+        // H-1) brought it to ~0.016, matching the direct path. The test breaks the per-pair delta down by
+        // surface area-class (wall > 5 / pane 0.5..5 / ring < 0.5) and asserts the round-trip stays healthy
+        // (< 0.02). No-op only if the fixture is absent.
+
+        private readonly ITestOutputHelper output;
+
+        public CompareSolarCoverageTests(ITestOutputHelper output)
+        {
+            this.output = output;
+        }
+
+        private static string AreaClass(double area)
+        {
+            if (area < 0.5) return "ring";
+            if (area <= 5.0) return "pane";
+            return "wall";
+        }
+
+        // (internalPoint, area, coverage result) for every coverage-bearing surface in the SolarModel.
+        private static List<Tuple<Point3D, double, SolarCoverageSimulationResult>> AreaPairs(SolarModel solarModel)
+        {
+            Dictionary<string, SolarCoverageSimulationResult> byReference = new Dictionary<string, SolarCoverageSimulationResult>();
+            foreach (SolarCoverageSimulationResult r in solarModel.SolarCoverageSimulationResults ?? new List<SolarCoverageSimulationResult>())
+            {
+                if (r?.Reference != null) byReference[r.Reference] = r;
+            }
+
+            List<Tuple<Point3D, double, SolarCoverageSimulationResult>> result = new List<Tuple<Point3D, double, SolarCoverageSimulationResult>>();
+            foreach (LinkedFace3D lf in solarModel.GetLinkedFace3Ds() ?? new List<LinkedFace3D>())
+            {
+                if (lf?.Face3D == null) continue;
+                if (!byReference.TryGetValue(lf.Guid.ToString(), out SolarCoverageSimulationResult r)) continue;
+                Point3D p = lf.Face3D.InternalPoint3D();
+                if (p == null) continue;
+                result.Add(Tuple.Create(p, lf.Face3D.GetArea(), r));
+            }
+            return result;
+        }
+
+        [Fact]
+        public void ViaTBD_roundtrip_delta_breakdown_by_surface_class()
+        {
+            string pathB = Path.Combine(FixturesDirectory, "ModelB-SAMToTasFromTas.sam");
+            if (!File.Exists(pathB))
+            {
+                output.WriteLine("SKIP: ModelB-SAMToTasFromTas.sam not present yet — export the option-2 FromTBD output into the test folder.");
+                return;
+            }
+
+            SolarModel smA = GetSolarModel(Load("ModelA-Tas.sam"));
+            SolarModel smB = GetSolarModel(Load("ModelB-SAMToTasFromTas.sam"));
+            Assert.NotNull(smA);
+            Assert.NotNull(smB);
+
+            List<Tuple<Point3D, double, SolarCoverageSimulationResult>> pairsA = AreaPairs(smA);
+            List<Tuple<Point3D, double, SolarCoverageSimulationResult>> pairsB = AreaPairs(smB);
+            output.WriteLine($"A surfaces={pairsA.Count}  B surfaces={pairsB.Count}");
+
+            // Align B onto A by the min corner (pure translation, as the node does).
+            double[] bbA = BBoxMin(pairsA.Select(x => x.Item1));
+            double[] bbB = BBoxMin(pairsB.Select(x => x.Item1));
+            double dx = bbA[0] - bbB[0], dy = bbA[1] - bbB[1], dz = bbA[2] - bbB[2];
+
+            const double tolerance = 0.5;
+            HashSet<int> usedB = new HashSet<int>();
+
+            // Per area-class accumulators: sum of |delta| and overlapping-hour count.
+            Dictionary<string, double> sumAbsByClass = new Dictionary<string, double> { ["wall"] = 0, ["pane"] = 0, ["ring"] = 0 };
+            Dictionary<string, int> hoursByClass = new Dictionary<string, int> { ["wall"] = 0, ["pane"] = 0, ["ring"] = 0 };
+            Dictionary<string, int> pairsByClass = new Dictionary<string, int> { ["wall"] = 0, ["pane"] = 0, ["ring"] = 0 };
+
+            double sumAbsAll = 0; int hoursAll = 0; int matched = 0;
+
+            foreach (Tuple<Point3D, double, SolarCoverageSimulationResult> pa in pairsA)
+            {
+                int best = -1; double bestDist = double.MaxValue;
+                for (int j = 0; j < pairsB.Count; j++)
+                {
+                    if (usedB.Contains(j)) continue;
+                    Point3D pb = pairsB[j].Item1;
+                    double d = pa.Item1.Distance(new Point3D(pb.X + dx, pb.Y + dy, pb.Z + dz));
+                    if (d <= tolerance && d < bestDist) { bestDist = d; best = j; }
+                }
+                if (best == -1) continue;
+                usedB.Add(best);
+                matched++;
+
+                // Classify by the larger of the two areas so a ring paired to a ring counts as "ring".
+                string cls = AreaClass(Math.Max(pa.Item2, pairsB[best].Item2));
+
+                Dictionary<HourKey, double> mapA = HourMap(pa.Item3);
+                Dictionary<HourKey, double> mapB = HourMap(pairsB[best].Item3);
+                double pairSumAbs = 0; int pairHours = 0;
+                foreach (KeyValuePair<HourKey, double> e in mapA)
+                {
+                    if (!mapB.TryGetValue(e.Key, out double vB)) continue;
+                    double ad = Math.Abs(vB - e.Value);
+                    pairSumAbs += ad; pairHours++;
+                }
+
+                sumAbsByClass[cls] += pairSumAbs; hoursByClass[cls] += pairHours; pairsByClass[cls]++;
+                sumAbsAll += pairSumAbs; hoursAll += pairHours;
+
+                double pairMean = pairHours == 0 ? double.NaN : pairSumAbs / pairHours;
+                output.WriteLine($"  [{cls}] areaA={pa.Item2:0.###} areaB={pairsB[best].Item2:0.###} centroid={pa.Item1} hours={pairHours} meanAbs={pairMean:0.0000}");
+            }
+
+            output.WriteLine("--- Per area-class ---");
+            foreach (string cls in new[] { "wall", "pane", "ring" })
+            {
+                double mean = hoursByClass[cls] == 0 ? double.NaN : sumAbsByClass[cls] / hoursByClass[cls];
+                output.WriteLine($"  {cls}: pairs={pairsByClass[cls]} hours={hoursByClass[cls]} meanAbsDelta={mean:0.0000}");
+            }
+            double overall = hoursAll == 0 ? double.NaN : sumAbsAll / hoursAll;
+            output.WriteLine($"overall meanAbsDelta={overall:0.0000}  matched={matched}");
+
+            Assert.Equal(36, matched);
+            // After the SAM_Tas shade-slot fix (write hour H at slot H, not H-1) the via-TBD round-trip
+            // matches the TAS benchmark to ~0.016 — the same quality as the direct path. Guard against a
+            // regression of the 1-hour offset, which drove this to ~0.106.
+            Assert.True(overall < 0.02, $"via-TBD round-trip regressed: overall meanAbsDelta {overall:0.0000} (expected < 0.02 after the hour-slot fix)");
+        }
+
+        // Linear hour index with the year forced to a common non-leap value, so A and B align on
+        // (month, day, hour) regardless of their stored years. Shiftable by whole hours.
+        private static Dictionary<int, double> LinearHourMap(SolarCoverageSimulationResult r)
+        {
+            Dictionary<int, double> result = new Dictionary<int, double>();
+            if (r?.Coverage == null) return result;
+            foreach (Tuple<DateTime, double> t in r.Coverage)
+            {
+                if (t == null || double.IsNaN(t.Item2)) continue;
+                DateTime dt = t.Item1;
+                int doy = new DateTime(2001, dt.Month, dt.Day).DayOfYear;
+                int key = doy * 24 + dt.Hour;
+                if (!result.ContainsKey(key)) result[key] = t.Item2;
+            }
+            return result;
+        }
+
+        // This probe localised the original ~0.106 gap: before the SAM_Tas fix the delta minimised at a
+        // B shift of -1 hour (B[h] == A[h+1]) — the via-TBD coverage landed one hour EARLY vs TAS, the
+        // entire gap (not geometry/rings/storage). Root cause: WriteImportedCoverageShades wrote hour H to
+        // slot H-1, which reads back at H-1 through FromTBD's read-write open. Fixed by writing at slot H;
+        // the delta now minimises at shift 0 (asserted below).
+        [Fact]
+        public void ViaTBD_hour_shift_probe()
+        {
+            string pathB = Path.Combine(FixturesDirectory, "ModelB-SAMToTasFromTas.sam");
+            if (!File.Exists(pathB))
+            {
+                output.WriteLine("SKIP: ModelB-SAMToTasFromTas.sam not present yet.");
+                return;
+            }
+
+            SolarModel smA = GetSolarModel(Load("ModelA-Tas.sam"));
+            SolarModel smB = GetSolarModel(Load("ModelB-SAMToTasFromTas.sam"));
+            Assert.NotNull(smA);
+            Assert.NotNull(smB);
+
+            List<Tuple<Point3D, double, SolarCoverageSimulationResult>> pairsA = AreaPairs(smA);
+            List<Tuple<Point3D, double, SolarCoverageSimulationResult>> pairsB = AreaPairs(smB);
+
+            double[] bbA = BBoxMin(pairsA.Select(x => x.Item1));
+            double[] bbB = BBoxMin(pairsB.Select(x => x.Item1));
+            double dx = bbA[0] - bbB[0], dy = bbA[1] - bbB[1], dz = bbA[2] - bbB[2];
+
+            // Match A->B once, then score the whole set under several whole-hour shifts of B.
+            const double tol = 0.5;
+            HashSet<int> usedB = new HashSet<int>();
+            List<Tuple<Dictionary<int, double>, Dictionary<int, double>>> matchedMaps = new List<Tuple<Dictionary<int, double>, Dictionary<int, double>>>();
+            foreach (Tuple<Point3D, double, SolarCoverageSimulationResult> pa in pairsA)
+            {
+                int best = -1; double bestDist = double.MaxValue;
+                for (int j = 0; j < pairsB.Count; j++)
+                {
+                    if (usedB.Contains(j)) continue;
+                    Point3D pb = pairsB[j].Item1;
+                    double d = pa.Item1.Distance(new Point3D(pb.X + dx, pb.Y + dy, pb.Z + dz));
+                    if (d <= tol && d < bestDist) { bestDist = d; best = j; }
+                }
+                if (best == -1) continue;
+                usedB.Add(best);
+                matchedMaps.Add(Tuple.Create(LinearHourMap(pa.Item3), LinearHourMap(pairsB[best].Item3)));
+            }
+
+            output.WriteLine($"matched pairs={matchedMaps.Count}");
+            output.WriteLine("shift(h) | overlap | overallMeanAbsDelta");
+            Dictionary<int, double> deltaByShift = new Dictionary<int, double>();
+            for (int shift = -3; shift <= 3; shift++)
+            {
+                double sumAbs = 0; int hours = 0;
+                foreach (var mm in matchedMaps)
+                {
+                    foreach (KeyValuePair<int, double> e in mm.Item1)
+                    {
+                        if (!mm.Item2.TryGetValue(e.Key + shift, out double vB)) continue;
+                        sumAbs += Math.Abs(vB - e.Value); hours++;
+                    }
+                }
+                double mean = hours == 0 ? double.NaN : sumAbs / hours;
+                deltaByShift[shift] = mean;
+                output.WriteLine($"  {shift,2}     | {hours,6} | {mean:0.0000}");
+            }
+
+            // Raw series for the first matched surface around midday on day-of-year 181 — shows whether
+            // B[h] == A[h-1] (a clean integer index shift) or a smear.
+            if (matchedMaps.Count > 0)
+            {
+                Dictionary<int, double> a = matchedMaps[0].Item1;
+                Dictionary<int, double> b = matchedMaps[0].Item2;
+                output.WriteLine("doy181 hour | A | B | A[h-1]");
+                for (int h = 5; h <= 20; h++)
+                {
+                    int key = 181 * 24 + h;
+                    string av = a.TryGetValue(key, out double va) ? va.ToString("0.000") : "  -  ";
+                    string bv = b.TryGetValue(key, out double vb) ? vb.ToString("0.000") : "  -  ";
+                    string aPrev = a.TryGetValue(key - 1, out double vap) ? vap.ToString("0.000") : "  -  ";
+                    output.WriteLine($"  {h,2} | {av} | {bv} | {aPrev}");
+                }
+            }
+
+            Assert.NotEmpty(matchedMaps);
+            // The hours align 1:1 with TAS, so no whole-hour shift should beat the unshifted score.
+            // (Before the SAM_Tas shade-slot fix the minimum was at -1h; this guards the fix.)
+            Assert.True(deltaByShift[0] < deltaByShift[-1] && deltaByShift[0] < deltaByShift[1],
+                $"via-TBD coverage is hour-shifted vs TAS: delta(0)={deltaByShift[0]:0.0000} should be below delta(-1)={deltaByShift[-1]:0.0000} and delta(+1)={deltaByShift[1]:0.0000}");
         }
     }
 }
