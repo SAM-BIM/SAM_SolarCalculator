@@ -413,15 +413,15 @@ namespace SAM.SolarCalculator.Tests
         [Fact]
         public void ViaTBD_roundtrip_delta_breakdown_by_surface_class()
         {
-            string pathB = Path.Combine(AppContext.BaseDirectory, "ModelB-WithShadeViaTBD.sam");
+            string pathB = Path.Combine(AppContext.BaseDirectory, "ModelB-SAMToTasFromTas.sam");
             if (!File.Exists(pathB))
             {
-                output.WriteLine("SKIP: ModelB-WithShadeViaTBD.sam not present yet — export the option-2 FromTBD output into the test folder.");
+                output.WriteLine("SKIP: ModelB-SAMToTasFromTas.sam not present yet — export the option-2 FromTBD output into the test folder.");
                 return;
             }
 
-            SolarModel smA = GetSolarModel(Load("ModelA-WithShade.sam"));
-            SolarModel smB = GetSolarModel(Load("ModelB-WithShadeViaTBD.sam"));
+            SolarModel smA = GetSolarModel(Load("ModelA-Tas.sam"));
+            SolarModel smB = GetSolarModel(Load("ModelB-SAMToTasFromTas.sam"));
             Assert.NotNull(smA);
             Assert.NotNull(smB);
 
@@ -488,6 +488,107 @@ namespace SAM.SolarCalculator.Tests
             output.WriteLine($"overall meanAbsDelta={overall:0.0000}  matched={matched}");
 
             Assert.True(matched > 0, "expected at least one matched A/B pair");
+        }
+
+        // Linear hour index with the year forced to a common non-leap value, so A and B align on
+        // (month, day, hour) regardless of their stored years. Shiftable by whole hours.
+        private static Dictionary<int, double> LinearHourMap(SolarCoverageSimulationResult r)
+        {
+            Dictionary<int, double> result = new Dictionary<int, double>();
+            if (r?.Coverage == null) return result;
+            foreach (Tuple<DateTime, double> t in r.Coverage)
+            {
+                if (t == null || double.IsNaN(t.Item2)) continue;
+                DateTime dt = t.Item1;
+                int doy = new DateTime(2001, dt.Month, dt.Day).DayOfYear;
+                int key = doy * 24 + dt.Hour;
+                if (!result.ContainsKey(key)) result[key] = t.Item2;
+            }
+            return result;
+        }
+
+        // FINDING (ModelB-SAMToTasFromTas): the delta minimises at a B shift of -1 hour (0.0164, == the
+        // direct-path quality), and the raw series shows B[h] == A[h+1] — i.e. the SAM->ToTBD->FromTBD
+        // coverage lands one hour EARLY vs the TAS-native benchmark. That 1-hour offset is the entire
+        // ~0.106 gap (not geometry/rings/storage). Root cause is an hour-index off-by-one in the SAM
+        // shade write/read path (UpdateShading/WriteImportedCoverageShades 'Hour-1' vs Create.SolarModel
+        // 'AddHours(1..24)') surfacing through the full save/reopen — to be fixed in SAM_Tas.
+        [Fact]
+        public void ViaTBD_hour_shift_probe()
+        {
+            string pathB = Path.Combine(AppContext.BaseDirectory, "ModelB-SAMToTasFromTas.sam");
+            if (!File.Exists(pathB))
+            {
+                output.WriteLine("SKIP: ModelB-SAMToTasFromTas.sam not present yet.");
+                return;
+            }
+
+            SolarModel smA = GetSolarModel(Load("ModelA-Tas.sam"));
+            SolarModel smB = GetSolarModel(Load("ModelB-SAMToTasFromTas.sam"));
+            Assert.NotNull(smA);
+            Assert.NotNull(smB);
+
+            List<Tuple<Point3D, double, SolarCoverageSimulationResult>> pairsA = AreaPairs(smA);
+            List<Tuple<Point3D, double, SolarCoverageSimulationResult>> pairsB = AreaPairs(smB);
+
+            double[] bbA = BBoxMin(pairsA.Select(x => x.Item1));
+            double[] bbB = BBoxMin(pairsB.Select(x => x.Item1));
+            double dx = bbA[0] - bbB[0], dy = bbA[1] - bbB[1], dz = bbA[2] - bbB[2];
+
+            // Match A->B once, then score the whole set under several whole-hour shifts of B.
+            const double tol = 0.5;
+            HashSet<int> usedB = new HashSet<int>();
+            List<Tuple<Dictionary<int, double>, Dictionary<int, double>>> matchedMaps = new List<Tuple<Dictionary<int, double>, Dictionary<int, double>>>();
+            foreach (Tuple<Point3D, double, SolarCoverageSimulationResult> pa in pairsA)
+            {
+                int best = -1; double bestDist = double.MaxValue;
+                for (int j = 0; j < pairsB.Count; j++)
+                {
+                    if (usedB.Contains(j)) continue;
+                    Point3D pb = pairsB[j].Item1;
+                    double d = pa.Item1.Distance(new Point3D(pb.X + dx, pb.Y + dy, pb.Z + dz));
+                    if (d <= tol && d < bestDist) { bestDist = d; best = j; }
+                }
+                if (best == -1) continue;
+                usedB.Add(best);
+                matchedMaps.Add(Tuple.Create(LinearHourMap(pa.Item3), LinearHourMap(pairsB[best].Item3)));
+            }
+
+            output.WriteLine($"matched pairs={matchedMaps.Count}");
+            output.WriteLine("shift(h) | overlap | overallMeanAbsDelta");
+            for (int shift = -3; shift <= 3; shift++)
+            {
+                double sumAbs = 0; int hours = 0;
+                foreach (var mm in matchedMaps)
+                {
+                    foreach (KeyValuePair<int, double> e in mm.Item1)
+                    {
+                        if (!mm.Item2.TryGetValue(e.Key + shift, out double vB)) continue;
+                        sumAbs += Math.Abs(vB - e.Value); hours++;
+                    }
+                }
+                double mean = hours == 0 ? double.NaN : sumAbs / hours;
+                output.WriteLine($"  {shift,2}     | {hours,6} | {mean:0.0000}");
+            }
+
+            // Raw series for the first matched surface around midday on day-of-year 181 — shows whether
+            // B[h] == A[h-1] (a clean integer index shift) or a smear.
+            if (matchedMaps.Count > 0)
+            {
+                Dictionary<int, double> a = matchedMaps[0].Item1;
+                Dictionary<int, double> b = matchedMaps[0].Item2;
+                output.WriteLine("doy181 hour | A | B | A[h-1]");
+                for (int h = 5; h <= 20; h++)
+                {
+                    int key = 181 * 24 + h;
+                    string av = a.TryGetValue(key, out double va) ? va.ToString("0.000") : "  -  ";
+                    string bv = b.TryGetValue(key, out double vb) ? vb.ToString("0.000") : "  -  ";
+                    string aPrev = a.TryGetValue(key - 1, out double vap) ? vap.ToString("0.000") : "  -  ";
+                    output.WriteLine($"  {h,2} | {av} | {bv} | {aPrev}");
+                }
+            }
+
+            Assert.NotEmpty(matchedMaps);
         }
     }
 }
