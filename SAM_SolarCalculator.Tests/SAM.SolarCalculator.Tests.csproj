@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+  <!-- SolarCalculator libraries under test (transitively copy the prebuilt SAM core DLLs to output). -->
+  <ItemGroup>
+    <ProjectReference Include="..\SAM_SolarCalculator\SAM.Core.SolarCalculator\SAM.Core.SolarCalculator.csproj" />
+    <ProjectReference Include="..\SAM_SolarCalculator\SAM.Geometry.SolarCalculator\SAM.Geometry.SolarCalculator.csproj" />
+    <ProjectReference Include="..\SAM_SolarCalculator\SAM.Weather.SolarCalculator\SAM.Weather.SolarCalculator.csproj" />
+    <ProjectReference Include="..\SAM_SolarCalculator\SAM.Analytical.SolarCalculator\SAM.Analytical.SolarCalculator.csproj" />
+  </ItemGroup>
+
+  <!-- Prebuilt SAM core assemblies, from the same SAM\build the SolarCalculator libs reference
+       (keeps compile-time and runtime on one assembly version). Copied local so they resolve at runtime. -->
+  <ItemGroup>
+    <Reference Include="SAM.Core">
+      <HintPath>..\..\SAM\build\SAM.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="SAM.Geometry">
+      <HintPath>..\..\SAM\build\SAM.Geometry.dll</HintPath>
+    </Reference>
+    <Reference Include="SAM.Analytical">
+      <HintPath>..\..\SAM\build\SAM.Analytical.dll</HintPath>
+    </Reference>
+    <Reference Include="SAM.Weather">
+      <HintPath>..\..\SAM\build\SAM.Weather.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Real exported AnalyticalModels used as macro-test fixtures, stored in SAM's native
+       compressed .sam (zip) format — ~40x smaller than the raw JSON, loaded via Convert.ToSAM.
+       Kept under Fixtures/ and copied (preserving that subfolder) next to the test assembly. -->
+  <ItemGroup>
+    <None Update="Fixtures\*.sam" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

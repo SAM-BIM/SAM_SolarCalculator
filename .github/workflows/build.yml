@@ -2,9 +2,9 @@ name: Build (Windows)
 
 on:
   push:
-    branches: [ "master", "main" ]
+    branches: [ "master", "main", "sow/**" ]
   pull_request:
-    branches: [ "master", "main" ]
+    branches: [ "master", "main", "sow/**" ]
   workflow_dispatch:
 
 jobs:
@@ -36,6 +36,26 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
+      - name: Compute SAMVersion
+        id: ver
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ref = if ('${{ github.event_name }}' -eq 'pull_request') { '${{ github.base_ref }}' } else { '${{ github.ref_name }}' }
+          # .NET AssemblyVersion components are UInt16 (max 65535). Cap to 60000 for headroom.
+          $run = ${{ github.run_number }} % 60000
+          if ($ref -match 'sow/(\d{4})-Q(\d)') {
+            $v = "$($Matches[1]).$($Matches[2]).$run"
+            $src = "branch '$ref'"
+          } else {
+            $now = (Get-Date).ToUniversalTime()
+            $quarter = [int][Math]::Ceiling($now.Month / 3.0)
+            $v = "$($now.Year).$quarter.$run"
+            $src = "date $($now.ToString('yyyy-MM-dd')) (ref '$ref' not sow/yyyy-Qx)"
+          }
+          Write-Host "SAMVersion = $v (from $src)"
+          "samversion=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - name: Clone dependency repos (siblings)
         shell: pwsh
         run: |
@@ -55,9 +75,36 @@ jobs:
           $deps = $buildOrder[0..($buildOrder.Count-2)]
           foreach ($r in $deps) {
             if (Test-Path $r) { continue }
-            Write-Host "Cloning https://github.com/$org/$r.git"
-            git clone --depth 1 "https://github.com/$org/$r.git" $r
+            $headRef = '${{ github.head_ref }}'
+            $baseRef = '${{ github.base_ref }}'
+            $refName = '${{ github.ref_name }}'
+            $candidates = @()
+            if ($headRef) { $candidates += $headRef }
+            # Current sow branch: base_ref on PR events, ref_name on push events.
+            $sowRef = if ($baseRef -match '^sow/') { $baseRef } elseif ($refName -match '^sow/') { $refName } else { '' }
+            if ($sowRef -and $sowRef -ne $headRef) { $candidates += $sowRef }
+            # Quarterly integration fallback — but NOT when building the default branch directly (a plain
+            # push to master/main with no PR head). There, dependencies must come from their own default
+            # branch, not from quarterly code, otherwise master CI silently builds against sow/** and masks
+            # integration/branch-skew issues.
+            $isDefaultBranchBuild = (-not $headRef) -and ($refName -eq 'master' -or $refName -eq 'main')
+            if (-not $isDefaultBranchBuild) { $candidates += 'sow/2026-Q2' }
+            $cloned = $false
+            foreach ($cand in $candidates) {
+              $has = (git ls-remote --heads "https://github.com/$org/$r.git" $cand 2>$null | Out-String).Trim()
+              if ($has) {
+                Write-Host "Cloning $org/$r @ $cand"
+                git clone --depth 1 --branch $cand "https://github.com/$org/$r.git" $r
+                $cloned = $true
+                break
+              }
+            }
+            if (-not $cloned) {
+              Write-Host "Cloning $org/$r @ default branch"
+              git clone --depth 1 "https://github.com/$org/$r.git" $r
+            }
           }
+
 
           # Ensure ReferencePath exists even before SAM_Windows builds
           New-Item -ItemType Directory -Force -Path "SAM_Windows\build" | Out-Null
@@ -79,6 +126,7 @@ jobs:
             '/p:UseSharedCompilation=false'
             '/p:RunPostBuildEvent=OnOutputUpdated'
             "/p:ReferencePath=$windowsRef"
+            '/p:SAMVersion=${{ steps.ver.outputs.samversion }}'
           )
 
           # If you really want Platform, use QUOTED Any CPU:

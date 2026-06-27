@@ -1,4 +1,6 @@
-﻿using Newtonsoft.Json.Linq;
+﻿// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
+using System.Text.Json.Nodes;
 using SAM.Core;
 using SAM.Core.SolarCalculator;
 
@@ -18,9 +20,9 @@ namespace SAM.Geometry.SolarCalculator
             this.globalHorizontal = globalHorizontal;
         }
 
-        public Radiation(JObject jObject)
+        public Radiation(JsonObject jObject)
         {
-            FromJObject(jObject);
+            FromJsonObject(jObject);
         }
 
         public Radiation(Radiation radiation)
@@ -57,24 +59,24 @@ namespace SAM.Geometry.SolarCalculator
             }
         }
         
-        public bool FromJObject(JObject jObject)
+        public bool FromJsonObject(JsonObject jObject)
         {
             if (jObject == null)
                 return false;
 
             if (jObject.ContainsKey("DirectNormal"))
             {
-                directNormal = jObject.Value<double>("DirectNormal");
+                directNormal = jObject["DirectNormal"]?.GetValue<double>() ?? default(double);
             }
 
             if (jObject.ContainsKey("DiffuseHorizontal"))
             {
-                diffuseHorizontal = jObject.Value<double>("DiffuseHorizontal");
+                diffuseHorizontal = jObject["DiffuseHorizontal"]?.GetValue<double>() ?? default(double);
             }
 
             if (jObject.ContainsKey("GlobalHorizontal"))
             {
-                globalHorizontal = jObject.Value<double>("GlobalHorizontal");
+                globalHorizontal = jObject["GlobalHorizontal"]?.GetValue<double>() ?? default(double);
             }
 
             return true;
@@ -85,9 +87,9 @@ namespace SAM.Geometry.SolarCalculator
             return directNormal + diffuseHorizontal + globalHorizontal; 
         }
         
-        public JObject ToJObject()
+        public JsonObject ToJsonObject()
         {
-            JObject jObject = new JObject();
+            JsonObject jObject = new JsonObject();
             jObject.Add("_type", Core.Query.FullTypeName(this));
 
             if(!double.IsNaN(directNormal))

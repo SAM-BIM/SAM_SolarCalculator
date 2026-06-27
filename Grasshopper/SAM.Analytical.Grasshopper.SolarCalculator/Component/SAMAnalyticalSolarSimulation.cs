@@ -1,4 +1,7 @@
-﻿using Grasshopper.Kernel;
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
+
+using Grasshopper.Kernel;
 using Grasshopper.Kernel.Types;
 using SAM.Analytical.Grasshopper.SolarCalculator.Properties;
 using SAM.Core;
@@ -18,7 +21,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// <summary>
         /// The latest version of this component
         /// </summary>
-        public override string LatestComponentVersion => "1.0.5";
+        public override string LatestComponentVersion => "1.0.8";
 
         /// <summary>
         /// Provides an Icon for the component.
@@ -32,7 +35,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// </summary>
         public SAMAnalyticalSolarSimulation()
           : base("SAMAnalytical.SolarSimulation", "SAMAnalytical.SolarSimulation",
-              "This node tries to replicate shading calculation as per T3D. \nCalculate for each given hour % that is exposed to sun\n*This node take quite long time to complete\n_timeShift_ Is set to  -30min to follow Tas EDSL apporach at 9:00 is calculated at 8:30",
+              "Replicates TAS-style shading calculation in SAM: for each requested hour, computes the fraction of every sun-exposed Panel that is hit by direct sun.\n*This node can take a long time on full-year inputs.*\n\n_timeShift_ defaults to -30 min so the 9:00 sample uses the sun position at 8:30 — same convention as Tas EDSL.\n\nResult mode (controlled by _coverageOnly_):\n  • false (default) — emits SolarFaceSimulationResults (per-timestep lit polygons, supports radiation/area queries downstream).\n  • true             — emits the lighter SolarCoverageSimulationResults (per-timestep lit-area / total-area ratio) and attaches a populated SolarModel to the AnalyticalModel under AnalyticalModelParameter.SolarModel. This is the format directly comparable with TAS-imported shade data — feed both into SAMAnalytical.CompareSolarCoverage to benchmark.",
               "SAM", "Solar")
         {
         }
@@ -69,6 +72,18 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 number.SetPersistentData(SAM.Core.Tolerance.Angle);
                 result.Add(new GH_SAMParam(number, ParamVisibility.Binding));
 
+                number = new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "_sampleSize_", NickName = "_sampleSize_", Description = "Optional shading sample grid size. Use 0 for exact geometry.", Access = GH_ParamAccess.item };
+                number.SetPersistentData(0);
+                result.Add(new GH_SAMParam(number, ParamVisibility.Voluntary));
+
+                global::Grasshopper.Kernel.Parameters.Param_Boolean coverageOnlyBoolean = new global::Grasshopper.Kernel.Parameters.Param_Boolean() { Name = "_coverageOnly_", NickName = "_coverageOnly_", Description = "If true, only SolarCoverageSimulationResults are generated and attached to the AnalyticalModel (lighter result, matches the TAS shade-proportion format).\nIf false, the regular SolarFaceSimulationResults are produced.", Access = GH_ParamAccess.item };
+                coverageOnlyBoolean.SetPersistentData(false);
+                result.Add(new GH_SAMParam(coverageOnlyBoolean, ParamVisibility.Voluntary));
+
+                global::Grasshopper.Kernel.Parameters.Param_Boolean useModelSolarModelBoolean = new global::Grasshopper.Kernel.Parameters.Param_Boolean() { Name = "_useModelSolarModel_", NickName = "_useModelSolarModel_", Description = "Benchmark helper (requires _coverageOnly_ = true). If true, SAM recomputes coverage on the LinkedFace3Ds of the SolarModel ALREADY attached to the input AnalyticalModel (e.g. the surfaces imported by SAMAnalytical.FromTBD with _importSurfaceShades_ = true) instead of deriving its own panel set from the AdjacencyCluster.\nFeed the SAME TAS-imported model into both this node and SAMAnalytical.CompareSolarCoverage so both sides cover an identical 1:1 surface set.", Access = GH_ParamAccess.item };
+                useModelSolarModelBoolean.SetPersistentData(false);
+                result.Add(new GH_SAMParam(useModelSolarModelBoolean, ParamVisibility.Voluntary));
+
                 global::Grasshopper.Kernel.Parameters.Param_Boolean boolean = new global::Grasshopper.Kernel.Parameters.Param_Boolean() { Name = "_run", NickName = "_run", Description = "Run", Access = GH_ParamAccess.item };
                 boolean.SetPersistentData(false);
                 result.Add(new GH_SAMParam(boolean, ParamVisibility.Binding));
@@ -86,7 +101,8 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             {
                 List<GH_SAMParam> result = new List<GH_SAMParam>();
                 result.Add(new GH_SAMParam(new GooAnalyticalModelParam() { Name = "analyticalModel", NickName = "analyticalModel", Description = "SAM Analytical Model", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
-                result.Add(new GH_SAMParam(new GooResultParam() { Name = "solarFaceSimulationResults", NickName = "solarFaceSimulationResults", Description = "SAM Analytical Model", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(new GooResultParam() { Name = "solarFaceSimulationResults", NickName = "solarFaceSimulationResults", Description = "Per-face sunlit polygons per timestep (only when _coverageOnly_ is false)", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(new GooResultParam() { Name = "solarCoverageSimulationResults", NickName = "solarCoverageSimulationResults", Description = "Per-face lit-area / total-area ratio per timestep (only when _coverageOnly_ is true). Apples-to-apples comparable with TAS shade-proportion data.", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
 
                 global::Grasshopper.Kernel.Parameters.Param_Integer integer = new global::Grasshopper.Kernel.Parameters.Param_Integer() { Name = "hoursOfYear", NickName = "hoursOfYear", Description = "Hours Of Year", Access = GH_ParamAccess.list };
                 result.Add(new GH_SAMParam(integer, ParamVisibility.Binding));
@@ -230,16 +246,75 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 }
             }
 
-            analyticalModel = new AnalyticalModel(analyticalModel);
-            List<Geometry.SolarCalculator.SolarFaceSimulationResult> solarFaceSimulationResults = Analytical.SolarCalculator.Modify.Simulate(analyticalModel, dateTimes, minHorizonAngle: minHorizonAngle, tolerance_Angle: tolerance_Angle);
+            index = Params.IndexOfInputParam("_sampleSize_");
+            double sampleSize = double.NaN;
+            if (index != -1)
+            {
+                double sampleSize_Temp = 0;
+                if (dataAccess.GetData(index, ref sampleSize_Temp) && !double.IsNaN(sampleSize_Temp) && sampleSize_Temp > 0)
+                {
+                    sampleSize = sampleSize_Temp;
+                }
+            }
 
-            
+            bool coverageOnly = false;
+            index = Params.IndexOfInputParam("_coverageOnly_");
+            if (index != -1)
+            {
+                bool coverageOnly_Temp = false;
+                if (dataAccess.GetData(index, ref coverageOnly_Temp))
+                {
+                    coverageOnly = coverageOnly_Temp;
+                }
+            }
+
+            bool useModelSolarModel = false;
+            index = Params.IndexOfInputParam("_useModelSolarModel_");
+            if (index != -1)
+            {
+                bool useModelSolarModel_Temp = false;
+                if (dataAccess.GetData(index, ref useModelSolarModel_Temp))
+                {
+                    useModelSolarModel = useModelSolarModel_Temp;
+                }
+            }
+
+            if (useModelSolarModel)
+            {
+                if (!coverageOnly)
+                {
+                    AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, "_useModelSolarModel_ only applies when _coverageOnly_ = true — ignoring it and deriving panels from the AdjacencyCluster as usual.");
+                    useModelSolarModel = false;
+                }
+                else if (analyticalModel.GetValue<Geometry.SolarCalculator.SolarModel>(AnalyticalModelParameter.SolarModel) == null)
+                {
+                    AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "_useModelSolarModel_ = true but the input AnalyticalModel has no SolarModel attached. Import surfaces first (e.g. SAMAnalytical.FromTBD with _importSurfaceShades_ = true).");
+                    return;
+                }
+            }
+
+            analyticalModel = new AnalyticalModel(analyticalModel);
+
+            List<Geometry.SolarCalculator.SolarFaceSimulationResult> solarFaceSimulationResults = null;
+            List<Geometry.SolarCalculator.SolarCoverageSimulationResult> solarCoverageSimulationResults = null;
+            bool successful;
+
+            if (coverageOnly)
+            {
+                solarCoverageSimulationResults = Analytical.SolarCalculator.Modify.Simulate_Coverage(analyticalModel, dateTimes, minHorizonAngle, Core.Tolerance.MacroDistance, Core.Tolerance.MacroDistance, tolerance_Angle, Core.Tolerance.Distance, sampleSize, useModelSolarModel);
+                successful = solarCoverageSimulationResults != null;
+            }
+            else
+            {
+                solarFaceSimulationResults = Analytical.SolarCalculator.Modify.Simulate(analyticalModel, dateTimes, minHorizonAngle: minHorizonAngle, tolerance_Angle: tolerance_Angle, sampleSize: sampleSize);
+                successful = solarFaceSimulationResults != null;
+            }
+
             index = Params.IndexOfOutputParam("hoursOfYear");
             if (index != -1)
             {
                 dataAccess.SetDataList(index, dateTimes?.ConvertAll(x => x.HourOfYear()));
             }
-
 
             index = Params.IndexOfOutputParam("analyticalModel");
             if (index != -1)
@@ -253,9 +328,15 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 dataAccess.SetDataList(index, solarFaceSimulationResults?.ConvertAll(x => new GooResult(x)));
             }
 
+            index = Params.IndexOfOutputParam("solarCoverageSimulationResults");
+            if (index != -1)
+            {
+                dataAccess.SetDataList(index, solarCoverageSimulationResults?.ConvertAll(x => new GooResult(x)));
+            }
+
             if (index_Successful != -1)
             {
-                dataAccess.SetData(index_Successful, solarFaceSimulationResults != null);
+                dataAccess.SetData(index_Successful, successful);
             }
         }
     }

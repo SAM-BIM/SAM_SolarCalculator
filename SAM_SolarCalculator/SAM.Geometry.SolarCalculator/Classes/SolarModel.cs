@@ -1,8 +1,9 @@
-﻿using Newtonsoft.Json.Linq;
+﻿// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
+using System.Text.Json.Nodes;
 using SAM.Core;
 using SAM.Core.SolarCalculator;
 using SAM.Geometry.Object.Spatial;
-using SAM.Geometry.Spatial;
 using System.Collections.Generic;
 
 namespace SAM.Geometry.SolarCalculator
@@ -12,7 +13,7 @@ namespace SAM.Geometry.SolarCalculator
         private Location location;
         private SolarRelationCluster solarRelationCluster;
 
-        public SolarModel(JObject jObject)
+        public SolarModel(JsonObject jObject)
             : base(jObject)
         {
 
@@ -32,6 +33,14 @@ namespace SAM.Geometry.SolarCalculator
             get
             {
                 return location == null ? null : new Location(location);
+            }
+        }
+
+        public List<SolarCoverageSimulationResult> SolarCoverageSimulationResults
+        {
+            get
+            {
+                return solarRelationCluster?.GetObjects<SolarCoverageSimulationResult>()?.ConvertAll(x => x == null ? null : new SolarCoverageSimulationResult(x));
             }
         }
 
@@ -57,7 +66,12 @@ namespace SAM.Geometry.SolarCalculator
 
         public bool Add(SolarFaceSimulationResult solarFaceSimulationResult, System.Guid linkedFace3DGuid)
         {
-            if (solarFaceSimulationResult == null)
+            return Add((ISolarSimulationResult)solarFaceSimulationResult, linkedFace3DGuid);
+        }
+
+        public bool Add(ISolarSimulationResult solarSimulationResult, System.Guid linkedFace3DGuid)
+        {
+            if (solarSimulationResult == null)
             {
                 return false;
             }
@@ -67,7 +81,7 @@ namespace SAM.Geometry.SolarCalculator
                 solarRelationCluster = new SolarRelationCluster();
             }
 
-            bool result = solarRelationCluster.AddObject(solarFaceSimulationResult);
+            bool result = solarRelationCluster.AddObject(solarSimulationResult);
             if (!result)
             {
                 return result;
@@ -78,13 +92,43 @@ namespace SAM.Geometry.SolarCalculator
                 LinkedFace3D linkedFace3D = solarRelationCluster.GetObject<LinkedFace3D>(linkedFace3DGuid);
                 if (linkedFace3D != null)
                 {
-                    solarRelationCluster.AddRelation(solarFaceSimulationResult, linkedFace3D);
+                    solarRelationCluster.AddRelation(solarSimulationResult, linkedFace3D);
                 }
             }
 
             return result;
         }
-        
+
+        public override bool FromJsonObject(JsonObject jObject)
+        {
+            if (!base.FromJsonObject(jObject))
+                return false;
+
+            if (jObject.ContainsKey("Location"))
+                location = new Location(jObject["Location"] as JsonObject);
+
+            if (jObject.ContainsKey("SolarRelationCluster"))
+                solarRelationCluster = new SolarRelationCluster(jObject["SolarRelationCluster"] as JsonObject);
+
+            return true;
+        }
+
+        public LinkedFace3D GetLinkedFace3D(ISolarSimulationResult solarSimulationResult)
+        {
+            if(solarSimulationResult is null || solarRelationCluster is null)
+            {
+                return null;
+            }
+
+            List<LinkedFace3D> linkedFace3Ds = solarRelationCluster.GetRelatedObjects<LinkedFace3D>(solarSimulationResult);
+            if(linkedFace3Ds is null || linkedFace3Ds.Count == 0)
+            {
+                return null;
+            }
+
+            return Core.Query.Clone(linkedFace3Ds.Find(x => x != null));
+        }
+
         public List<LinkedFace3D> GetLinkedFace3Ds()
         {
             return solarRelationCluster?.GetObjects<LinkedFace3D>()?.ConvertAll(x => x == null ? null : new LinkedFace3D(x));
@@ -94,32 +138,55 @@ namespace SAM.Geometry.SolarCalculator
         {
             return solarRelationCluster?.GetObjects<SolarFaceSimulationResult>()?.ConvertAll(x => x == null ? null : new SolarFaceSimulationResult(x));
         }
-
-        public override bool FromJObject(JObject jObject)
+        
+        public List<TSolarSimulationResult> GetSolarSimulationResults<TSolarSimulationResult>() where TSolarSimulationResult : ISolarSimulationResult
         {
-            if (!base.FromJObject(jObject))
-                return false;
+            List<TSolarSimulationResult> originals = solarRelationCluster?.GetObjects<TSolarSimulationResult>();
+            if (originals == null)
+            {
+                return null;
+            }
 
-            if (jObject.ContainsKey("Location"))
-                location = new Location(jObject.Value<JObject>("Location"));
+            // Clone each result via its concrete type's copy constructor — matches the pattern
+            // already used by the typed SolarCoverageSimulationResults / GetSolarFaceSimulationResults
+            // accessors and avoids a reflection-based Core.Query.Clone round-trip.
+            List<TSolarSimulationResult> result = new List<TSolarSimulationResult>(originals.Count);
+            foreach (TSolarSimulationResult original in originals)
+            {
+                if (original == null)
+                {
+                    result.Add(default);
+                    continue;
+                }
 
-            if (jObject.ContainsKey("SolarRelationCluster"))
-                solarRelationCluster = new SolarRelationCluster(jObject.Value<JObject>("SolarRelationCluster"));
-
-            return true;
+                switch (original)
+                {
+                    case SolarCoverageSimulationResult coverageResult:
+                        result.Add((TSolarSimulationResult)(ISolarSimulationResult)new SolarCoverageSimulationResult(coverageResult));
+                        break;
+                    case SolarFaceSimulationResult faceResult:
+                        result.Add((TSolarSimulationResult)(ISolarSimulationResult)new SolarFaceSimulationResult(faceResult));
+                        break;
+                    default:
+                        // Unknown subtype — fall back to reflection-based clone.
+                        result.Add(Core.Query.Clone(original));
+                        break;
+                }
+            }
+            return result;
         }
-
-        public override JObject ToJObject()
+        
+        public override JsonObject ToJsonObject()
         {
-            JObject jObject = base.ToJObject();
+            JsonObject jObject = base.ToJsonObject();
             if (jObject == null)
                 return jObject;
 
             if (location != null)
-                jObject.Add("Location", location.ToJObject());
+                jObject.Add("Location", location.ToJsonObject());
 
             if (solarRelationCluster != null)
-                jObject.Add("SolarRelationCluster", solarRelationCluster.ToJObject());
+                jObject.Add("SolarRelationCluster", solarRelationCluster.ToJsonObject());
 
             return jObject;
         }
