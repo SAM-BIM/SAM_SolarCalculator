@@ -684,82 +684,29 @@ namespace SAM.Weather.SolarCalculator
         private static void AddSampleCells(List<SampleCell> sampleCells, LinkedFace3D linkedFace3D, Guid mergedGuid, double sampleSize, double tolerance_Area, double tolerance_Distance)
         {
             Face3D face3D = linkedFace3D?.Face3D;
-            Plane plane = face3D?.GetPlane();
-            if (sampleCells == null || face3D == null || plane == null)
+            if (sampleCells == null || face3D == null || face3D.GetPlane() == null)
             {
                 return;
             }
 
-            Geometry.Planar.Face2D face2D = plane.Convert(face3D);
-            Geometry.Planar.BoundingBox2D boundingBox2D = face2D?.GetBoundingBox();
-            if (face2D == null || boundingBox2D == null)
+            // Cell subdivision is shared with the aperture analysis pipeline
+            // (Geometry.SolarCalculator.Query.AnalysisCells) — one implementation, one grid.
+            List<AnalysisCell> analysisCells = Geometry.SolarCalculator.Query.AnalysisCells(face3D, sampleSize, tolerance_Area, tolerance_Distance);
+            if (analysisCells == null || analysisCells.Count == 0)
             {
                 return;
             }
 
-            Geometry.Planar.Point2D min = boundingBox2D.Min;
-            Geometry.Planar.Point2D max = boundingBox2D.Max;
-            if (min == null || max == null)
+            foreach (AnalysisCell analysisCell in analysisCells)
             {
-                return;
-            }
-
-            for (double x = min.X; x < max.X; x += sampleSize)
-            {
-                double width = System.Math.Min(sampleSize, max.X - x);
-                if (width <= tolerance_Distance)
+                Point3D point3D = analysisCell?.InternalPoint3D;
+                Face3D face3D_Cell = analysisCell?.Face3D;
+                if (point3D == null || face3D_Cell == null || !face3D_Cell.IsValid())
                 {
                     continue;
                 }
 
-                for (double y = min.Y; y < max.Y; y += sampleSize)
-                {
-                    double height = System.Math.Min(sampleSize, max.Y - y);
-                    if (height <= tolerance_Distance)
-                    {
-                        continue;
-                    }
-
-                    // Do NOT reject the cell by whether its centre is inside the face: for concave or
-                    // triangular faces a cell can overlap the face (area above tolerance) while its centre
-                    // lies outside. Let the clipping below decide — cells that don't overlap produce an
-                    // empty intersection and are dropped, so no valid sunlit area is lost.
-                    Geometry.Planar.Rectangle2D rectangle2D = new Geometry.Planar.Rectangle2D(new Geometry.Planar.Point2D(x, y), width, height);
-                    Geometry.Planar.Face2D face2D_Cell = rectangle2D;
-
-                    List<Geometry.Planar.Face2D> face2Ds_Cell = null;
-                    if (face2D.Inside(rectangle2D, tolerance_Distance))
-                    {
-                        face2Ds_Cell = new List<Geometry.Planar.Face2D>() { face2D_Cell };
-                    }
-                    else
-                    {
-                        face2Ds_Cell = Geometry.Planar.Query.Intersection(face2D_Cell, face2D, tolerance_Distance);
-                    }
-
-                    if (face2Ds_Cell == null || face2Ds_Cell.Count == 0)
-                    {
-                        continue;
-                    }
-
-                    foreach (Geometry.Planar.Face2D face2D_Temp in face2Ds_Cell)
-                    {
-                        if (face2D_Temp == null || face2D_Temp.GetArea() < tolerance_Area)
-                        {
-                            continue;
-                        }
-
-                        Geometry.Planar.Point2D point2D = face2D_Temp.GetInternalPoint2D(tolerance_Distance);
-                        Point3D point3D = plane.Convert(point2D);
-                        Face3D face3D_Cell = plane.Convert(face2D_Temp);
-                        if (point3D == null || face3D_Cell == null || !face3D_Cell.IsValid())
-                        {
-                            continue;
-                        }
-
-                        sampleCells.Add(new SampleCell(linkedFace3D.Guid, mergedGuid, point3D, face3D_Cell));
-                    }
-                }
+                sampleCells.Add(new SampleCell(linkedFace3D.Guid, mergedGuid, point3D, face3D_Cell));
             }
         }
 
