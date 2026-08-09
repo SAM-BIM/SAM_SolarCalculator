@@ -202,6 +202,28 @@ namespace SAM.Weather.SolarCalculator
             return solarVisibilityCache != null && GetIdentity() == solarVisibilityCache.GetIdentity();
         }
 
+        /// <summary>
+        /// True when this cache matches every identity input of a would-be build. Use it to decide
+        /// reuse without rebuilding: any change in context geometry, cell layout, bin resolution,
+        /// tolerances, location or year returns false.
+        /// </summary>
+        public bool Matches(string geometryHash, double cellSize, double binSizeDegrees, double minHorizonAngle, double tolerance_Area, double tolerance_Snap, double tolerance_Angle, double tolerance_Distance, double latitude, double longitude, int year, int cellCount)
+        {
+            return schemaVersion == CurrentSchemaVersion
+                && this.geometryHash == geometryHash
+                && this.cellSize == cellSize
+                && this.binSizeDegrees == binSizeDegrees
+                && this.minHorizonAngle == minHorizonAngle
+                && this.tolerance_Area == tolerance_Area
+                && this.tolerance_Snap == tolerance_Snap
+                && this.tolerance_Angle == tolerance_Angle
+                && this.tolerance_Distance == tolerance_Distance
+                && this.latitude == latitude
+                && this.longitude == longitude
+                && this.year == year
+                && this.cellCount == cellCount;
+        }
+
         /// <summary>Bin index for the given solar angles, or -1 when no bin covers them.</summary>
         public int FindBin(double altitude, double azimuth)
         {

@@ -135,6 +135,23 @@ namespace SAM.Weather.SolarCalculator
             return skyVisibilityCache != null && GetIdentity() == skyVisibilityCache.GetIdentity();
         }
 
+        /// <summary>
+        /// True when this cache matches every identity input of a would-be build. Independent of
+        /// location, year, weather and AnalysisPeriod by construction.
+        /// </summary>
+        public bool Matches(string geometryHash, double cellSize, Geometry.SolarCalculator.SkyPatchSubdivision skyPatchSubdivision, double tolerance_Area, double tolerance_Snap, double tolerance_Angle, double tolerance_Distance, int cellCount)
+        {
+            return schemaVersion == CurrentSchemaVersion
+                && this.geometryHash == geometryHash
+                && this.cellSize == cellSize
+                && this.skyPatchSubdivision == skyPatchSubdivision
+                && this.tolerance_Area == tolerance_Area
+                && this.tolerance_Snap == tolerance_Snap
+                && this.tolerance_Angle == tolerance_Angle
+                && this.tolerance_Distance == tolerance_Distance
+                && this.cellCount == cellCount;
+        }
+
         /// <summary>Cosine-weighted sky view factor of a cell (unobstructed vertical = 0.5).</summary>
         public double SkyViewFactor(int cellIndex)
         {
