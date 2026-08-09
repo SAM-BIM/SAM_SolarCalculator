@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: LGPL-3.0-or-later
-// Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
+﻿// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright (c) 2020â€“2026 Michal Dengusiak & Jakub Ziolkowski and contributors
 
 using SAM.Geometry.Object.Spatial;
 using NetTopologySuite.Geometries;
@@ -46,7 +46,7 @@ namespace SAM.Weather.SolarCalculator
 
             // Pre-collect every timestep that passes the sun-above-horizon check so we
             // can emit an all-zero coverage series for faces that are fully shaded across
-            // the entire run — keeping the per-face DateTime grid consistent with TAS.
+            // the entire run â€” keeping the per-face DateTime grid consistent with TAS.
             List<DateTime> validDateTimes = new List<DateTime>();
             foreach (KeyValuePair<DateTime, Vector3D> kvp in directionDictionary)
             {
@@ -115,7 +115,7 @@ namespace SAM.Weather.SolarCalculator
 
                 // Build the coverage series over EVERY valid timestep: the lit entry where the face is
                 // exposed, and an explicit zero-coverage entry where it is fully shaded. This keeps the
-                // per-face DateTime grid complete and consistent with TAS — without it, a face that
+                // per-face DateTime grid complete and consistent with TAS â€” without it, a face that
                 // alternates lit/shaded would record only its lit timesteps, leaving the shaded ones as
                 // gaps (NaN) that CompareSolarCoverage then skips, biasing the comparison. Handles all
                 // cases uniformly: fully shaded (all zero), partially shaded (mix), fully lit (all lit).
@@ -144,7 +144,7 @@ namespace SAM.Weather.SolarCalculator
                 }
                 else
                 {
-                    // No valid-timestep grid supplied — fall back to the lit entries only (legacy behaviour).
+                    // No valid-timestep grid supplied â€” fall back to the lit entries only (legacy behaviour).
                     if (sunExposure == null || sunExposure.Count == 0)
                     {
                         continue;
@@ -349,7 +349,7 @@ namespace SAM.Weather.SolarCalculator
         /// for one sun direction, projects the visible merged faces and clips them back onto the
         /// source faces, returning the lit fragments as LinkedFace3Ds keyed by their source Guids.
         /// Extracted from the three previously duplicated occlusion loops (Simulate, Simulate_Sampled
-        /// and ComputeSunExposure) — behaviour unchanged.
+        /// and ComputeSunExposure) â€” behaviour unchanged.
         /// </summary>
         private static List<LinkedFace3D> ExposedExactLinkedFace3Ds(List<LinkedFace3D> linkedFace3Ds_Merge, Dictionary<Guid, LinkedFace3D> dictionary_LinkedFace3D_Merge, Dictionary<LinkedFace3D, List<LinkedFace3D>> dictionary_Merge, Vector3D sunDirection, double tolerance_Area, double tolerance_Snap, double tolerance_Angle, double tolerance_Distance)
         {
@@ -562,7 +562,7 @@ namespace SAM.Weather.SolarCalculator
             return result;
         }
 
-        private static Plane SunPlane(List<LinkedFace3D> linkedFace3Ds, Vector3D sunDirection, out Vector3D vector3D, out Vector3D vector3D_Ray, double tolerance_Distance)
+        internal static Plane SunPlane(List<LinkedFace3D> linkedFace3Ds, Vector3D sunDirection, out Vector3D vector3D, out Vector3D vector3D_Ray, double tolerance_Distance)
         {
             vector3D = null;
             vector3D_Ray = null;
@@ -590,7 +590,7 @@ namespace SAM.Weather.SolarCalculator
             return new Plane(point3D, vector3D.Unit);
         }
 
-        private static List<ProjectedFace> ProjectedFaces(List<LinkedFace3D> linkedFace3Ds, Plane plane, Vector3D vector3D, Vector3D sunDirection, double tolerance_Area, double tolerance_Angle, double tolerance_Distance)
+        internal static List<ProjectedFace> ProjectedFaces(List<LinkedFace3D> linkedFace3Ds, Plane plane, Vector3D vector3D, Vector3D sunDirection, double tolerance_Area, double tolerance_Angle, double tolerance_Distance)
         {
             List<ProjectedFace> result = new List<ProjectedFace>();
             foreach (LinkedFace3D linkedFace3D in linkedFace3Ds)
@@ -601,7 +601,7 @@ namespace SAM.Weather.SolarCalculator
                     continue;
                 }
 
-                // Include EVERY face as a ray-cast candidate — occlusion is geometric and independent of
+                // Include EVERY face as a ray-cast candidate â€” occlusion is geometric and independent of
                 // orientation, so a back-facing wall/shade must still be able to block the ray. The
                 // orientation test only decides whether the HIT face can itself RECEIVE sun (front-facing),
                 // which is recorded on the ProjectedFace and checked when a sample cell hits its own face.
@@ -690,7 +690,7 @@ namespace SAM.Weather.SolarCalculator
             }
 
             // Cell subdivision is shared with the aperture analysis pipeline
-            // (Geometry.SolarCalculator.Query.AnalysisCells) — one implementation, one grid.
+            // (Geometry.SolarCalculator.Query.AnalysisCells) â€” one implementation, one grid.
             List<AnalysisCell> analysisCells = Geometry.SolarCalculator.Query.AnalysisCells(face3D, sampleSize, tolerance_Area, tolerance_Distance);
             if (analysisCells == null || analysisCells.Count == 0)
             {
@@ -710,7 +710,7 @@ namespace SAM.Weather.SolarCalculator
             }
         }
 
-        private static Envelope ToEnvelope(Geometry.Planar.BoundingBox2D boundingBox2D, double tolerance_Distance)
+        internal static Envelope ToEnvelope(Geometry.Planar.BoundingBox2D boundingBox2D, double tolerance_Distance)
         {
             if (boundingBox2D == null)
             {
@@ -727,7 +727,7 @@ namespace SAM.Weather.SolarCalculator
             return new Envelope(min.X - tolerance_Distance, max.X + tolerance_Distance, min.Y - tolerance_Distance, max.Y + tolerance_Distance);
         }
 
-        private static Envelope ToEnvelope(Geometry.Planar.Point2D point2D, double tolerance_Distance)
+        internal static Envelope ToEnvelope(Geometry.Planar.Point2D point2D, double tolerance_Distance)
         {
             if (point2D == null)
             {
@@ -737,7 +737,7 @@ namespace SAM.Weather.SolarCalculator
             return new Envelope(point2D.X - tolerance_Distance, point2D.X + tolerance_Distance, point2D.Y - tolerance_Distance, point2D.Y + tolerance_Distance);
         }
 
-        private class ProjectedFace
+        internal class ProjectedFace
         {
             public ProjectedFace(LinkedFace3D linkedFace3D, Geometry.Planar.Face2D face2D, Geometry.Planar.BoundingBox2D boundingBox2D, bool isSolarCandidate)
             {
