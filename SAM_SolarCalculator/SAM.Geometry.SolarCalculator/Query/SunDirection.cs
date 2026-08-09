@@ -39,20 +39,12 @@ namespace SAM.Geometry.SolarCalculator
                 return null;
             }
 
-            Angle angle_Latitude = new Angle(location.Latitude);
-            Angle angle_Longitude = new Angle(location.Longitude);
-
-            int timeZoneOffset = 0;
-            if (location.TryGetValue(LocationParameter.TimeZone, out string timeZoneString))
+            SolarTimes solarTimes = Create.SolarTimes(location, dateTime);
+            if (solarTimes == null)
             {
-                UTC uTC = Core.Query.UTC(timeZoneString);
-                if (uTC != UTC.Undefined)
-                {
-                    timeZoneOffset = System.Convert.ToInt32(Core.Query.Double(uTC));
-                }
+                return null;
             }
 
-            SolarTimes solarTimes = new SolarTimes(dateTime, timeZoneOffset, angle_Latitude, angle_Longitude);
             if (!includeNight && (dateTime < solarTimes.Sunrise || dateTime > solarTimes.Sunset))
             {
                 return null;
