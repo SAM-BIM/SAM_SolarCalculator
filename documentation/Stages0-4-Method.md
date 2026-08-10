@@ -61,8 +61,12 @@ Two distinct timelines exist and are never mixed silently:
 Verified against `SAM.Weather.Query.TryGetData` (SAM core repo), the EPW importer:
 
 - reads the EPW **hour field (1–24)** and applies `hour = hour - 1`;
-- imports EPW **field 13** as `GlobalSolarRadiation` and **field 15** as `DiffuseSolarRadiation`;
-- **never** imports EPW field 14 (direct normal), so `DirectSolarRadiation` is left unpopulated.
+- reads the comma-split data line into a zero-based `values[]` array, where `values[i]` is EPW field
+  `i + 1` (field 1, `Year`, lands at `values[0]`):
+  - `values[13]` — EPW field 14, Global Horizontal Radiation — imported as `GlobalSolarRadiation`;
+  - `values[14]` — EPW field 15, Direct Normal Radiation — **currently not imported**, so
+    `DirectSolarRadiation` is left unpopulated;
+  - `values[15]` — EPW field 16, Diffuse Horizontal Radiation — imported as `DiffuseSolarRadiation`.
 
 EPW labels an interval by its **end**: hour field `H` carries values averaged over `(H−1):00 → H:00`.
 After the decrement, the SAM timestamp is `H−1`, i.e. **the start of the interval the values describe**.
@@ -129,7 +133,7 @@ surfaces — a south wall at solar noon receives the east wall's beam. It also c
 frozen by `Legacy_Isotropic_GoldenValues_Frozen` and
 `T3_Legacy_Overload_Is_Not_The_Reference_And_Still_Disagrees`.
 
-**Corrected physical — `Geometry.SolarCalculator.Create.Radiation(SolarTimes, Plane outwardPlane, dni, dhi, ghi, SkyModel, svf, gvf, albedo)`.**
+**Corrected physical — `Geometry.SolarCalculator.Create.Radiation(SolarTimes, Plane outwardPlane, dni, dhi, ghi, SkyModel, skyViewFactorMultiplier, groundViewFactorMultiplier, albedo)`.**
 Deliberately a different API *shape* (a `Plane`, not two doubles) so the two systems cannot be mixed
 up at a call site:
 
@@ -192,9 +196,11 @@ ground  = GHI * albedo * GVF(cell)                         <- isotropic ground
 
 Note that in the **cached** path `SVF` and `GVF` are **absolute** view factors (they already contain
 the `(1 ± cos β)/2` geometric factor). In the **standalone** `Create.Radiation` overload the
-`skyViewFactor` / `groundViewFactor` arguments are **relative** multipliers applied on top of
-`(1 ± cos β)/2`. Passing 1 there is therefore equivalent to the cached path's unobstructed case; the
-two are cross-checked in §8, T3.
+`skyViewFactorMultiplier` / `groundViewFactorMultiplier` arguments are **relative** multipliers
+applied on top of `(1 ± cos β)/2`. Passing 1 there is therefore equivalent to the cached path's
+unobstructed case; passing an absolute view factor (e.g. `SkyVisibilityCache.SkyViewFactor(...)`,
+~0.5 on an unobstructed vertical surface) into this multiplier double-applies the geometric factor
+and understates diffuse by roughly half. The two are cross-checked in §8, T3.
 
 `SkyModel.Isotropic` in the evaluation path uses `diffuse = DHI · SVF(cell)` — the same
 obstruction-aware form factor; the legacy `cos²(tilt/2)` value is recovered exactly for unobstructed
@@ -513,23 +519,55 @@ No action is required now; this is recorded so the Stage 5–8 work does not hav
 |---|---|
 | Binary | **No released public signature removed, renamed or changed.** The legacy `Geometry.SolarCalculator.Create.Radiation(SolarTimes, double tilt, double surfaceAzimuth, …)` overload, the misspelled `calctulateRadiation` parameter on all three `Modify.Simulate` overloads, `Weather.SolarCalculator.Create.Radiation(WeatherData, DateTime, Plane, …)` and `Query.SunDirection(Location, DateTime, bool)` all keep their exact signatures. |
 | Source | No existing enum value renumbered. New enums (`SkyModel`, `SkyPatchSubdivision`, `SunTimeConvention`, `AnalysisPeriodPreset`) are additive. |
-| Behavioural | Mostly unchanged — with three **deliberate defect fixes** listed below. |
+| Behavioural | Mostly unchanged — with four **deliberate defect fixes** listed below. |
 
 Behavioural changes to *released* code, all of them intentional fixes with regression tests, none of
 them a convention change:
 
 1. **Fractional time zones are no longer truncated.** `Query.SunDirection(Location, DateTime, bool)`
    and `Weather.SolarCalculator.Create.Radiation(WeatherData, …)` used
-   `System.Convert.ToInt32(Core.Query.Double(uTC))`, which turned UTC+05:30 into UTC+05:00 and moved
-   the computed sun position by up to 30 minutes. Both now route through
-   `Create.SolarTimes(Location, DateTime)`, which carries the fractional offset. **Results are
-   bit-identical for every whole-hour time zone** and change only where the old value was wrong.
+   `System.Convert.ToInt32(Core.Query.Double(uTC))`. `Convert.ToInt32(double)` rounds to the nearest
+   integer with ties resolved to even (banker's rounding), not truncation, so it turned UTC+05:30
+   into **UTC+06:00** (5.5 ties to the even neighbour, 6), not UTC+05:00 as originally stated here —
+   the **± 30-minute error magnitude is unchanged**, only its direction. Both call sites now route
+   through `Create.SolarTimes(Location, DateTime)`, which carries the fractional offset. **Results
+   are bit-identical for every whole-hour time zone** and change only where the old value was wrong.
    Pinned by `SunDirection_FractionalTimeZone_Preserved`.
 2. **`Modify.Simulate(…, merge: true)` returns the merged results.** It previously built the merged
    list, attached it, and then returned the *un-merged* one. Pinned by
    `Simulate_MergeTrue_Returns_Merged_Results`.
 3. **`SunExposureFace3Ds` returns null instead of throwing** when the plane search yields nothing.
-   Pinned by `SunExposureFace3Ds_NullPlane_Returns_Null`.
+   Pinned by `SunExposureFace3Ds_NullPlane_Returns_Null` (a genuinely degenerate/collinear `Face3D`
+   whose `GetPlane()` returns null; the earlier, non-throwing empty-list guard is a separate case,
+   pinned by `SunExposureFace3Ds_NullExposureList_Returns_Null`).
+4. **An unresolved Location timezone is no longer silently treated as UTC+00:00.**
+   `Geometry.SolarCalculator.Query.TimeZoneOffset(Location)` now returns `double.NaN` when the
+   Location has no TimeZone parameter, or the TimeZone string does not resolve to a known
+   `SAM.Core.UTC` value — previously it returned `0`, indistinguishable from a genuine UTC+00:00.
+   `Create.SolarTimes(Location, DateTime)` detects the NaN and returns null;
+   `Modify.SimulateApertures` detects it explicitly and returns null rather than running the
+   geometric pass against a fabricated Greenwich offset. Genuine UTC+00:00 (including the ordinarily-
+   written `"UTC+00:00"` / `"UTC-00:00"` strings, which `SAM.Core.Query.UTC(string)` does not itself
+   recognise — see below) still resolves to `0.0`. Pinned by `TimeZoneOffset_GenuineUTC0_Is_Accepted_Not_NaN`
+   and `TimeZoneOffset_Unresolvable_Returns_NaN_And_SolarTimes_Fails_Safely`.
+
+   Two SAM.Core gaps were found while implementing this and are **not fixed in this repository**
+   (SAM.Core is a separate repository/build, referenced here as a prebuilt `SAM.Core.dll`):
+   - `SAM.Core.Query.UTC(double)` / `Query.Double(UTC)` omit `UTC.Minus0900` (UTC−09:00) despite the
+     enum member existing — an Alaska-style EPW location resolves to `Undefined` instead. Worked
+     around locally in `Query.TimeZoneOffset` by normalising the ordinary `"UTC+00:00"` / `"UTC-00:00"`
+     strings before calling into SAM.Core (see next point), but the −09:00 case has no such
+     workaround here since it is a genuinely missing value, not a formatting mismatch — a real
+     UTC−09:00 Location still resolves to NaN until SAM.Core adds the mapping.
+   - `SAM.Core.Query.UTC(string)` only recognises the zero offset written with the Unicode plus-minus
+     sign (`UTC.PlusMinus0000`'s `Description`, `"UTC±00:00"`) — the ordinarily-written `"UTC+00:00"`
+     / `"UTC-00:00"` do not match and fall through to `Undefined`. `Query.TimeZoneOffset` normalises
+     these two specific strings to `"UTC±00:00"` before calling `Core.Query.UTC`, so this repository
+     is not affected, but any other SAM.Core caller passing an ordinarily-written zero-offset string
+     directly to `Core.Query.UTC` still gets `Undefined`.
+
+   Both are prepared as a local commit on branch `fix/utc-minus-0900-mapping` in the sibling SAM.Core
+   working copy (not pushed, not part of this PR) — see that commit for the exact diff.
 
 What is explicitly **not** changed: the legacy isotropic radiation formula (inward-normal tilt, +90°
 azimuth rotation) and its consumption of `CalculatedDirectSolarRadiation()`. Both are frozen by
@@ -538,7 +576,11 @@ and the cache evaluation path.
 
 Types and members introduced **within this PR** (`ApertureIrradianceResult`, `SimulateApertures`,
 `ApertureSolarTargets`, the caches) are not yet released, so they were renamed freely to the agreed
-engineer-facing vocabulary in this batch. That freedom ends when this PR merges.
+engineer-facing vocabulary in this batch — including `Create.Radiation(SolarTimes, Plane, …,
+SkyModel, …)`'s `skyViewFactor`/`groundViewFactor` parameters, renamed to
+`skyViewFactorMultiplier`/`groundViewFactorMultiplier` (source-only; no numerical change) to make
+their RELATIVE-multiplier semantics explicit against the cache path's ABSOLUTE view factors (§4).
+That freedom ends when this PR merges.
 
 ## 12. Appendix — traps found the hard way
 
@@ -554,8 +596,13 @@ them.
   `Query.TryGetSunAngles(Location, DateTime)`.
 - **`WeatherHour.Calculated*SolarRadiation()` are not neutral accessors** — each falls back to a
   *different* field. Read the raw properties when the derivation must be unambiguous (§3.2).
-- **`Core.Tolerance.Angle` is 0.0349066 rad = 2°**, not an epsilon. It is the default
-  `minHorizonAngle`, so "the default tolerance" silently discards the lowest 2° of sky.
+- **`Core.Tolerance.Angle` is 0.0349066 rad = 2°**, not an epsilon. It was the default
+  `minHorizonAngle` throughout the library, so "the default tolerance" silently discards the lowest
+  2° of sky. `SimulateApertures`'s `minHorizonAngle` default is now the independently-named
+  `Modify.DefaultMinHorizonAngle` (same 0.0349066 rad value, zero numerical change) precisely so a
+  future change to the generic geometry tolerance cannot silently retune this physics gate; the
+  pre-existing `Modify.Simulate` / `Create.SunBins` overloads elsewhere in the library still alias
+  `Core.Tolerance.Angle` directly and were left unchanged (out of scope for this correction batch).
 - **Windows PowerShell 5.1 `Get-Content` / `Set-Content` corrupts UTF-8** (ANSI round-trip mojibake;
   already repaired once, commit `cfdc393`). Use the editor tooling, or
   `[IO.File]::ReadAllText(p, UTF8)` / `WriteAllText(p, s, New-Object UTF8Encoding($false))`.
