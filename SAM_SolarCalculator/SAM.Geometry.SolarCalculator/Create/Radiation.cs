@@ -75,18 +75,24 @@ namespace SAM.Geometry.SolarCalculator
         ///
         /// Components (Perez et al. 1990, Solar Energy 44(5), 271-289, for PerezAnisotropic):
         ///   beam    = DNI * max(0, cosThetaI)
-        ///   diffuse = DHI * [(1-F1)*(1+cosB)/2*SVF + F1*(a/b) + F2*sinB*SVF]   (clamped >= 0)
-        ///   ground  = GHI * albedo * GVF * (1-cosB)/2
+        ///   diffuse = DHI * [(1-F1)*(1+cosB)/2*SVF_mult + F1*(a/b) + F2*sinB*SVF_mult]   (clamped >= 0)
+        ///   ground  = GHI * albedo * GVF_mult * (1-cosB)/2
         /// where B is the receiving-side tilt from horizontal, a = max(0, cosThetaI),
         /// b = max(cos 85 deg, cos theta_z). For Isotropic the same physical conventions apply with
-        /// diffuse = DHI * (1+cosB)/2 * SVF (the corrected isotropic, NOT the legacy formula).
+        /// diffuse = DHI * (1+cosB)/2 * SVF_mult (the corrected isotropic, NOT the legacy formula).
         /// directNormalIrradiance is true DNI, W/m2.
         ///
-        /// With scalar view factors (no directional visibility), skyViewFactor scales the isotropic
-        /// and horizon terms and the circumsolar term is kept whenever the sun is in front of the
-        /// surface. For component-aware obstruction (circumsolar removed when the sun is obstructed,
-        /// horizon term scaled by horizon-band visibility) use the SolarVisibilityCache /
-        /// SkyVisibilityCache evaluation path (SAM.Analytical.SolarCalculator.Query.CachedIrradiance).
+        /// skyViewFactorMultiplier and groundViewFactorMultiplier are RELATIVE MULTIPLIERS on top of
+        /// the analytic unobstructed (1+cosB)/2 / (1-cosB)/2 form factors already baked into the
+        /// formulas above — 1.0 means unobstructed, not "the sky/ground view factor". They are NOT
+        /// the same quantity as SkyVisibilityCache.SkyViewFactor(...) / GroundViewFactor(...), which
+        /// are ABSOLUTE view factors that already contain that geometric term (an unobstructed
+        /// vertical surface has an absolute SkyViewFactor of ~0.5, but a skyViewFactorMultiplier of
+        /// 1.0). Passing an absolute view factor into this multiplier silently double-applies the
+        /// geometric factor (e.g. 0.5 * 0.5 = 0.25 instead of 0.5). For component-aware obstruction
+        /// (circumsolar removed when the sun is obstructed, horizon term scaled by horizon-band
+        /// visibility, absolute view factors) use the SolarVisibilityCache / SkyVisibilityCache
+        /// evaluation path (SAM.Analytical.SolarCalculator.Query.CachedIrradiance).
         /// </summary>
         /// <param name="solarTimes">Solar position source.</param>
         /// <param name="plane">OUTWARD-oriented receiving plane (normal = receiving side).</param>
@@ -94,10 +100,10 @@ namespace SAM.Geometry.SolarCalculator
         /// <param name="diffuseHorizontalIrradiance">DHI, W/m2.</param>
         /// <param name="globalHorizontalIrradiance">GHI, W/m2.</param>
         /// <param name="skyModel">Sky model.</param>
-        /// <param name="skyViewFactor">Scalar sky view factor (1 = unobstructed).</param>
-        /// <param name="groundViewFactor">Scalar ground view factor (1 = fully ground-exposed).</param>
+        /// <param name="skyViewFactorMultiplier">Relative multiplier applied on top of the analytic unobstructed sky form factor (1.0 = unobstructed). NOT the same as the absolute SkyVisibilityCache.SkyViewFactor(...).</param>
+        /// <param name="groundViewFactorMultiplier">Relative multiplier applied on top of the analytic unobstructed ground form factor (1.0 = unobstructed). NOT the same as the absolute SkyVisibilityCache.GroundViewFactor(...).</param>
         /// <param name="albedo">Ground reflectance.</param>
-        public static Radiation Radiation(this SolarTimes solarTimes, Spatial.Plane plane, double directNormalIrradiance, double diffuseHorizontalIrradiance, double globalHorizontalIrradiance, SkyModel skyModel, double skyViewFactor = 1, double groundViewFactor = 1, double albedo = 0.2)
+        public static Radiation Radiation(this SolarTimes solarTimes, Spatial.Plane plane, double directNormalIrradiance, double diffuseHorizontalIrradiance, double globalHorizontalIrradiance, SkyModel skyModel, double skyViewFactorMultiplier = 1, double groundViewFactorMultiplier = 1, double albedo = 0.2)
         {
             if (solarTimes == null || plane == null || double.IsNaN(directNormalIrradiance) || double.IsNaN(diffuseHorizontalIrradiance) || double.IsNaN(globalHorizontalIrradiance))
             {
@@ -133,11 +139,11 @@ namespace SAM.Geometry.SolarCalculator
             double cosThetaI = normal.X * sunX + normal.Y * sunY + normal.Z * sunZ;
 
             double beam = directNormalIrradiance * System.Math.Max(0.0, cosThetaI);
-            double ground = globalHorizontalIrradiance * albedo * groundViewFactor * (1.0 - cosBeta) / 2.0;
+            double ground = globalHorizontalIrradiance * albedo * groundViewFactorMultiplier * (1.0 - cosBeta) / 2.0;
 
             if (skyModel == SkyModel.Isotropic)
             {
-                double diffuse_Isotropic = diffuseHorizontalIrradiance * (1.0 + cosBeta) / 2.0 * skyViewFactor;
+                double diffuse_Isotropic = diffuseHorizontalIrradiance * (1.0 + cosBeta) / 2.0 * skyViewFactorMultiplier;
                 return new Radiation(beam, System.Math.Max(0.0, diffuse_Isotropic), System.Math.Max(0.0, ground));
             }
 
@@ -156,9 +162,9 @@ namespace SAM.Geometry.SolarCalculator
             double b = System.Math.Max(System.Math.Cos(85.0 * System.Math.PI / 180.0), cosZenith);
 
             double diffuse = diffuseHorizontalIrradiance *
-                ((1.0 - f1) * (1.0 + cosBeta) / 2.0 * skyViewFactor +
+                ((1.0 - f1) * (1.0 + cosBeta) / 2.0 * skyViewFactorMultiplier +
                  f1 * a / b +
-                 f2 * sinBeta * skyViewFactor);
+                 f2 * sinBeta * skyViewFactorMultiplier);
 
             // Perez's (1-F1) can go negative under very clear skies; clamp the composed component.
             return new Radiation(beam, System.Math.Max(0.0, diffuse), System.Math.Max(0.0, ground));

@@ -15,6 +15,15 @@ namespace SAM.Analytical.SolarCalculator
     public static partial class Modify
     {
         /// <summary>
+        /// Default sun-altitude cutoff for SimulateApertures, radians (~2 deg). Numerically equal to
+        /// Core.Tolerance.Angle (the value the default previously aliased), but named and pinned
+        /// independently: Core.Tolerance.Angle is a generic geometry tolerance, and this is a physics
+        /// gate on the analysis -- they should be free to diverge later without either silently
+        /// retuning the other. Zero numerical change from the previous default.
+        /// </summary>
+        private const double DefaultMinHorizonAngle = 0.0349066;
+
+        /// <summary>
         /// Per-aperture irradiance over any AnalysisPeriod, from the reusable visibility caches.
         ///
         /// Pipeline: aperture targets (Stage 0) -> occluder context -> sun-bin direct-beam cache +
@@ -44,6 +53,10 @@ namespace SAM.Analytical.SolarCalculator
         /// Engineer-facing vocabulary is used on this entry point (gridSize, sunAngleStep,
         /// recalculate, reusedPreviousCalculation); the implementation types keep their internal
         /// names (AnalysisCell, SunBin, SolarVisibilityCache).
+        ///
+        /// The location's timezone must resolve (Geometry.SolarCalculator.Query.TimeZoneOffset ->
+        /// a finite value): an unresolved/unsupported timezone returns null here rather than running
+        /// the geometric pass against a silently-assumed UTC+00:00.
         /// </summary>
         /// <param name="analyticalModel">Model; supplies geometry, and WeatherData when none is passed.</param>
         /// <param name="analysisPeriod">Hours to integrate.</param>
@@ -56,12 +69,12 @@ namespace SAM.Analytical.SolarCalculator
         /// <param name="recalculate">Force the solar visibility calculation to be rebuilt even when it could be reused.</param>
         /// <param name="albedo">Ground reflectance.</param>
         /// <param name="sunTimeConvention">Timestamp convention of the weather timeline (default IntervalStart = EPW/SAM, +30 min).</param>
-        /// <param name="minHorizonAngle">Minimum sun altitude, RADIANS.</param>
+        /// <param name="minHorizonAngle">Minimum sun altitude, RADIANS. Default DefaultMinHorizonAngle, ~2 deg.</param>
         /// <param name="tolerance_Area">Area tolerance.</param>
         /// <param name="tolerance_Snap">Snap tolerance (also the ray-start offset).</param>
         /// <param name="tolerance_Angle">Angle tolerance, RADIANS.</param>
         /// <param name="tolerance_Distance">Distance tolerance.</param>
-        public static List<ApertureIrradianceResult> SimulateApertures(this AnalyticalModel analyticalModel, AnalysisPeriod analysisPeriod, out bool reusedPreviousCalculation, WeatherData weatherData = null, IEnumerable<Guid> apertureGuids = null, double gridSize = 0.5, SkyModel skyModel = SkyModel.PerezAnisotropic, double sunAngleStep = 2.0, bool recalculate = false, double albedo = 0.2, SunTimeConvention sunTimeConvention = SunTimeConvention.IntervalStart, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance)
+        public static List<ApertureIrradianceResult> SimulateApertures(this AnalyticalModel analyticalModel, AnalysisPeriod analysisPeriod, out bool reusedPreviousCalculation, WeatherData weatherData = null, IEnumerable<Guid> apertureGuids = null, double gridSize = 0.5, SkyModel skyModel = SkyModel.PerezAnisotropic, double sunAngleStep = 2.0, bool recalculate = false, double albedo = 0.2, SunTimeConvention sunTimeConvention = SunTimeConvention.IntervalStart, double minHorizonAngle = DefaultMinHorizonAngle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance)
         {
             double timeShiftInMinutes = sunTimeConvention.TimeShiftInMinutes();
             if (double.IsNaN(timeShiftInMinutes))
@@ -79,7 +92,7 @@ namespace SAM.Analytical.SolarCalculator
         /// The offset becomes part of the cache identity: bins are built from weather-hour + offset
         /// positions and the evaluation reads the offset back from the cache.
         /// </summary>
-        public static List<ApertureIrradianceResult> SimulateApertures(this AnalyticalModel analyticalModel, AnalysisPeriod analysisPeriod, out bool reusedPreviousCalculation, WeatherData weatherData, IEnumerable<Guid> apertureGuids, double gridSize, SkyModel skyModel, double sunAngleStep, bool recalculate, double albedo, double timeShiftInMinutes, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance)
+        public static List<ApertureIrradianceResult> SimulateApertures(this AnalyticalModel analyticalModel, AnalysisPeriod analysisPeriod, out bool reusedPreviousCalculation, WeatherData weatherData, IEnumerable<Guid> apertureGuids, double gridSize, SkyModel skyModel, double sunAngleStep, bool recalculate, double albedo, double timeShiftInMinutes, double minHorizonAngle = DefaultMinHorizonAngle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance)
         {
             reusedPreviousCalculation = false;
 
@@ -155,9 +168,18 @@ namespace SAM.Analytical.SolarCalculator
                 return null;
             }
 
+            double timeZoneOffset = Geometry.SolarCalculator.Query.TimeZoneOffset(location);
+            if (double.IsNaN(timeZoneOffset))
+            {
+                // Unresolved/unsupported timezone (e.g. a mapping missing from SAM.Core.UTC) must not
+                // silently become Greenwich: the sun position would be wrong by up to the full offset
+                // while every timeline-conservation diagnostic still passes, since the cache stays
+                // internally consistent with the (wrong) sun path it was built from.
+                return null;
+            }
+
             string contextGeometryHash = Geometry.SolarCalculator.Query.GeometryHash(occluders, tolerance_Distance);
             string targetGeometryHash = Geometry.SolarCalculator.Query.TargetHash(cells, tolerance_Distance);
-            double timeZoneOffset = Geometry.SolarCalculator.Query.TimeZoneOffset(location);
 
             // Reuse the caches on the attached SolarModel only when every identity input matches.
             SolarModel solarModel = analyticalModel.GetValue<SolarModel>(AnalyticalModelParameter.SolarModel);

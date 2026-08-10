@@ -145,6 +145,40 @@ namespace SAM.SolarCalculator.Tests
         }
 
         [Fact]
+        public void ViewFactorMultipliers_Are_Relative_Not_Absolute()
+        {
+            // Freezes the semantics of skyViewFactorMultiplier / groundViewFactorMultiplier on the
+            // Plane-based Create.Radiation overload: they are RELATIVE multipliers applied on top of
+            // the analytic unobstructed form factor, not absolute view factors. On a vertical surface
+            // the analytic unobstructed sky/ground fraction is (1+cosB)/2 = (1-cosB)/2 = 0.5, so
+            // multiplier 1.0 must reproduce the full 0.5 * DHI / 0.5 * GHI * albedo contribution, and
+            // multiplier 0.5 must halve it again (0.25 * DHI / 0.25 * GHI * albedo) -- NOT reproduce
+            // the multiplier-1.0 result, which is what passing an already-absolute ~0.5 view factor
+            // (e.g. from SkyVisibilityCache.SkyViewFactor) would incorrectly do.
+            SolarTimes solarTimes = NoonSummer();
+            Plane south = OutwardPlane(new Vector3D(0, -1, 0));
+            double dni = 0; // isolate diffuse/ground: no beam contribution to reason about
+            double dhi = 200;
+            double ghi = 200;
+            double albedo = 0.2;
+
+            Radiation unobstructed = Geometry.SolarCalculator.Create.Radiation(solarTimes, south, dni, dhi, ghi, SkyModel.Isotropic, skyViewFactorMultiplier: 1.0, groundViewFactorMultiplier: 1.0, albedo: albedo);
+            Radiation halved = Geometry.SolarCalculator.Create.Radiation(solarTimes, south, dni, dhi, ghi, SkyModel.Isotropic, skyViewFactorMultiplier: 0.5, groundViewFactorMultiplier: 0.5, albedo: albedo);
+
+            double analyticVerticalFraction = 0.5; // (1 + cosB)/2 for a vertical surface, cosB = 0
+            Assert.Equal(dhi * analyticVerticalFraction, unobstructed.DiffuseHorizontal, 6);
+            Assert.Equal(ghi * albedo * analyticVerticalFraction, unobstructed.GlobalHorizontal, 6);
+
+            Assert.Equal(unobstructed.DiffuseHorizontal * 0.5, halved.DiffuseHorizontal, 6);
+            Assert.Equal(unobstructed.GlobalHorizontal * 0.5, halved.GlobalHorizontal, 6);
+
+            // And explicitly NOT the same: a multiplier of 0.5 must not be a no-op relative to 1.0,
+            // which is the failure mode of mistaking it for an already-absolute view factor.
+            Assert.NotEqual(unobstructed.DiffuseHorizontal, halved.DiffuseHorizontal);
+            Assert.NotEqual(unobstructed.GlobalHorizontal, halved.GlobalHorizontal);
+        }
+
+        [Fact]
         public void Perez_Overcast_Agrees_With_Isotropic_On_Horizontal()
         {
             // Overcast (epsilon ~ 1): DNI ~ 0. On a horizontal surface Perez and isotropic must agree.
