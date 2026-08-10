@@ -56,86 +56,77 @@ namespace SAM.Weather.SolarCalculator
             allPatches.AddRange(skyPatches);
             allPatches.AddRange(groundPatches);
 
+            // Ray-cast every patch in parallel (thread-confined per-patch results), then accumulate
+            // sequentially - the result is deterministic, with no locks in the inner geometry loop.
+            bool[][] visibleByPatch = new bool[allPatches.Count][];
+            Parallel.For(0, allPatches.Count, p =>
+            {
+                Vector3D direction = allPatches[p]?.Direction;
+                if (direction == null || !direction.IsValid())
+                {
+                    return;
+                }
+
+                visibleByPatch[p] = Query.CellVisibility(occluders, points, normals, direction, tolerance_Area, tolerance_Angle, tolerance_Distance, tolerance_Snap);
+            });
+
             double[] skyViewFactors = new double[cellCount];
             double[] horizonNumerators = new double[cellCount];
             double[] horizonDenominators = new double[cellCount];
             double[] groundViewFactors = new double[cellCount];
 
-            object lockObject = new object();
-            Parallel.For(0, allPatches.Count,
-                () => new double[4 * cellCount],
-                (p, state, buffer) =>
+            for (int p = 0; p < allPatches.Count; p++)
+            {
+                SkyPatch skyPatch = allPatches[p];
+                Vector3D direction = skyPatch?.Direction;
+                bool[] visible = visibleByPatch[p];
+                if (direction == null || visible == null)
                 {
-                    SkyPatch skyPatch = allPatches[p];
-                    Vector3D direction = skyPatch?.Direction;
-                    if (direction == null || !direction.IsValid())
-                    {
-                        return buffer;
-                    }
+                    continue;
+                }
 
-                    bool isGround = direction.Z < 0;
+                bool isGround = direction.Z < 0;
+                double weight = skyPatch.SolidAngle;
 
-                    bool[] visible = Query.CellVisibility(occluders, points, normals, direction, tolerance_Area, tolerance_Angle, tolerance_Distance, tolerance_Snap);
-                    if (visible == null)
-                    {
-                        return buffer;
-                    }
-
-                    double weight = skyPatch.SolidAngle;
-                    for (int c = 0; c < cellCount; c++)
-                    {
-                        Vector3D normal = normals[c];
-                        if (normal == null)
-                        {
-                            continue;
-                        }
-
-                        double cosTheta = normal.DotProduct(direction);
-                        if (cosTheta <= 0)
-                        {
-                            continue;
-                        }
-
-                        double w = cosTheta * weight;
-                        if (!isGround && skyPatch.IsHorizonBand)
-                        {
-                            buffer[3 * cellCount + c] += w;   // horizon denominator (all band patches)
-                        }
-
-                        if (!visible[c])
-                        {
-                            continue;
-                        }
-
-                        if (isGround)
-                        {
-                            buffer[2 * cellCount + c] += w;
-                        }
-                        else
-                        {
-                            buffer[0 * cellCount + c] += w;   // sky numerator
-                            if (skyPatch.IsHorizonBand)
-                            {
-                                buffer[1 * cellCount + c] += w;   // horizon numerator (visible only)
-                            }
-                        }
-                    }
-
-                    return buffer;
-                },
-                buffer =>
+                for (int c = 0; c < cellCount; c++)
                 {
-                    lock (lockObject)
+                    Vector3D normal = normals[c];
+                    if (normal == null)
                     {
-                        for (int c = 0; c < cellCount; c++)
+                        continue;
+                    }
+
+                    double cosTheta = normal.DotProduct(direction);
+                    if (cosTheta <= 0)
+                    {
+                        continue;
+                    }
+
+                    double w = cosTheta * weight;
+                    if (!isGround && skyPatch.IsHorizonBand)
+                    {
+                        horizonDenominators[c] += w;   // all band patches
+                    }
+
+                    if (!visible[c])
+                    {
+                        continue;
+                    }
+
+                    if (isGround)
+                    {
+                        groundViewFactors[c] += w;
+                    }
+                    else
+                    {
+                        skyViewFactors[c] += w;
+                        if (skyPatch.IsHorizonBand)
                         {
-                            skyViewFactors[c] += buffer[0 * cellCount + c];
-                            horizonNumerators[c] += buffer[1 * cellCount + c];
-                            groundViewFactors[c] += buffer[2 * cellCount + c];
-                            horizonDenominators[c] += buffer[3 * cellCount + c];
+                            horizonNumerators[c] += w;   // visible band patches only
                         }
                     }
-                });
+                }
+            }
 
             // Normalise: view factors are defined against the full cosine-weighted dome (pi
             // steradians per hemisphere). The horizon factor is normalised against the cell's own
