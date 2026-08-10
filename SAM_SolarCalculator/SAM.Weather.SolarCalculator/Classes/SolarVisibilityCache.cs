@@ -1,5 +1,5 @@
 ﻿// SPDX-License-Identifier: LGPL-3.0-or-later
-// Copyright (c) 2020â€“2026 Michal Dengusiak & Jakub Ziolkowski and contributors
+// Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
 
 using System;
 using System.Collections.Generic;
@@ -16,21 +16,24 @@ namespace SAM.Weather.SolarCalculator
     /// build once; any AnalysisPeriod is then evaluated arithmetically, with no geometric pass.
     ///
     /// The cache is deliberately WEATHER-INDEPENDENT: bins are defined by solar geometry (bin
-    /// centres), so the same cache remains valid for any weather file and any period within the
-    /// cache's year. The identity string covers everything that must invalidate the cache:
-    /// schema/algorithm version, context + cell geometry hash, cell size, bin angular resolution,
-    /// minimum horizon angle, tolerances, and the bin-defining location/year.
+    /// centres), so the same cache remains valid for any weather file and any AnalysisPeriod within
+    /// the cache's year. The identity string covers everything that must invalidate the cache:
+    /// schema/algorithm version, order-independent occluder hash, ORDER- and ORIENTATION-sensitive
+    /// analysis-cell hash, cell size, bin angular resolution, minimum horizon angle, tolerances,
+    /// and the sun-position drivers (latitude, longitude, fractional UTC offset, year, and the
+    /// sun-position sampling shift of the timeline the bins were built for).
     /// </summary>
     public class SolarVisibilityCache : IJSAMObject, ISolarObject
     {
         /// <summary>Cache schema/algorithm version. Bump whenever the layout or raycast changes.</summary>
-        public const int CurrentSchemaVersion = 1;
+        public const int CurrentSchemaVersion = 2;
 
         /// <summary>Visibility algorithm tag recorded in the identity.</summary>
         public const string Algorithm = "CellRaycast";
 
         private int schemaVersion = CurrentSchemaVersion;
-        private string geometryHash;
+        private string contextGeometryHash;
+        private string targetGeometryHash;
         private double cellSize = double.NaN;
         private double binSizeDegrees = double.NaN;
         private double minHorizonAngle = double.NaN;
@@ -40,6 +43,8 @@ namespace SAM.Weather.SolarCalculator
         private double tolerance_Distance = double.NaN;
         private double latitude = double.NaN;
         private double longitude = double.NaN;
+        private double timeZoneOffset = double.NaN;
+        private double sunPositionShiftInMinutes;
         private int year;
         private int cellCount;
         private List<SunBin> bins;
@@ -48,9 +53,10 @@ namespace SAM.Weather.SolarCalculator
         [NonSerialized]
         private Dictionary<Tuple<int, int>, int> binIndexByCoordinates;
 
-        public SolarVisibilityCache(string geometryHash, double cellSize, double binSizeDegrees, double minHorizonAngle, double tolerance_Area, double tolerance_Snap, double tolerance_Angle, double tolerance_Distance, double latitude, double longitude, int year, int cellCount, IEnumerable<SunBin> bins, ulong[][] litBits)
+        public SolarVisibilityCache(string contextGeometryHash, string targetGeometryHash, double cellSize, double binSizeDegrees, double minHorizonAngle, double tolerance_Area, double tolerance_Snap, double tolerance_Angle, double tolerance_Distance, double latitude, double longitude, double timeZoneOffset, double sunPositionShiftInMinutes, int year, int cellCount, IEnumerable<SunBin> bins, ulong[][] litBits)
         {
-            this.geometryHash = geometryHash;
+            this.contextGeometryHash = contextGeometryHash;
+            this.targetGeometryHash = targetGeometryHash;
             this.cellSize = cellSize;
             this.binSizeDegrees = binSizeDegrees;
             this.minHorizonAngle = minHorizonAngle;
@@ -60,6 +66,8 @@ namespace SAM.Weather.SolarCalculator
             this.tolerance_Distance = tolerance_Distance;
             this.latitude = latitude;
             this.longitude = longitude;
+            this.timeZoneOffset = timeZoneOffset;
+            this.sunPositionShiftInMinutes = sunPositionShiftInMinutes;
             this.year = year;
             this.cellCount = cellCount;
             this.bins = bins == null ? null : new List<SunBin>(bins);
@@ -72,7 +80,8 @@ namespace SAM.Weather.SolarCalculator
             if (solarVisibilityCache != null)
             {
                 schemaVersion = solarVisibilityCache.schemaVersion;
-                geometryHash = solarVisibilityCache.geometryHash;
+                contextGeometryHash = solarVisibilityCache.contextGeometryHash;
+                targetGeometryHash = solarVisibilityCache.targetGeometryHash;
                 cellSize = solarVisibilityCache.cellSize;
                 binSizeDegrees = solarVisibilityCache.binSizeDegrees;
                 minHorizonAngle = solarVisibilityCache.minHorizonAngle;
@@ -82,6 +91,8 @@ namespace SAM.Weather.SolarCalculator
                 tolerance_Distance = solarVisibilityCache.tolerance_Distance;
                 latitude = solarVisibilityCache.latitude;
                 longitude = solarVisibilityCache.longitude;
+                timeZoneOffset = solarVisibilityCache.timeZoneOffset;
+                sunPositionShiftInMinutes = solarVisibilityCache.sunPositionShiftInMinutes;
                 year = solarVisibilityCache.year;
                 cellCount = solarVisibilityCache.cellCount;
                 bins = solarVisibilityCache.bins?.ConvertAll(x => x == null ? null : new SunBin(x));
@@ -110,11 +121,21 @@ namespace SAM.Weather.SolarCalculator
             }
         }
 
-        public string GeometryHash
+        /// <summary>Order-independent hash of the occluder geometry.</summary>
+        public string ContextGeometryHash
         {
             get
             {
-                return geometryHash;
+                return contextGeometryHash;
+            }
+        }
+
+        /// <summary>Order- and orientation-sensitive hash of the analysis cells.</summary>
+        public string TargetGeometryHash
+        {
+            get
+            {
+                return targetGeometryHash;
             }
         }
 
@@ -139,6 +160,28 @@ namespace SAM.Weather.SolarCalculator
             get
             {
                 return minHorizonAngle;
+            }
+        }
+
+        /// <summary>Fractional UTC offset in hours (e.g. 5.5 for UTC+05:30) the bins were built with.</summary>
+        public double TimeZoneOffset
+        {
+            get
+            {
+                return timeZoneOffset;
+            }
+        }
+
+        /// <summary>
+        /// Sun-position sampling shift of the timeline the bins were built for, in minutes
+        /// (e.g. +30 for an interval-start EPW weather timeline, -30 for TAS EDSL compatibility).
+        /// Bin membership is only meaningful when the evaluation applies the same shift.
+        /// </summary>
+        public double SunPositionShiftInMinutes
+        {
+            get
+            {
+                return sunPositionShiftInMinutes;
             }
         }
 
@@ -183,7 +226,8 @@ namespace SAM.Weather.SolarCalculator
             return string.Join(";",
                 schemaVersion,
                 Algorithm,
-                geometryHash,
+                contextGeometryHash,
+                targetGeometryHash,
                 cellSize.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
                 binSizeDegrees.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
                 minHorizonAngle.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
@@ -193,6 +237,8 @@ namespace SAM.Weather.SolarCalculator
                 tolerance_Distance.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
                 latitude.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
                 longitude.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
+                timeZoneOffset.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
+                sunPositionShiftInMinutes.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
                 year,
                 cellCount);
         }
@@ -204,13 +250,15 @@ namespace SAM.Weather.SolarCalculator
 
         /// <summary>
         /// True when this cache matches every identity input of a would-be build. Use it to decide
-        /// reuse without rebuilding: any change in context geometry, cell layout, bin resolution,
-        /// tolerances, location or year returns false.
+        /// reuse without rebuilding: any change in occluder geometry, cell geometry/order/orientation,
+        /// cell size, bin resolution, tolerances, location, timezone, sun-position shift or year
+        /// returns false.
         /// </summary>
-        public bool Matches(string geometryHash, double cellSize, double binSizeDegrees, double minHorizonAngle, double tolerance_Area, double tolerance_Snap, double tolerance_Angle, double tolerance_Distance, double latitude, double longitude, int year, int cellCount)
+        public bool Matches(string contextGeometryHash, string targetGeometryHash, double cellSize, double binSizeDegrees, double minHorizonAngle, double tolerance_Area, double tolerance_Snap, double tolerance_Angle, double tolerance_Distance, double latitude, double longitude, double timeZoneOffset, double sunPositionShiftInMinutes, int year, int cellCount)
         {
             return schemaVersion == CurrentSchemaVersion
-                && this.geometryHash == geometryHash
+                && this.contextGeometryHash == contextGeometryHash
+                && this.targetGeometryHash == targetGeometryHash
                 && this.cellSize == cellSize
                 && this.binSizeDegrees == binSizeDegrees
                 && this.minHorizonAngle == minHorizonAngle
@@ -220,6 +268,8 @@ namespace SAM.Weather.SolarCalculator
                 && this.tolerance_Distance == tolerance_Distance
                 && this.latitude == latitude
                 && this.longitude == longitude
+                && this.timeZoneOffset == timeZoneOffset
+                && this.sunPositionShiftInMinutes == sunPositionShiftInMinutes
                 && this.year == year
                 && this.cellCount == cellCount;
         }
@@ -288,9 +338,14 @@ namespace SAM.Weather.SolarCalculator
                 schemaVersion = jObject["SchemaVersion"]?.GetValue<int>() ?? default;
             }
 
-            if (jObject.ContainsKey("GeometryHash"))
+            if (jObject.ContainsKey("ContextGeometryHash"))
             {
-                geometryHash = jObject["GeometryHash"]?.GetValue<string>();
+                contextGeometryHash = jObject["ContextGeometryHash"]?.GetValue<string>();
+            }
+
+            if (jObject.ContainsKey("TargetGeometryHash"))
+            {
+                targetGeometryHash = jObject["TargetGeometryHash"]?.GetValue<string>();
             }
 
             if (jObject.ContainsKey("CellSize"))
@@ -336,6 +391,16 @@ namespace SAM.Weather.SolarCalculator
             if (jObject.ContainsKey("Longitude"))
             {
                 longitude = jObject["Longitude"]?.GetValue<double>() ?? double.NaN;
+            }
+
+            if (jObject.ContainsKey("TimeZoneOffset"))
+            {
+                timeZoneOffset = jObject["TimeZoneOffset"]?.GetValue<double>() ?? double.NaN;
+            }
+
+            if (jObject.ContainsKey("SunPositionShiftInMinutes"))
+            {
+                sunPositionShiftInMinutes = jObject["SunPositionShiftInMinutes"]?.GetValue<double>() ?? default;
             }
 
             if (jObject.ContainsKey("Year"))
@@ -387,9 +452,14 @@ namespace SAM.Weather.SolarCalculator
 
             jObject.Add("SchemaVersion", schemaVersion);
 
-            if (geometryHash != null)
+            if (contextGeometryHash != null)
             {
-                jObject.Add("GeometryHash", geometryHash);
+                jObject.Add("ContextGeometryHash", contextGeometryHash);
+            }
+
+            if (targetGeometryHash != null)
+            {
+                jObject.Add("TargetGeometryHash", targetGeometryHash);
             }
 
             jObject.Add("CellSize", cellSize);
@@ -401,6 +471,8 @@ namespace SAM.Weather.SolarCalculator
             jObject.Add("Tolerance_Distance", tolerance_Distance);
             jObject.Add("Latitude", latitude);
             jObject.Add("Longitude", longitude);
+            jObject.Add("TimeZoneOffset", timeZoneOffset);
+            jObject.Add("SunPositionShiftInMinutes", sunPositionShiftInMinutes);
             jObject.Add("Year", year);
             jObject.Add("CellCount", cellCount);
 

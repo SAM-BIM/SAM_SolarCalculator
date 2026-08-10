@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-3.0-or-later
+﻿// SPDX-License-Identifier: LGPL-3.0-or-later
 // Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
 
 using System;
@@ -22,17 +22,19 @@ namespace SAM.Weather.SolarCalculator
     ///                        ground assumed; unobstructed: (1-cosB)/2). Weights ground-reflected.
     /// The circumsolar component uses the direct-beam SolarVisibilityCache (obstruction in the
     /// actual sun direction), so all three anisotropic diffuse components are handled separately.
-    /// Identity covers schema/algorithm version, patch subdivision, geometry hash, cell size and
-    /// tolerances; it is independent of location, year, weather and AnalysisPeriod.
+    /// Identity covers schema/algorithm version, patch subdivision, order-independent occluder
+    /// hash, ORDER- and ORIENTATION-sensitive cell hash, cell size and tolerances; it is
+    /// independent of location, year, weather and AnalysisPeriod.
     /// </summary>
     public class SkyVisibilityCache : IJSAMObject, ISolarObject
     {
-        public const int CurrentSchemaVersion = 1;
+        public const int CurrentSchemaVersion = 2;
 
         public const string Algorithm = "PatchRaycast";
 
         private int schemaVersion = CurrentSchemaVersion;
-        private string geometryHash;
+        private string contextGeometryHash;
+        private string targetGeometryHash;
         private double cellSize = double.NaN;
         private double tolerance_Area = double.NaN;
         private double tolerance_Snap = double.NaN;
@@ -44,9 +46,10 @@ namespace SAM.Weather.SolarCalculator
         private double[] horizonViewFactors;
         private double[] groundViewFactors;
 
-        public SkyVisibilityCache(string geometryHash, double cellSize, double tolerance_Area, double tolerance_Snap, double tolerance_Angle, double tolerance_Distance, Geometry.SolarCalculator.SkyPatchSubdivision skyPatchSubdivision, int cellCount, double[] skyViewFactors, double[] horizonViewFactors, double[] groundViewFactors)
+        public SkyVisibilityCache(string contextGeometryHash, string targetGeometryHash, double cellSize, double tolerance_Area, double tolerance_Snap, double tolerance_Angle, double tolerance_Distance, Geometry.SolarCalculator.SkyPatchSubdivision skyPatchSubdivision, int cellCount, double[] skyViewFactors, double[] horizonViewFactors, double[] groundViewFactors)
         {
-            this.geometryHash = geometryHash;
+            this.contextGeometryHash = contextGeometryHash;
+            this.targetGeometryHash = targetGeometryHash;
             this.cellSize = cellSize;
             this.tolerance_Area = tolerance_Area;
             this.tolerance_Snap = tolerance_Snap;
@@ -64,7 +67,8 @@ namespace SAM.Weather.SolarCalculator
             if (skyVisibilityCache != null)
             {
                 schemaVersion = skyVisibilityCache.schemaVersion;
-                geometryHash = skyVisibilityCache.geometryHash;
+                contextGeometryHash = skyVisibilityCache.contextGeometryHash;
+                targetGeometryHash = skyVisibilityCache.targetGeometryHash;
                 cellSize = skyVisibilityCache.cellSize;
                 tolerance_Area = skyVisibilityCache.tolerance_Area;
                 tolerance_Snap = skyVisibilityCache.tolerance_Snap;
@@ -91,11 +95,21 @@ namespace SAM.Weather.SolarCalculator
             }
         }
 
-        public string GeometryHash
+        /// <summary>Order-independent hash of the occluder geometry.</summary>
+        public string ContextGeometryHash
         {
             get
             {
-                return geometryHash;
+                return contextGeometryHash;
+            }
+        }
+
+        /// <summary>Order- and orientation-sensitive hash of the analysis cells.</summary>
+        public string TargetGeometryHash
+        {
+            get
+            {
+                return targetGeometryHash;
             }
         }
 
@@ -121,7 +135,8 @@ namespace SAM.Weather.SolarCalculator
                 schemaVersion,
                 Algorithm,
                 skyPatchSubdivision,
-                geometryHash,
+                contextGeometryHash,
+                targetGeometryHash,
                 cellSize.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
                 tolerance_Area.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
                 tolerance_Snap.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
@@ -139,10 +154,11 @@ namespace SAM.Weather.SolarCalculator
         /// True when this cache matches every identity input of a would-be build. Independent of
         /// location, year, weather and AnalysisPeriod by construction.
         /// </summary>
-        public bool Matches(string geometryHash, double cellSize, Geometry.SolarCalculator.SkyPatchSubdivision skyPatchSubdivision, double tolerance_Area, double tolerance_Snap, double tolerance_Angle, double tolerance_Distance, int cellCount)
+        public bool Matches(string contextGeometryHash, string targetGeometryHash, double cellSize, Geometry.SolarCalculator.SkyPatchSubdivision skyPatchSubdivision, double tolerance_Area, double tolerance_Snap, double tolerance_Angle, double tolerance_Distance, int cellCount)
         {
             return schemaVersion == CurrentSchemaVersion
-                && this.geometryHash == geometryHash
+                && this.contextGeometryHash == contextGeometryHash
+                && this.targetGeometryHash == targetGeometryHash
                 && this.cellSize == cellSize
                 && this.skyPatchSubdivision == skyPatchSubdivision
                 && this.tolerance_Area == tolerance_Area
@@ -182,9 +198,14 @@ namespace SAM.Weather.SolarCalculator
                 schemaVersion = jObject["SchemaVersion"]?.GetValue<int>() ?? default;
             }
 
-            if (jObject.ContainsKey("GeometryHash"))
+            if (jObject.ContainsKey("ContextGeometryHash"))
             {
-                geometryHash = jObject["GeometryHash"]?.GetValue<string>();
+                contextGeometryHash = jObject["ContextGeometryHash"]?.GetValue<string>();
+            }
+
+            if (jObject.ContainsKey("TargetGeometryHash"))
+            {
+                targetGeometryHash = jObject["TargetGeometryHash"]?.GetValue<string>();
             }
 
             if (jObject.ContainsKey("CellSize"))
@@ -236,9 +257,14 @@ namespace SAM.Weather.SolarCalculator
 
             jObject.Add("SchemaVersion", schemaVersion);
 
-            if (geometryHash != null)
+            if (contextGeometryHash != null)
             {
-                jObject.Add("GeometryHash", geometryHash);
+                jObject.Add("ContextGeometryHash", contextGeometryHash);
+            }
+
+            if (targetGeometryHash != null)
+            {
+                jObject.Add("TargetGeometryHash", targetGeometryHash);
             }
 
             jObject.Add("CellSize", cellSize);

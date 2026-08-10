@@ -1,5 +1,5 @@
-﻿// SPDX-License-Identifier: LGPL-3.0-or-later
-// Copyright (c) 2020â€“2026 Michal Dengusiak & Jakub Ziolkowski and contributors
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
 
 using System.Collections.Generic;
 
@@ -13,13 +13,13 @@ namespace SAM.Core.SolarCalculator
         /// halves of the year. A null location is treated as northern hemisphere.
         ///
         /// Conventions (northern hemisphere; mirrored in the south):
-        ///   Summer        = 1 Jun â€“ 31 Aug
-        ///   Winter        = 1 Dec â€“ end of Feb (year-wrapping)
-        ///   CoolingSeason = 1 May â€“ 30 Sep
-        ///   HeatingSeason = 1 Oct â€“ 31 Mar (year-wrapping)
+        ///   Summer        = 1 Jun – 31 Aug
+        ///   Winter        = 1 Dec – end of Feb (year-wrapping)
+        ///   CoolingSeason = 1 May – 30 Sep
+        ///   HeatingSeason = 1 Oct – 31 Mar (year-wrapping)
         ///   PeakSummerDay = 21 Jun (solar-declination maximum)
         ///   PeakWinterDay = 21 Dec
-        ///   Equinox       = two 14-day windows centred on the equinoxes (15â€“28 Mar and 17â€“30 Sep),
+        ///   Equinox       = two 14-day windows centred on the equinoxes (15–28 Mar and 17–30 Sep),
         ///                   emitted as explicit hours of the year.
         /// </summary>
         public static AnalysisPeriod AnalysisPeriod(this AnalysisPeriodPreset analysisPeriodPreset, int year, Location location = null)

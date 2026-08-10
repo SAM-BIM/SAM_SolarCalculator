@@ -63,38 +63,41 @@ namespace SAM.Geometry.SolarCalculator
         }
 
         /// <summary>
-        /// Irradiance on a surface under an explicit sky model.
+        /// Irradiance on a surface under an explicit sky model, PHYSICAL convention path.
         ///
-        /// SkyModel.Isotropic delegates to the legacy overload above, unchanged (same signature
-        /// conventions: tilt_Temp = 180 - tilt, solar azimuth rotated by +90 degrees).
+        /// The receiving surface is given as its OUTWARD-oriented <see cref="SAM.Geometry.Spatial.Plane"/>
+        /// (plane normal = the direction the surface receives radiation on). This is deliberately a
+        /// different API shape from the legacy overload above: the legacy (tilt, surfaceAzimuth)
+        /// doubles keep their historical meaning (inward-normal tilt and a +90 degree solar-azimuth
+        /// rotation, kept for compatibility) and must never be mixed with this path.
         ///
-        /// SkyModel.PerezAnisotropic implements Perez et al. 1990 (Solar Energy 44(5), 271-289) with
-        /// PHYSICAL input conventions, which differ from the legacy isotropic path:
-        ///   - tilt: tilt of the RECEIVING (outward) normal from horizontal, degrees
-        ///           (0 = up-facing, 90 = vertical, 180 = down-facing);
-        ///   - surfaceAzimuth: compass azimuth of the outward normal, degrees clockwise from north;
-        ///   - directNormalIrradiance: true direct normal irradiance (DNI), W/m2.
-        /// Components: beam = DNI * max(0, cosThetaI); diffuse = DHI * [(1-F1)*(1+cosB)/2*SVF +
-        /// F1*(a/b) + F2*sinB*SVF]; ground = GHI * albedo * GVF * (1-cosB)/2.
+        /// Components (Perez et al. 1990, Solar Energy 44(5), 271-289, for PerezAnisotropic):
+        ///   beam    = DNI * max(0, cosThetaI)
+        ///   diffuse = DHI * [(1-F1)*(1+cosB)/2*SVF + F1*(a/b) + F2*sinB*SVF]   (clamped >= 0)
+        ///   ground  = GHI * albedo * GVF * (1-cosB)/2
+        /// where B is the receiving-side tilt from horizontal, a = max(0, cosThetaI),
+        /// b = max(cos 85 deg, cos theta_z). For Isotropic the same physical conventions apply with
+        /// diffuse = DHI * (1+cosB)/2 * SVF (the corrected isotropic, NOT the legacy formula).
+        /// directNormalIrradiance is true DNI, W/m2.
+        ///
         /// With scalar view factors (no directional visibility), skyViewFactor scales the isotropic
         /// and horizon terms and the circumsolar term is kept whenever the sun is in front of the
         /// surface. For component-aware obstruction (circumsolar removed when the sun is obstructed,
         /// horizon term scaled by horizon-band visibility) use the SolarVisibilityCache /
-        /// SkyVisibilityCache evaluation path.
+        /// SkyVisibilityCache evaluation path (SAM.Analytical.SolarCalculator.Query.CachedIrradiance).
         /// </summary>
-        public static Radiation Radiation(this SolarTimes solarTimes, double tilt, double surfaceAzimuth, double directNormalIrradiance, double diffuseHorizontalIrradiance, double globalHorizontalIrradiance, SkyModel skyModel, double skyViewFactor = 1, double groundViewFactor = 1, double albedo = 0.2)
+        /// <param name="solarTimes">Solar position source.</param>
+        /// <param name="plane">OUTWARD-oriented receiving plane (normal = receiving side).</param>
+        /// <param name="directNormalIrradiance">True direct normal irradiance (DNI), W/m2.</param>
+        /// <param name="diffuseHorizontalIrradiance">DHI, W/m2.</param>
+        /// <param name="globalHorizontalIrradiance">GHI, W/m2.</param>
+        /// <param name="skyModel">Sky model.</param>
+        /// <param name="skyViewFactor">Scalar sky view factor (1 = unobstructed).</param>
+        /// <param name="groundViewFactor">Scalar ground view factor (1 = fully ground-exposed).</param>
+        /// <param name="albedo">Ground reflectance.</param>
+        public static Radiation Radiation(this SolarTimes solarTimes, Spatial.Plane plane, double directNormalIrradiance, double diffuseHorizontalIrradiance, double globalHorizontalIrradiance, SkyModel skyModel, double skyViewFactor = 1, double groundViewFactor = 1, double albedo = 0.2)
         {
-            if (skyModel == SkyModel.Isotropic)
-            {
-                return Radiation(solarTimes, tilt, surfaceAzimuth, directNormalIrradiance, diffuseHorizontalIrradiance, globalHorizontalIrradiance, skyViewFactor, groundViewFactor, albedo);
-            }
-
-            if (skyModel != SkyModel.PerezAnisotropic)
-            {
-                return null;
-            }
-
-            if (solarTimes == null || double.IsNaN(directNormalIrradiance) || double.IsNaN(diffuseHorizontalIrradiance) || double.IsNaN(globalHorizontalIrradiance))
+            if (solarTimes == null || plane == null || double.IsNaN(directNormalIrradiance) || double.IsNaN(diffuseHorizontalIrradiance) || double.IsNaN(globalHorizontalIrradiance))
             {
                 return null;
             }
@@ -107,32 +110,56 @@ namespace SAM.Geometry.SolarCalculator
             }
 
             double solarElevation = Convert.ToDouble(angle_SolarElevation.Radians);   // radians
-            double solarAzimuth = Convert.ToDouble(angle_SolarAzimuth.Degrees);       // compass degrees from north (NOAA)
+            double solarAzimuth = Convert.ToDouble(angle_SolarAzimuth.Radians);       // radians, compass clockwise from north (NOAA)
 
-            double tiltRadians = tilt * Math.PI / 180.0;   // receiving-side tilt from horizontal
-
-            // Angle of incidence on the receiving side.
-            double cosThetaI = Math.Sin(solarElevation) * Math.Cos(tiltRadians) +
-                               Math.Cos(solarElevation) * Math.Sin(tiltRadians) *
-                               Math.Cos((solarAzimuth - surfaceAzimuth) * Math.PI / 180);
-
-            if (!Query.TryGetPerezCoefficients(directNormalIrradiance, diffuseHorizontalIrradiance, solarElevation * 180.0 / Math.PI, solarTimes.ForDate.DayOfYear, out double f1, out double f2, out _, out _))
+            // Receiving-side geometry from the outward plane normal: B = tilt from horizontal
+            // (cosB = normal . +Z); the azimuth difference enters through the horizontal dot product.
+            Spatial.Vector3D normal = plane.Normal?.Unit;
+            if (normal == null)
             {
                 return null;
             }
 
-            double cosZenith = Math.Sin(solarElevation);
-            double a = Math.Max(0.0, cosThetaI);
-            double b = Math.Max(Math.Cos(85.0 * Math.PI / 180.0), cosZenith);
+            double cosBeta = System.Math.Max(-1.0, System.Math.Min(1.0, normal.Z));
+            double tiltRadians = System.Math.Acos(cosBeta);
+            double sinBeta = System.Math.Sin(tiltRadians);
 
-            double beam = directNormalIrradiance * a;
+            // cos(incidence) = normal . (surface -> sun unit vector); sun azimuth is compass-from-north.
+            double sunX = System.Math.Cos(solarElevation) * System.Math.Sin(solarAzimuth);
+            double sunY = System.Math.Cos(solarElevation) * System.Math.Cos(solarAzimuth);
+            double sunZ = System.Math.Sin(solarElevation);
+            double cosThetaI = normal.X * sunX + normal.Y * sunY + normal.Z * sunZ;
+
+            double beam = directNormalIrradiance * System.Math.Max(0.0, cosThetaI);
+            double ground = globalHorizontalIrradiance * albedo * groundViewFactor * (1.0 - cosBeta) / 2.0;
+
+            if (skyModel == SkyModel.Isotropic)
+            {
+                double diffuse_Isotropic = diffuseHorizontalIrradiance * (1.0 + cosBeta) / 2.0 * skyViewFactor;
+                return new Radiation(beam, System.Math.Max(0.0, diffuse_Isotropic), System.Math.Max(0.0, ground));
+            }
+
+            if (skyModel != SkyModel.PerezAnisotropic)
+            {
+                return null;
+            }
+
+            if (!Query.TryGetPerezCoefficients(directNormalIrradiance, diffuseHorizontalIrradiance, solarElevation * 180.0 / System.Math.PI, solarTimes.ForDate.DayOfYear, out double f1, out double f2, out _, out _))
+            {
+                return null;
+            }
+
+            double cosZenith = System.Math.Sin(solarElevation);
+            double a = System.Math.Max(0.0, cosThetaI);
+            double b = System.Math.Max(System.Math.Cos(85.0 * System.Math.PI / 180.0), cosZenith);
+
             double diffuse = diffuseHorizontalIrradiance *
-                ((1.0 - f1) * (1.0 + Math.Cos(tiltRadians)) / 2.0 * skyViewFactor +
+                ((1.0 - f1) * (1.0 + cosBeta) / 2.0 * skyViewFactor +
                  f1 * a / b +
-                 f2 * Math.Sin(tiltRadians) * skyViewFactor);
-            double ground = globalHorizontalIrradiance * albedo * groundViewFactor * (1.0 - Math.Cos(tiltRadians)) / 2.0;
+                 f2 * sinBeta * skyViewFactor);
 
-            return new Radiation(beam, diffuse, ground);
+            // Perez's (1-F1) can go negative under very clear skies; clamp the composed component.
+            return new Radiation(beam, System.Math.Max(0.0, diffuse), System.Math.Max(0.0, ground));
         }
     }
 }

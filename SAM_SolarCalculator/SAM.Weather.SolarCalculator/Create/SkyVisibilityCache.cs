@@ -38,16 +38,14 @@ namespace SAM.Weather.SolarCalculator
 
             List<Point3D> points = new List<Point3D>(analysisCells.Count);
             List<Vector3D> normals = new List<Vector3D>(analysisCells.Count);
-            List<Face3D> cellFaces = new List<Face3D>(analysisCells.Count);
             foreach (AnalysisCell analysisCell in analysisCells)
             {
                 points.Add(analysisCell?.InternalPoint3D);
-                Face3D face3D = analysisCell?.Face3D;
-                cellFaces.Add(face3D);
-                normals.Add(face3D?.GetPlane()?.Normal?.Unit);
+                normals.Add(analysisCell?.Face3D?.GetPlane()?.Normal?.Unit);
             }
 
-            string geometryHash = Geometry.SolarCalculator.Query.GeometryHash(occluders, cellFaces, tolerance_Distance);
+            string contextGeometryHash = Geometry.SolarCalculator.Query.GeometryHash(occluders, tolerance_Distance);
+            string targetGeometryHash = Geometry.SolarCalculator.Query.TargetHash(analysisCells, tolerance_Distance);
 
             int cellCount = analysisCells.Count;
 
@@ -143,7 +141,7 @@ namespace SAM.Weather.SolarCalculator
                 horizonViewFactors[c] = horizonDenominators[c] > 0 ? horizonNumerators[c] / horizonDenominators[c] : 0;
             }
 
-            return new SkyVisibilityCache(geometryHash, cellSize, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, skyPatchSubdivision, cellCount, skyViewFactors, horizonViewFactors, groundViewFactors);
+            return new SkyVisibilityCache(contextGeometryHash, targetGeometryHash, cellSize, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, skyPatchSubdivision, cellCount, skyViewFactors, horizonViewFactors, groundViewFactors);
         }
     }
 }

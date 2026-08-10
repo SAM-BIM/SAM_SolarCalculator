@@ -1,5 +1,5 @@
-﻿// SPDX-License-Identifier: LGPL-3.0-or-later
-// Copyright (c) 2020â€“2026 Michal Dengusiak & Jakub Ziolkowski and contributors
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
 
 using System;
 using System.Collections.Generic;
@@ -173,7 +173,7 @@ namespace SAM.SolarCalculator.Tests
         [Fact]
         public void ComplementaryPeriods_Partition_FullYear()
         {
-            // Two complementary custom periods whose union is exactly the full year â€” the correct
+            // Two complementary custom periods whose union is exactly the full year — the correct
             // conservation-test construction (seasons do not partition the year; these do).
             AnalysisPeriod firstHalf = new AnalysisPeriod(2018, 1, 1, 6, 30);
             AnalysisPeriod secondHalf = new AnalysisPeriod(2018, 7, 1, 12, 31);

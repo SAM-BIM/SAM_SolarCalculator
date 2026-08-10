@@ -34,8 +34,11 @@ namespace SAM.Analytical.SolarCalculator
         private double[] groundReflected;
         private double[] sunlitHours;
         private List<DateTime> dateTimes;
+        private int missedBinHours;
+        private int belowHorizonHours;
+        private int missingWeatherHours;
 
-        public ApertureIrradianceResult(string name, string source, string reference, AnalysisPeriod analysisPeriod, SkyModel skyModel, double cellSize, double binSizeDegrees, double albedo, double timeShiftInMinutes, double grossArea, double[] cellAreas, double[] direct, double[] diffuse, double[] groundReflected, double[] sunlitHours, IEnumerable<DateTime> dateTimes)
+        public ApertureIrradianceResult(string name, string source, string reference, AnalysisPeriod analysisPeriod, SkyModel skyModel, double cellSize, double binSizeDegrees, double albedo, double timeShiftInMinutes, double grossArea, double[] cellAreas, double[] direct, double[] diffuse, double[] groundReflected, double[] sunlitHours, IEnumerable<DateTime> dateTimes, int missedBinHours = 0, int belowHorizonHours = 0, int missingWeatherHours = 0)
             : base(name, source, reference)
         {
             this.analysisPeriod = analysisPeriod == null ? null : new AnalysisPeriod(analysisPeriod);
@@ -51,6 +54,9 @@ namespace SAM.Analytical.SolarCalculator
             this.groundReflected = groundReflected == null ? null : (double[])groundReflected.Clone();
             this.sunlitHours = sunlitHours == null ? null : (double[])sunlitHours.Clone();
             this.dateTimes = dateTimes == null ? null : new List<DateTime>(dateTimes);
+            this.missedBinHours = missedBinHours;
+            this.belowHorizonHours = belowHorizonHours;
+            this.missingWeatherHours = missingWeatherHours;
         }
 
         public ApertureIrradianceResult(ApertureIrradianceResult apertureIrradianceResult)
@@ -71,6 +77,9 @@ namespace SAM.Analytical.SolarCalculator
                 groundReflected = apertureIrradianceResult.groundReflected == null ? null : (double[])apertureIrradianceResult.groundReflected.Clone();
                 sunlitHours = apertureIrradianceResult.sunlitHours == null ? null : (double[])apertureIrradianceResult.sunlitHours.Clone();
                 dateTimes = apertureIrradianceResult.dateTimes == null ? null : new List<DateTime>(apertureIrradianceResult.dateTimes);
+                missedBinHours = apertureIrradianceResult.missedBinHours;
+                belowHorizonHours = apertureIrradianceResult.belowHorizonHours;
+                missingWeatherHours = apertureIrradianceResult.missingWeatherHours;
             }
         }
 
@@ -250,6 +259,33 @@ namespace SAM.Analytical.SolarCalculator
             }
         }
 
+        /// <summary>Hours skipped because their sun position fell outside the cached bins (0 for a consistent cache/timeline pair).</summary>
+        public int MissedBinHours
+        {
+            get
+            {
+                return missedBinHours;
+            }
+        }
+
+        /// <summary>Period hours skipped because the sun was below the minimum horizon angle.</summary>
+        public int BelowHorizonHours
+        {
+            get
+            {
+                return belowHorizonHours;
+            }
+        }
+
+        /// <summary>Period hours skipped for missing/invalid weather values.</summary>
+        public int MissingWeatherHours
+        {
+            get
+            {
+                return missingWeatherHours;
+            }
+        }
+
         public override bool FromJsonObject(JsonObject jObject)
         {
             if (!base.FromJsonObject(jObject))
@@ -312,6 +348,21 @@ namespace SAM.Analytical.SolarCalculator
                 }
             }
 
+            if (jObject.ContainsKey("MissedBinHours"))
+            {
+                missedBinHours = jObject["MissedBinHours"]?.GetValue<int>() ?? default;
+            }
+
+            if (jObject.ContainsKey("BelowHorizonHours"))
+            {
+                belowHorizonHours = jObject["BelowHorizonHours"]?.GetValue<int>() ?? default;
+            }
+
+            if (jObject.ContainsKey("MissingWeatherHours"))
+            {
+                missingWeatherHours = jObject["MissingWeatherHours"]?.GetValue<int>() ?? default;
+            }
+
             return true;
         }
 
@@ -350,6 +401,10 @@ namespace SAM.Analytical.SolarCalculator
                 }
                 jObject.Add("DateTimes", jArray);
             }
+
+            jObject.Add("MissedBinHours", missedBinHours);
+            jObject.Add("BelowHorizonHours", belowHorizonHours);
+            jObject.Add("MissingWeatherHours", missingWeatherHours);
 
             return jObject;
         }

@@ -15,7 +15,9 @@ namespace SAM.Analytical.SolarCalculator
         /// Builds the aperture-centric analysis targets for a model. When apertureGuids is null or
         /// empty, every aperture on a sun-exposed external (single-space) panel is selected —
         /// mirroring the panel filter in Convert.ToSAM_SolarModel. An explicit selection returns
-        /// exactly the resolvable subset. Each target's Face3D is re-oriented to the resolved
+        /// exactly the resolvable subset, minus apertures on two-space (interior) panels, which are
+        /// always rejected (an internal aperture receives no direct sun and would produce
+        /// physically meaningless results). Each target's Face3D is re-oriented to the resolved
         /// OUTWARD normal, so flipped aperture winding cannot invert the analysis.
         /// </summary>
         public static List<ApertureSolarTarget> ApertureSolarTargets(this AnalyticalModel analyticalModel, IEnumerable<Guid> apertureGuids = null, double cellSize = 0.5, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Distance = Core.Tolerance.Distance)
@@ -52,16 +54,20 @@ namespace SAM.Analytical.SolarCalculator
 
                 bool explicitSelection = selection != null;
 
+                // Two-space (interior) panels never produce targets: their apertures receive no
+                // direct sun and would yield physically meaningless results. Applies to explicit
+                // selections too — an explicitly requested internal aperture is rejected, not
+                // silently analysed.
+                List<Space> spaces = adjacencyCluster.GetSpaces(panel);
+                if (spaces != null && spaces.Count >= 2)
+                {
+                    continue;
+                }
+
                 if (!explicitSelection)
                 {
                     // Default selection: mirror Convert.ToSAM_SolarModel — sun-exposed panels that
                     // are not shared by two spaces.
-                    List<Space> spaces = adjacencyCluster.GetSpaces(panel);
-                    if (spaces != null && spaces.Count >= 2)
-                    {
-                        continue;
-                    }
-
                     if (!panel.IsExposedToSun())
                     {
                         continue;

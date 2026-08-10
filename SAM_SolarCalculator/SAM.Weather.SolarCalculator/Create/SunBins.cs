@@ -16,12 +16,19 @@ namespace SAM.Weather.SolarCalculator
         /// independent of the selected AnalysisPeriod and weather file. Hours whose sun is below
         /// minHorizonAngle are discarded. Each bin's representative direction is the angular bin
         /// centre (deterministic, weather-independent).
+        ///
+        /// timeShiftInMinutes makes the sun-position sampling convention of the timeline explicit:
+        /// bin membership of the weather-timeline hour h is decided by the sun at h + shift
+        /// (+30 for interval-start EPW timelines, -30 for TAS EDSL compatibility). Membership and
+        /// evaluation must use the same shift, which is why the shift is recorded in the cache
+        /// identity. Stored hours of the year remain on the weather (unshifted) timeline.
         /// </summary>
         /// <param name="location">Reference location (latitude/longitude/time zone).</param>
         /// <param name="dateTimes">Weather-timeline DateTimes (whole hours).</param>
         /// <param name="binSizeDegrees">Angular bin size in degrees (altitude x azimuth).</param>
         /// <param name="minHorizonAngle">Minimum sun altitude above the horizon, RADIANS (Core.Tolerance convention).</param>
-        public static List<SunBin> SunBins(this Location location, IEnumerable<DateTime> dateTimes, double binSizeDegrees, double minHorizonAngle = Core.Tolerance.Angle)
+        /// <param name="timeShiftInMinutes">Sun-position sampling offset relative to each timestamp, minutes.</param>
+        public static List<SunBin> SunBins(this Location location, IEnumerable<DateTime> dateTimes, double binSizeDegrees, double minHorizonAngle = Core.Tolerance.Angle, double timeShiftInMinutes = 0)
         {
             if (location == null || dateTimes == null || double.IsNaN(binSizeDegrees) || binSizeDegrees <= 0)
             {
@@ -33,7 +40,9 @@ namespace SAM.Weather.SolarCalculator
             Dictionary<Tuple<int, int>, List<int>> dictionary = new Dictionary<Tuple<int, int>, List<int>>();
             foreach (DateTime dateTime in dateTimes)
             {
-                Vector3D sunDirection = Geometry.SolarCalculator.Query.SunDirection(location, dateTime, true);
+                DateTime sunTime = timeShiftInMinutes == 0 ? dateTime : dateTime.AddMinutes(timeShiftInMinutes);
+
+                Vector3D sunDirection = Geometry.SolarCalculator.Query.SunDirection(location, sunTime, true);
                 if (!Geometry.SolarCalculator.Query.TryGetSunAngles(sunDirection, out double altitude, out double azimuth))
                 {
                     continue;
@@ -88,7 +97,7 @@ namespace SAM.Weather.SolarCalculator
         /// Full-year convenience overload: bins every hour of the given year, so the result covers
         /// any AnalysisPeriod within that year.
         /// </summary>
-        public static List<SunBin> SunBins(this Location location, int year, double binSizeDegrees, double minHorizonAngle = Core.Tolerance.Angle)
+        public static List<SunBin> SunBins(this Location location, int year, double binSizeDegrees, double minHorizonAngle = Core.Tolerance.Angle, double timeShiftInMinutes = 0)
         {
             int count = DateTime.IsLeapYear(year) ? 8784 : 8760;
             DateTime start = new DateTime(year, 1, 1);
@@ -99,7 +108,7 @@ namespace SAM.Weather.SolarCalculator
                 dateTimes.Add(start.AddHours(i));
             }
 
-            return SunBins(location, dateTimes, binSizeDegrees, minHorizonAngle);
+            return SunBins(location, dateTimes, binSizeDegrees, minHorizonAngle, timeShiftInMinutes);
         }
 
         /// <summary>

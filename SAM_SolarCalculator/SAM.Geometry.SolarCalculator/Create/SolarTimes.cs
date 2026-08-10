@@ -23,7 +23,9 @@ namespace SAM.Geometry.SolarCalculator
 
             double timeZoneOffset = Query.TimeZoneOffset(location);
 
-            return new Innovative.SolarCalculator.SolarTimes(new DateTimeOffset(dateTime, TimeSpan.FromHours(timeZoneOffset)), new Angle(location.Latitude), new Angle(location.Longitude));
+            // DateTimeOffset(DateTime, TimeSpan) throws for Kind Utc/Local with a mismatched offset;
+            // SAM timeline timestamps are location-local floating times, so normalise to Unspecified.
+            return new Innovative.SolarCalculator.SolarTimes(new DateTimeOffset(DateTime.SpecifyKind(dateTime, DateTimeKind.Unspecified), TimeSpan.FromHours(timeZoneOffset)), new Angle(location.Latitude), new Angle(location.Longitude));
         }
     }
 }

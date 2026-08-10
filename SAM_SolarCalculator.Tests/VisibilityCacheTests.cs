@@ -1,5 +1,5 @@
-﻿// SPDX-License-Identifier: LGPL-3.0-or-later
-// Copyright (c) 2020â€“2026 Michal Dengusiak & Jakub Ziolkowski and contributors
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
 
 using System;
 using System.Collections.Generic;
@@ -125,21 +125,36 @@ namespace SAM.SolarCalculator.Tests
         {
             Face3D window = WindowFace();
             List<LinkedFace3D> occluders = Occluders();
+            List<AnalysisCell> cells = Geometry.SolarCalculator.Query.AnalysisCells(window, 0.5);
 
-            string hash1 = Geometry.SolarCalculator.Query.GeometryHash(occluders, new List<Face3D> { window });
-            string hash2 = Geometry.SolarCalculator.Query.GeometryHash(occluders, new List<Face3D> { window });
+            string hash1 = Geometry.SolarCalculator.Query.GeometryHash(occluders);
+            string hash2 = Geometry.SolarCalculator.Query.GeometryHash(occluders);
             Assert.Equal(hash1, hash2);
+
+            string targetHash1 = Geometry.SolarCalculator.Query.TargetHash(cells);
+            Assert.Equal(targetHash1, Geometry.SolarCalculator.Query.TargetHash(cells));
 
             // Move the overhang 10 cm -> context changed -> hash must change.
             Face3D moved = Core.Query.Clone(OverhangFace());
             moved = moved.GetMoved(new Vector3D(0, 0, 0.1)) as Face3D;
-            string hash3 = Geometry.SolarCalculator.Query.GeometryHash(new List<LinkedFace3D> { new LinkedFace3D(Guid.NewGuid(), moved) }, new List<Face3D> { window });
+            string hash3 = Geometry.SolarCalculator.Query.GeometryHash(new List<LinkedFace3D> { new LinkedFace3D(Guid.NewGuid(), moved) });
             Assert.NotEqual(hash1, hash3);
 
-            // Reordering the same set does NOT change the hash.
+            // Reordering the same OCCLUDER set does NOT change the context hash.
             List<LinkedFace3D> reversed = new List<LinkedFace3D>(occluders);
             reversed.Reverse();
-            Assert.Equal(hash1, Geometry.SolarCalculator.Query.GeometryHash(reversed, new List<Face3D> { window }));
+            Assert.Equal(hash1, Geometry.SolarCalculator.Query.GeometryHash(reversed));
+
+            // A start-index-shifted but identical polygon keeps the same target hash.
+            Face3D rotated = new Face3D(new Polygon3D(new List<Point3D>
+            {
+                new Point3D(2, 0, 2),
+                new Point3D(0, 0, 2),
+                new Point3D(0, 0, 1),
+                new Point3D(2, 0, 1),
+            }));
+            List<AnalysisCell> cellsRotated = Geometry.SolarCalculator.Query.AnalysisCells(rotated, 0.5);
+            Assert.Equal(targetHash1, Geometry.SolarCalculator.Query.TargetHash(cellsRotated));
         }
 
         [Fact]

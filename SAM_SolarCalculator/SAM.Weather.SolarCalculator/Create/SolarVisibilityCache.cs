@@ -1,5 +1,5 @@
-﻿// SPDX-License-Identifier: LGPL-3.0-or-later
-// Copyright (c) 2020â€“2026 Michal Dengusiak & Jakub Ziolkowski and contributors
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
 
 using SAM.Core;
 using SAM.Geometry.Object.Spatial;
@@ -16,9 +16,13 @@ namespace SAM.Weather.SolarCalculator
         /// Builds the direct-beam visibility cache: sun bins for the full given year at the given
         /// angular resolution, then ONE occlusion pass per bin (parallel, thread-confined) storing
         /// the per-cell lit bits. This is the expensive geometric pass; evaluating any
-        /// AnalysisPeriod afterwards is arithmetic only. The cache identity (geometry hash, cell
-        /// size, bin resolution, min horizon angle, tolerances, algorithm/version, location, year)
-        /// is recorded on the cache â€” weather data is NOT part of it.
+        /// AnalysisPeriod afterwards is arithmetic only.
+        ///
+        /// The sun-position sampling shift is part of the cache's bin definition: bins are built
+        /// from the sun positions at weather-hour + sunPositionShiftInMinutes, and the evaluation
+        /// applies the same shift read back from the cache — the two timelines can never drift
+        /// apart (a shift change is an identity change and rebuilds). Weather data is NOT part of
+        /// the identity.
         /// </summary>
         /// <param name="location">Site location (defines the sun path; fractional time zone preserved).</param>
         /// <param name="year">Weather year the bins cover.</param>
@@ -27,14 +31,15 @@ namespace SAM.Weather.SolarCalculator
         /// <param name="analysisCells">Target cells (outward-oriented).</param>
         /// <param name="cellSize">Cell size the targets were subdivided with (identity only).</param>
         /// <param name="minHorizonAngle">Minimum sun altitude, RADIANS.</param>
-        public static SolarVisibilityCache SolarVisibilityCache(this Location location, int year, double binSizeDegrees, List<LinkedFace3D> occluders, List<AnalysisCell> analysisCells, double cellSize, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance)
+        /// <param name="sunPositionShiftInMinutes">Sun-position sampling offset of the timeline, minutes (+30 for interval-start EPW weather, -30 for TAS EDSL compatibility).</param>
+        public static SolarVisibilityCache SolarVisibilityCache(this Location location, int year, double binSizeDegrees, List<LinkedFace3D> occluders, List<AnalysisCell> analysisCells, double cellSize, double minHorizonAngle = Core.Tolerance.Angle, double sunPositionShiftInMinutes = 0, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance)
         {
             if (location == null || analysisCells == null || analysisCells.Count == 0 || double.IsNaN(binSizeDegrees) || binSizeDegrees <= 0)
             {
                 return null;
             }
 
-            List<SunBin> bins = SunBins(location, year, binSizeDegrees, minHorizonAngle);
+            List<SunBin> bins = SunBins(location, year, binSizeDegrees, minHorizonAngle, sunPositionShiftInMinutes);
             if (bins == null || bins.Count == 0)
             {
                 return null;
@@ -42,16 +47,15 @@ namespace SAM.Weather.SolarCalculator
 
             List<Point3D> points = new List<Point3D>(analysisCells.Count);
             List<Vector3D> normals = new List<Vector3D>(analysisCells.Count);
-            List<Face3D> cellFaces = new List<Face3D>(analysisCells.Count);
             foreach (AnalysisCell analysisCell in analysisCells)
             {
                 points.Add(analysisCell?.InternalPoint3D);
-                Face3D face3D = analysisCell?.Face3D;
-                cellFaces.Add(face3D);
-                normals.Add(face3D?.GetPlane()?.Normal?.Unit);
+                normals.Add(analysisCell?.Face3D?.GetPlane()?.Normal?.Unit);
             }
 
-            string geometryHash = Geometry.SolarCalculator.Query.GeometryHash(occluders, cellFaces, tolerance_Distance);
+            string contextGeometryHash = Geometry.SolarCalculator.Query.GeometryHash(occluders, tolerance_Distance);
+            string targetGeometryHash = Geometry.SolarCalculator.Query.TargetHash(analysisCells, tolerance_Distance);
+            double timeZoneOffset = Geometry.SolarCalculator.Query.TimeZoneOffset(location);
 
             ulong[][] litBits = global::SAM.Weather.SolarCalculator.SolarVisibilityCache.CreateBitStorage(bins.Count, analysisCells.Count);
 
@@ -81,7 +85,7 @@ namespace SAM.Weather.SolarCalculator
                 }
             });
 
-            return new global::SAM.Weather.SolarCalculator.SolarVisibilityCache(geometryHash, cellSize, binSizeDegrees, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, location.Latitude, location.Longitude, year, analysisCells.Count, bins, litBits);
+            return new global::SAM.Weather.SolarCalculator.SolarVisibilityCache(contextGeometryHash, targetGeometryHash, cellSize, binSizeDegrees, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, location.Latitude, location.Longitude, timeZoneOffset, sunPositionShiftInMinutes, year, analysisCells.Count, bins, litBits);
         }
     }
 }

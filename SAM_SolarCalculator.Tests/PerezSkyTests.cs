@@ -1,5 +1,5 @@
-﻿// SPDX-License-Identifier: LGPL-3.0-or-later
-// Copyright (c) 2020â€“2026 Michal Dengusiak & Jakub Ziolkowski and contributors
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
 
 using System;
 using System.Collections.Generic;
@@ -18,7 +18,9 @@ namespace SAM.SolarCalculator.Tests
 {
     /// <summary>
     /// Stage 3 tests: Tregenza patch sets, Perez 1990 conventions, and the per-cell
-    /// component-aware sky/horizon/ground visibility.
+    /// component-aware sky/horizon/ground visibility. Includes the golden-value freezes of the
+    /// legacy (compatibility) and corrected (physical) radiation conventions — two systems that
+    /// must never be mixed.
     /// </summary>
     public class PerezSkyTests
     {
@@ -46,6 +48,11 @@ namespace SAM.SolarCalculator.Tests
             return Geometry.SolarCalculator.Create.SolarTimes(TestHelpers.London(), new DateTime(2018, 6, 21, 12, 0, 0));
         }
 
+        private static Plane OutwardPlane(Vector3D normal)
+        {
+            return new Plane(new Point3D(0, 0, 0), normal);
+        }
+
         [Fact]
         public void Tregenza145_PatchSet()
         {
@@ -69,6 +76,75 @@ namespace SAM.SolarCalculator.Tests
         }
 
         [Fact]
+        public void Legacy_Isotropic_GoldenValues_Frozen()
+        {
+            // Golden freeze of the LEGACY convention (inward-normal tilt, +90 deg solar azimuth
+            // rotation): kept byte-for-byte for compatibility. These values were measured on the
+            // released code (summer noon, London) and must never drift.
+            SolarTimes solarTimes = NoonSummer();
+            double dni = 800, dhi = 200, ghi = 700;
+
+            // Down (roof, inward) normal -> tilt 180: full sky, direct from high sun.
+            Radiation roof = Geometry.SolarCalculator.Create.Radiation(solarTimes, 180, 180, dni, dhi, ghi);
+            Assert.Equal(705.9, roof.DirectNormal, 1);
+            Assert.Equal(200.0, roof.DiffuseHorizontal, 6);
+            Assert.Equal(0.0, roof.GlobalHorizontal, 6);
+
+            // Up normal -> tilt 0: legacy treats the receiving side as down-facing.
+            Radiation up = Geometry.SolarCalculator.Create.Radiation(solarTimes, 0, 0, dni, dhi, ghi);
+            Assert.Equal(0.0, up.DirectNormal, 6);
+            Assert.Equal(0.0, up.DiffuseHorizontal, 6);
+            Assert.Equal(140.0, up.GlobalHorizontal, 6);
+
+            // Vertical south-out normal (saz 180): legacy gives it the east orientation's beam
+            // (the +90 deg rotation), nearly grazing at noon.
+            Radiation south = Geometry.SolarCalculator.Create.Radiation(solarTimes, 90, 180, dni, dhi, ghi);
+            Assert.Equal(7.0, south.DirectNormal, 0);
+            Assert.Equal(100.0, south.DiffuseHorizontal, 6);
+            Assert.Equal(70.0, south.GlobalHorizontal, 6);
+
+            // Vertical west-out normal (saz 270): legacy assigns the south orientation's beam.
+            Radiation west = Geometry.SolarCalculator.Create.Radiation(solarTimes, 90, 270, dni, dhi, ghi);
+            Assert.Equal(376.4, west.DirectNormal, 1);
+            Assert.Equal(100.0, west.DiffuseHorizontal, 6);
+            Assert.Equal(70.0, west.GlobalHorizontal, 6);
+        }
+
+        [Fact]
+        public void Corrected_Physical_GoldenValues_Frozen()
+        {
+            // Golden freeze of the CORRECTED path (Plane-based, outward normal, unrotated NOAA
+            // azimuth, true DNI). Summer noon, London: elevation 61.95 deg, azimuth 178 deg.
+            SolarTimes solarTimes = NoonSummer();
+            double dni = 800, dhi = 200, ghi = 700;
+
+            // South vertical (outward normal (0,-1,0)): beam = DNI * cos(elev) * cos(az-180).
+            Radiation south = Geometry.SolarCalculator.Create.Radiation(solarTimes, OutwardPlane(new Vector3D(0, -1, 0)), dni, dhi, ghi, SkyModel.PerezAnisotropic);
+            double elevationRad = System.Convert.ToDouble(solarTimes.SolarElevation.Radians);
+            double azimuthRad = System.Convert.ToDouble(solarTimes.SolarAzimuth.Radians);
+            double expectedBeam = dni * Math.Cos(elevationRad) * Math.Cos(azimuthRad - Math.PI);
+            Assert.Equal(expectedBeam, south.DirectNormal, 6);
+            Assert.Equal(376.4, south.DirectNormal, 1);
+            // Perez diffuse for clear-ish sky (epsilon ~ 4.6, F1 ~ 0.63): well above the isotropic
+            // 0.5 * DHI = 100 because of the circumsolar term. Frozen value from the implementation.
+            Assert.Equal(131.1, south.DiffuseHorizontal, 1);
+            // Vertical: ground half-exposed.
+            Assert.Equal(0.5 * ghi * 0.2, south.GlobalHorizontal, 6);
+
+            // Roof (up normal): beam = DNI * sin(elev); full sky; no ground.
+            Radiation roof = Geometry.SolarCalculator.Create.Radiation(solarTimes, OutwardPlane(new Vector3D(0, 0, 1)), dni, dhi, ghi, SkyModel.PerezAnisotropic);
+            Assert.Equal(dni * Math.Sin(elevationRad), roof.DirectNormal, 6);
+            Assert.Equal(dhi, roof.DiffuseHorizontal, 0);
+            Assert.Equal(0.0, roof.GlobalHorizontal, 6);
+
+            // North vertical at noon: no beam; sky and ground halves.
+            Radiation north = Geometry.SolarCalculator.Create.Radiation(solarTimes, OutwardPlane(new Vector3D(0, 1, 0)), dni, dhi, ghi, SkyModel.PerezAnisotropic);
+            Assert.Equal(0.0, north.DirectNormal, 6);
+            Assert.True(north.DiffuseHorizontal > 0);
+            Assert.True(north.GlobalHorizontal > 0);
+        }
+
+        [Fact]
         public void Perez_Overcast_Agrees_With_Isotropic_On_Horizontal()
         {
             // Overcast (epsilon ~ 1): DNI ~ 0. On a horizontal surface Perez and isotropic must agree.
@@ -78,10 +154,9 @@ namespace SAM.SolarCalculator.Tests
             double dhi = 200;
             double ghi = 200;
 
-            // Legacy isotropic convention: inward (down) normal for a roof -> tilt = 180.
-            Radiation isotropic = Geometry.SolarCalculator.Create.Radiation(solarTimes, 180, 0, dni, dhi, ghi);
-            // Perez physical convention: receiving side up -> tilt = 0.
-            Radiation perez = Geometry.SolarCalculator.Create.Radiation(solarTimes, 0, 0, dni, dhi, ghi, SkyModel.PerezAnisotropic);
+            Plane roof = OutwardPlane(new Vector3D(0, 0, 1));
+            Radiation isotropic = Geometry.SolarCalculator.Create.Radiation(solarTimes, roof, dni, dhi, ghi, SkyModel.Isotropic);
+            Radiation perez = Geometry.SolarCalculator.Create.Radiation(solarTimes, roof, dni, dhi, ghi, SkyModel.PerezAnisotropic);
 
             Assert.NotNull(isotropic);
             Assert.NotNull(perez);
@@ -106,10 +181,9 @@ namespace SAM.SolarCalculator.Tests
             output.WriteLine($"clear sky: epsilon={epsilon:0.##} delta={delta:0.###} F1={f1:0.###} F2={f2:0.###}");
             Assert.True(epsilon > 6.0, $"expected clear-sky epsilon > 6, got {epsilon:0.##}");
 
-            // Legacy isotropic for the inward-normal vertical plane (tilt = 90, azimuth = 0).
-            Radiation isotropic = Geometry.SolarCalculator.Create.Radiation(solarTimes, 90, 0, dni, dhi, ghi);
-            // Perez for the outward south-facing plane (tilt = 90, azimuth = 180).
-            Radiation perez = Geometry.SolarCalculator.Create.Radiation(solarTimes, 90, 180, dni, dhi, ghi, SkyModel.PerezAnisotropic);
+            Plane south = OutwardPlane(new Vector3D(0, -1, 0));
+            Radiation isotropic = Geometry.SolarCalculator.Create.Radiation(solarTimes, south, dni, dhi, ghi, SkyModel.Isotropic);
+            Radiation perez = Geometry.SolarCalculator.Create.Radiation(solarTimes, south, dni, dhi, ghi, SkyModel.PerezAnisotropic);
 
             output.WriteLine($"clear vertical south: isotropic diffuse={isotropic.DiffuseHorizontal:0.##} perez diffuse={perez.DiffuseHorizontal:0.##}");
             double difference = Math.Abs(perez.DiffuseHorizontal - isotropic.DiffuseHorizontal) / isotropic.DiffuseHorizontal;
@@ -118,8 +192,8 @@ namespace SAM.SolarCalculator.Tests
             // Beam on the surface must be physically correct: DNI * cos(incidence), with the sun
             // essentially due south (azimuth ~178 deg) at solar noon.
             double elevationRad = System.Convert.ToDouble(solarTimes.SolarElevation.Radians);
-            double azimuthDeg = System.Convert.ToDouble(solarTimes.SolarAzimuth.Degrees);
-            double cosTheta = Math.Cos(elevationRad) * Math.Cos((azimuthDeg - 180.0) * Math.PI / 180.0);
+            double azimuthRad = System.Convert.ToDouble(solarTimes.SolarAzimuth.Radians);
+            double cosTheta = Math.Cos(elevationRad) * Math.Cos(azimuthRad - Math.PI);
             Assert.Equal(dni * cosTheta, perez.DirectNormal, 6);
         }
 
@@ -132,10 +206,10 @@ namespace SAM.SolarCalculator.Tests
             SolarTimes solarTimes = NoonSummer();
             double dni = 800, dhi = 80, ghi = 600;
 
-            Radiation south = Geometry.SolarCalculator.Create.Radiation(solarTimes, 90, 180, dni, dhi, ghi, SkyModel.PerezAnisotropic);
-            Radiation east = Geometry.SolarCalculator.Create.Radiation(solarTimes, 90, 90, dni, dhi, ghi, SkyModel.PerezAnisotropic);
-            Radiation north = Geometry.SolarCalculator.Create.Radiation(solarTimes, 90, 0, dni, dhi, ghi, SkyModel.PerezAnisotropic);
-            Radiation roof = Geometry.SolarCalculator.Create.Radiation(solarTimes, 0, 0, dni, dhi, ghi, SkyModel.PerezAnisotropic);
+            Radiation south = Geometry.SolarCalculator.Create.Radiation(solarTimes, OutwardPlane(new Vector3D(0, -1, 0)), dni, dhi, ghi, SkyModel.PerezAnisotropic);
+            Radiation east = Geometry.SolarCalculator.Create.Radiation(solarTimes, OutwardPlane(new Vector3D(1, 0, 0)), dni, dhi, ghi, SkyModel.PerezAnisotropic);
+            Radiation north = Geometry.SolarCalculator.Create.Radiation(solarTimes, OutwardPlane(new Vector3D(0, 1, 0)), dni, dhi, ghi, SkyModel.PerezAnisotropic);
+            Radiation roof = Geometry.SolarCalculator.Create.Radiation(solarTimes, OutwardPlane(new Vector3D(0, 0, 1)), dni, dhi, ghi, SkyModel.PerezAnisotropic);
 
             Assert.True(south.DirectNormal > 300, $"south beam {south.DirectNormal:0.#}");
             // Sun essentially due south: an east facade is at grazing incidence (beam ~ 0 but not

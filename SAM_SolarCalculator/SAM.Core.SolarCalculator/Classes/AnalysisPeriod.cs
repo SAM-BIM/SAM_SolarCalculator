@@ -180,8 +180,8 @@ namespace SAM.Core.SolarCalculator
         }
 
         /// <summary>
-        /// Timesteps per hour. Reserved for sub-hourly weather data — only 1 (hourly) is currently
-        /// supported; enumeration methods throw NotSupportedException for any other value.
+        /// Timesteps per hour. Only 1 (hourly) is currently supported; any other value fails at
+        /// construction. Reserved for future sub-hourly weather support.
         /// </summary>
         public int Timestep
         {
@@ -191,7 +191,11 @@ namespace SAM.Core.SolarCalculator
             }
             private set
             {
-                timestep = Math.Max(value, 1);
+                if (value != 1)
+                {
+                    throw new System.ArgumentOutOfRangeException(nameof(value), "AnalysisPeriod currently supports hourly periods (Timestep == 1) only.");
+                }
+                timestep = value;
             }
         }
 
@@ -219,11 +223,6 @@ namespace SAM.Core.SolarCalculator
         /// <summary>True when the given DateTime (weather-timeline) belongs to the period.</summary>
         public bool Contains(DateTime dateTime)
         {
-            if (timestep != 1)
-            {
-                throw new NotSupportedException("AnalysisPeriod currently supports hourly (Timestep == 1) enumeration only.");
-            }
-
             if (dateTime.Year != year)
             {
                 return false;
@@ -240,11 +239,6 @@ namespace SAM.Core.SolarCalculator
         /// <summary>True when the given hour of the year (0-based, from 1 Jan 00:00) belongs to the period.</summary>
         public bool Contains(int hourOfYear)
         {
-            if (timestep != 1)
-            {
-                throw new NotSupportedException("AnalysisPeriod currently supports hourly (Timestep == 1) enumeration only.");
-            }
-
             int count = DateTime.IsLeapYear(year) ? 8784 : 8760;
             if (hourOfYear < 0 || hourOfYear >= count)
             {
@@ -263,11 +257,6 @@ namespace SAM.Core.SolarCalculator
         /// <summary>All hours of the year (0-based) belonging to the period, ascending.</summary>
         public List<int> HoursOfYear()
         {
-            if (timestep != 1)
-            {
-                throw new NotSupportedException("AnalysisPeriod currently supports hourly (Timestep == 1) enumeration only.");
-            }
-
             if (hoursOfYear != null)
             {
                 return new List<int>(hoursOfYear);
@@ -361,7 +350,7 @@ namespace SAM.Core.SolarCalculator
         public JsonObject ToJsonObject()
         {
             JsonObject jObject = new JsonObject();
-            jObject.Add("_type", Query.FullTypeName(this));
+            jObject.Add("_type", Core.Query.FullTypeName(this));
 
             jObject.Add("Year", year);
             jObject.Add("StartMonth", startMonth);

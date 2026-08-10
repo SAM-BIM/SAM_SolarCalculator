@@ -1,5 +1,5 @@
-﻿// SPDX-License-Identifier: LGPL-3.0-or-later
-// Copyright (c) 2020â€“2026 Michal Dengusiak & Jakub Ziolkowski and contributors
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
 
 using System;
 using System.Collections.Generic;
@@ -316,11 +316,11 @@ namespace SAM.SolarCalculator.Tests
             Assert.True(perezRatio < isoRatio - 0.1, $"circumsolar removal must drop Perez diffuse well beyond the SVF effect (perez {perezRatio:0.###} vs isotropic {isoRatio:0.###})");
         }
 
-        private static CachedIrradianceResult RunSynthetic(Location location, int year, List<AnalysisCell> cells, List<Vector3D> normals, List<LinkedFace3D> occluders, WeatherData weatherData, AnalysisPeriod period, SkyModel skyModel = SkyModel.PerezAnisotropic)
+        private static CachedIrradianceResult RunSynthetic(Location location, int year, List<AnalysisCell> cells, List<Vector3D> normals, List<LinkedFace3D> occluders, WeatherData weatherData, AnalysisPeriod period, SkyModel skyModel = SkyModel.PerezAnisotropic, double timeShiftInMinutes = 0)
         {
-            SolarVisibilityCache solarCache = Weather.SolarCalculator.Create.SolarVisibilityCache(location, year, 2.0, occluders, cells, 0.5);
+            SolarVisibilityCache solarCache = Weather.SolarCalculator.Create.SolarVisibilityCache(location, year, 2.0, occluders, cells, 0.5, sunPositionShiftInMinutes: timeShiftInMinutes);
             SkyVisibilityCache skyCache = Weather.SolarCalculator.Create.SkyVisibilityCache(occluders, cells, 0.5);
-            return Analytical.SolarCalculator.Query.CachedIrradiance(solarCache, skyCache, weatherData, period, normals, skyModel, 0.2, 0);
+            return Analytical.SolarCalculator.Query.CachedIrradiance(solarCache, skyCache, weatherData, period, normals, skyModel, 0.2);
         }
     }
 }
