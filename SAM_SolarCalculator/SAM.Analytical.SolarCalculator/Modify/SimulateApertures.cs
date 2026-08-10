@@ -36,28 +36,41 @@ namespace SAM.Analytical.SolarCalculator
         ///
         /// The period is re-rooted to the weather data's year when they differ (hour-of-year
         /// structure is preserved). Weather values are read on the weather-timeline hour.
+        ///
+        /// Weather precedence (the Stage 10 component contract, implemented here so every caller
+        /// gets the same rule): supplied weatherData -> the model's own
+        /// AnalyticalModelParameter.WeatherData -> null return (no weather = no analysis).
+        ///
+        /// Engineer-facing vocabulary is used on this entry point (gridSize, sunAngleStep,
+        /// recalculate, reusedPreviousCalculation); the implementation types keep their internal
+        /// names (AnalysisCell, SunBin, SolarVisibilityCache).
         /// </summary>
-        /// <param name="analyticalModel">Model with WeatherData attached (AnalyticalModelParameter.WeatherData).</param>
+        /// <param name="analyticalModel">Model; supplies geometry, and WeatherData when none is passed.</param>
         /// <param name="analysisPeriod">Hours to integrate.</param>
-        /// <param name="cacheReused">True when both caches were reused (no geometric pass ran).</param>
+        /// <param name="reusedPreviousCalculation">True when both previous solar calculations were reused (no geometric pass ran).</param>
+        /// <param name="weatherData">Weather to use. Null = use the WeatherData associated with the model.</param>
         /// <param name="apertureGuids">Null/empty = all apertures on sun-exposed external panels.</param>
-        /// <param name="cellSize">Analysis cell size, m.</param>
+        /// <param name="gridSize">Aperture analysis-grid size, m.</param>
         /// <param name="skyModel">Diffuse sky model.</param>
-        /// <param name="binSizeDegrees">Sun-bin angular resolution, degrees.</param>
-        /// <param name="rebuildCache">Force a cache rebuild even when the identity matches.</param>
+        /// <param name="sunAngleStep">Angular resolution used to group similar sun positions, degrees.</param>
+        /// <param name="recalculate">Force the solar visibility calculation to be rebuilt even when it could be reused.</param>
         /// <param name="albedo">Ground reflectance.</param>
         /// <param name="sunTimeConvention">Timestamp convention of the weather timeline (default IntervalStart = EPW/SAM, +30 min).</param>
         /// <param name="minHorizonAngle">Minimum sun altitude, RADIANS.</param>
-        public static List<ApertureIrradianceResult> SimulateApertures(this AnalyticalModel analyticalModel, AnalysisPeriod analysisPeriod, out bool cacheReused, IEnumerable<Guid> apertureGuids = null, double cellSize = 0.5, SkyModel skyModel = SkyModel.PerezAnisotropic, double binSizeDegrees = 2.0, bool rebuildCache = false, double albedo = 0.2, SunTimeConvention sunTimeConvention = SunTimeConvention.IntervalStart, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance)
+        /// <param name="tolerance_Area">Area tolerance.</param>
+        /// <param name="tolerance_Snap">Snap tolerance (also the ray-start offset).</param>
+        /// <param name="tolerance_Angle">Angle tolerance, RADIANS.</param>
+        /// <param name="tolerance_Distance">Distance tolerance.</param>
+        public static List<ApertureIrradianceResult> SimulateApertures(this AnalyticalModel analyticalModel, AnalysisPeriod analysisPeriod, out bool reusedPreviousCalculation, WeatherData weatherData = null, IEnumerable<Guid> apertureGuids = null, double gridSize = 0.5, SkyModel skyModel = SkyModel.PerezAnisotropic, double sunAngleStep = 2.0, bool recalculate = false, double albedo = 0.2, SunTimeConvention sunTimeConvention = SunTimeConvention.IntervalStart, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance)
         {
             double timeShiftInMinutes = sunTimeConvention.TimeShiftInMinutes();
             if (double.IsNaN(timeShiftInMinutes))
             {
-                cacheReused = false;
+                reusedPreviousCalculation = false;
                 return null;
             }
 
-            return SimulateApertures(analyticalModel, analysisPeriod, out cacheReused, apertureGuids, cellSize, skyModel, binSizeDegrees, rebuildCache, albedo, timeShiftInMinutes, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance);
+            return SimulateApertures(analyticalModel, analysisPeriod, out reusedPreviousCalculation, weatherData, apertureGuids, gridSize, skyModel, sunAngleStep, recalculate, albedo, timeShiftInMinutes, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance);
         }
 
         /// <summary>
@@ -66,16 +79,21 @@ namespace SAM.Analytical.SolarCalculator
         /// The offset becomes part of the cache identity: bins are built from weather-hour + offset
         /// positions and the evaluation reads the offset back from the cache.
         /// </summary>
-        public static List<ApertureIrradianceResult> SimulateApertures(this AnalyticalModel analyticalModel, AnalysisPeriod analysisPeriod, out bool cacheReused, IEnumerable<Guid> apertureGuids, double cellSize, SkyModel skyModel, double binSizeDegrees, bool rebuildCache, double albedo, double timeShiftInMinutes, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance)
+        public static List<ApertureIrradianceResult> SimulateApertures(this AnalyticalModel analyticalModel, AnalysisPeriod analysisPeriod, out bool reusedPreviousCalculation, WeatherData weatherData, IEnumerable<Guid> apertureGuids, double gridSize, SkyModel skyModel, double sunAngleStep, bool recalculate, double albedo, double timeShiftInMinutes, double minHorizonAngle = Core.Tolerance.Angle, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance)
         {
-            cacheReused = false;
+            reusedPreviousCalculation = false;
 
             if (analyticalModel == null || analysisPeriod == null || double.IsNaN(timeShiftInMinutes))
             {
                 return null;
             }
 
-            WeatherData weatherData = analyticalModel.GetValue<WeatherData>(AnalyticalModelParameter.WeatherData);
+            // Precedence: supplied weather first, then the model's own.
+            if (weatherData == null)
+            {
+                weatherData = analyticalModel.GetValue<WeatherData>(AnalyticalModelParameter.WeatherData);
+            }
+
             if (weatherData == null)
             {
                 return null;
@@ -100,7 +118,7 @@ namespace SAM.Analytical.SolarCalculator
                 }
             }
 
-            List<ApertureSolarTarget> targets = analyticalModel.ApertureSolarTargets(apertureGuids, cellSize, tolerance_Area, tolerance_Distance);
+            List<ApertureSolarTarget> targets = analyticalModel.ApertureSolarTargets(apertureGuids, gridSize, tolerance_Area, tolerance_Distance);
             if (targets == null || targets.Count == 0)
             {
                 return null;
@@ -143,23 +161,23 @@ namespace SAM.Analytical.SolarCalculator
 
             // Reuse the caches on the attached SolarModel only when every identity input matches.
             SolarModel solarModel = analyticalModel.GetValue<SolarModel>(AnalyticalModelParameter.SolarModel);
-            SolarVisibilityCache solarVisibilityCache = rebuildCache ? null : solarModel?.GetValue<SolarVisibilityCache>(SolarModelParameter.SolarVisibilityCache);
-            SkyVisibilityCache skyVisibilityCache = rebuildCache ? null : solarModel?.GetValue<SkyVisibilityCache>(SolarModelParameter.SkyVisibilityCache);
+            SolarVisibilityCache solarVisibilityCache = recalculate ? null : solarModel?.GetValue<SolarVisibilityCache>(SolarModelParameter.SolarVisibilityCache);
+            SkyVisibilityCache skyVisibilityCache = recalculate ? null : solarModel?.GetValue<SkyVisibilityCache>(SolarModelParameter.SkyVisibilityCache);
 
-            if (solarVisibilityCache != null && !solarVisibilityCache.Matches(contextGeometryHash, targetGeometryHash, cellSize, binSizeDegrees, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, location.Latitude, location.Longitude, timeZoneOffset, timeShiftInMinutes, year, cells.Count))
+            if (solarVisibilityCache != null && !solarVisibilityCache.Matches(contextGeometryHash, targetGeometryHash, gridSize, sunAngleStep, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, location.Latitude, location.Longitude, timeZoneOffset, timeShiftInMinutes, year, cells.Count))
             {
                 solarVisibilityCache = null;
             }
 
-            if (skyVisibilityCache != null && !skyVisibilityCache.Matches(contextGeometryHash, targetGeometryHash, cellSize, SkyPatchSubdivision.Tregenza145, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, cells.Count))
+            if (skyVisibilityCache != null && !skyVisibilityCache.Matches(contextGeometryHash, targetGeometryHash, gridSize, SkyPatchSubdivision.Tregenza145, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, cells.Count))
             {
                 skyVisibilityCache = null;
             }
 
             if (solarVisibilityCache == null || skyVisibilityCache == null)
             {
-                solarVisibilityCache = Weather.SolarCalculator.Create.SolarVisibilityCache(location, year, binSizeDegrees, occluders, cells, cellSize, minHorizonAngle, timeShiftInMinutes, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance);
-                skyVisibilityCache = Weather.SolarCalculator.Create.SkyVisibilityCache(occluders, cells, cellSize, SkyPatchSubdivision.Tregenza145, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance);
+                solarVisibilityCache = Weather.SolarCalculator.Create.SolarVisibilityCache(location, year, sunAngleStep, occluders, cells, gridSize, minHorizonAngle, timeShiftInMinutes, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance);
+                skyVisibilityCache = Weather.SolarCalculator.Create.SkyVisibilityCache(occluders, cells, gridSize, SkyPatchSubdivision.Tregenza145, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance);
                 if (solarVisibilityCache == null || skyVisibilityCache == null)
                 {
                     return null;
@@ -181,7 +199,7 @@ namespace SAM.Analytical.SolarCalculator
             }
             else
             {
-                cacheReused = true;
+                reusedPreviousCalculation = true;
             }
 
             CachedIrradianceResult cachedIrradianceResult = Query.CachedIrradiance(solarVisibilityCache, skyVisibilityCache, weatherData, analysisPeriod, cellNormals, skyModel, albedo);
@@ -235,7 +253,7 @@ namespace SAM.Analytical.SolarCalculator
                     aperture?.Name,
                     "SAM.Analytical.SolarCalculator",
                     target.ApertureGuid.ToString(),
-                    analysisPeriod, skyModel, cellSize, binSizeDegrees, albedo, timeShiftInMinutes,
+                    analysisPeriod, skyModel, gridSize, sunAngleStep, albedo, timeShiftInMinutes,
                     target.GrossArea, cellAreas, direct, diffuse, ground, sunlit,
                     cachedIrradianceResult.DateTimes,
                     cachedIrradianceResult.MissedBinHours, cachedIrradianceResult.BelowHorizonHours, cachedIrradianceResult.MissingWeatherHours);

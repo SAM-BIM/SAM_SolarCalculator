@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-3.0-or-later
+﻿// SPDX-License-Identifier: LGPL-3.0-or-later
 // Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
 
 using System;
@@ -84,11 +84,11 @@ namespace SAM.SolarCalculator.Tests
 
             List<ApertureIrradianceResult> results = analyticalModel.SimulateApertures(
                 Core.SolarCalculator.Create.AnalysisPeriod(AnalysisPeriodPreset.FullYear, year, analyticalModel.Location),
-                out bool cacheReused, cellSize: 0.5, skyModel: SkyModel.PerezAnisotropic);
+                out bool reusedPreviousCalculation, gridSize: 0.5, skyModel: SkyModel.PerezAnisotropic);
 
             Assert.NotNull(results);
             Assert.NotEmpty(results);
-            Assert.False(cacheReused);
+            Assert.False(reusedPreviousCalculation);
 
             double south = MeanByAzimuth(results, analyticalModel, 180);
             double north = MeanByAzimuth(results, analyticalModel, 0);
@@ -141,17 +141,17 @@ namespace SAM.SolarCalculator.Tests
             int year = WeatherYearOf(analyticalModel);
 
             System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
-            List<ApertureIrradianceResult> full = analyticalModel.SimulateApertures(new AnalysisPeriod(year), out bool cacheReused_First);
+            List<ApertureIrradianceResult> full = analyticalModel.SimulateApertures(new AnalysisPeriod(year), out bool reused_First);
             stopwatch.Stop();
             long buildMs = stopwatch.ElapsedMilliseconds;
-            Assert.False(cacheReused_First);
+            Assert.False(reused_First);
 
             stopwatch.Restart();
-            List<ApertureIrradianceResult> summer = analyticalModel.SimulateApertures(Core.SolarCalculator.Create.AnalysisPeriod(AnalysisPeriodPreset.Summer, year, analyticalModel.Location), out bool cacheReused_Second);
+            List<ApertureIrradianceResult> summer = analyticalModel.SimulateApertures(Core.SolarCalculator.Create.AnalysisPeriod(AnalysisPeriodPreset.Summer, year, analyticalModel.Location), out bool reused_Second);
             stopwatch.Stop();
             long reuseMs = stopwatch.ElapsedMilliseconds;
 
-            Assert.True(cacheReused_Second, "second period on the same model must reuse the cache");
+            Assert.True(reused_Second, "second period on the same model must reuse the cache");
             output.WriteLine($"cache build+evaluate: {buildMs} ms; cached re-evaluate (summer): {reuseMs} ms");
 
             // Different period -> different totals, but results remain consistent per shared hour.
@@ -169,8 +169,8 @@ namespace SAM.SolarCalculator.Tests
             });
             analyticalModel.SetValue(AnalyticalModelParameter.WeatherData, otherWeather);
 
-            List<ApertureIrradianceResult> synthetic = analyticalModel.SimulateApertures(new AnalysisPeriod(year), out bool cacheReused_Third);
-            Assert.True(cacheReused_Third, "weather swap must not force a geometric rebuild");
+            List<ApertureIrradianceResult> synthetic = analyticalModel.SimulateApertures(new AnalysisPeriod(year), out bool reused_Third);
+            Assert.True(reused_Third, "weather swap must not force a geometric rebuild");
             Assert.NotNull(synthetic);
         }
 
@@ -231,9 +231,9 @@ namespace SAM.SolarCalculator.Tests
             int year = WeatherYearOf(analyticalModel);
             AnalysisPeriod period = new AnalysisPeriod(year);
 
-            List<ApertureIrradianceResult> coarse = analyticalModel.SimulateApertures(period, out _, cellSize: 1.0);
-            List<ApertureIrradianceResult> medium = analyticalModel.SimulateApertures(period, out _, cellSize: 0.5);
-            List<ApertureIrradianceResult> fine = analyticalModel.SimulateApertures(period, out _, cellSize: 0.25);
+            List<ApertureIrradianceResult> coarse = analyticalModel.SimulateApertures(period, out _, gridSize: 1.0);
+            List<ApertureIrradianceResult> medium = analyticalModel.SimulateApertures(period, out _, gridSize: 0.5);
+            List<ApertureIrradianceResult> fine = analyticalModel.SimulateApertures(period, out _, gridSize: 0.25);
 
             foreach (ApertureIrradianceResult m in medium)
             {

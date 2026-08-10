@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-3.0-or-later
+﻿// SPDX-License-Identifier: LGPL-3.0-or-later
 // Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
 
 using System;
@@ -23,8 +23,8 @@ namespace SAM.Analytical.SolarCalculator
     {
         private AnalysisPeriod analysisPeriod;
         private SkyModel skyModel = SkyModel.Undefined;
-        private double cellSize = double.NaN;
-        private double binSizeDegrees = double.NaN;
+        private double gridSize = double.NaN;
+        private double sunAngleStep = double.NaN;
         private double albedo = double.NaN;
         private double timeShiftInMinutes;
         private double grossArea = double.NaN;
@@ -38,13 +38,13 @@ namespace SAM.Analytical.SolarCalculator
         private int belowHorizonHours;
         private int missingWeatherHours;
 
-        public ApertureIrradianceResult(string name, string source, string reference, AnalysisPeriod analysisPeriod, SkyModel skyModel, double cellSize, double binSizeDegrees, double albedo, double timeShiftInMinutes, double grossArea, double[] cellAreas, double[] direct, double[] diffuse, double[] groundReflected, double[] sunlitHours, IEnumerable<DateTime> dateTimes, int missedBinHours = 0, int belowHorizonHours = 0, int missingWeatherHours = 0)
+        public ApertureIrradianceResult(string name, string source, string reference, AnalysisPeriod analysisPeriod, SkyModel skyModel, double gridSize, double sunAngleStep, double albedo, double timeShiftInMinutes, double grossArea, double[] cellAreas, double[] direct, double[] diffuse, double[] groundReflected, double[] sunlitHours, IEnumerable<DateTime> dateTimes, int missedBinHours = 0, int belowHorizonHours = 0, int missingWeatherHours = 0)
             : base(name, source, reference)
         {
             this.analysisPeriod = analysisPeriod == null ? null : new AnalysisPeriod(analysisPeriod);
             this.skyModel = skyModel;
-            this.cellSize = cellSize;
-            this.binSizeDegrees = binSizeDegrees;
+            this.gridSize = gridSize;
+            this.sunAngleStep = sunAngleStep;
             this.albedo = albedo;
             this.timeShiftInMinutes = timeShiftInMinutes;
             this.grossArea = grossArea;
@@ -66,8 +66,8 @@ namespace SAM.Analytical.SolarCalculator
             {
                 analysisPeriod = apertureIrradianceResult.analysisPeriod == null ? null : new AnalysisPeriod(apertureIrradianceResult.analysisPeriod);
                 skyModel = apertureIrradianceResult.skyModel;
-                cellSize = apertureIrradianceResult.cellSize;
-                binSizeDegrees = apertureIrradianceResult.binSizeDegrees;
+                gridSize = apertureIrradianceResult.gridSize;
+                sunAngleStep = apertureIrradianceResult.sunAngleStep;
                 albedo = apertureIrradianceResult.albedo;
                 timeShiftInMinutes = apertureIrradianceResult.timeShiftInMinutes;
                 grossArea = apertureIrradianceResult.grossArea;
@@ -101,6 +101,71 @@ namespace SAM.Analytical.SolarCalculator
             get
             {
                 return skyModel;
+            }
+        }
+
+        /// <summary>Aperture analysis-grid size the result was computed with, m.</summary>
+        public double GridSize
+        {
+            get
+            {
+                return gridSize;
+            }
+        }
+
+        /// <summary>Angular resolution used to group similar sun positions, degrees.</summary>
+        public double SunAngleStep
+        {
+            get
+            {
+                return sunAngleStep;
+            }
+        }
+
+        public double Albedo
+        {
+            get
+            {
+                return albedo;
+            }
+        }
+
+        /// <summary>
+        /// Sun-position sampling offset applied to each weather timestamp, minutes
+        /// (see <see cref="SunTimeConvention"/>: +30 interval start, 0 on the hour, -30 interval end).
+        /// </summary>
+        public double TimeShiftInMinutes
+        {
+            get
+            {
+                return timeShiftInMinutes;
+            }
+        }
+
+        /// <summary>
+        /// The named timeline convention this result used, or Undefined when the explicit-minutes
+        /// overload was called with a non-standard offset.
+        /// </summary>
+        public SunTimeConvention SunTimeConvention
+        {
+            get
+            {
+                if (timeShiftInMinutes == 0)
+                {
+                    return SunTimeConvention.OnTheHour;
+                }
+
+                if (timeShiftInMinutes == 30)
+                {
+                    return SunTimeConvention.IntervalStart;
+                }
+
+                if (timeShiftInMinutes == -30)
+                {
+                    return SunTimeConvention.IntervalEnd;
+                }
+
+                return SunTimeConvention.Undefined;
             }
         }
 
@@ -303,14 +368,14 @@ namespace SAM.Analytical.SolarCalculator
                 Enum.TryParse(jObject["SkyModel"]?.GetValue<string>(), out skyModel);
             }
 
-            if (jObject.ContainsKey("CellSize"))
+            if (jObject.ContainsKey("GridSize"))
             {
-                cellSize = jObject["CellSize"]?.GetValue<double>() ?? double.NaN;
+                gridSize = jObject["GridSize"]?.GetValue<double>() ?? double.NaN;
             }
 
-            if (jObject.ContainsKey("BinSizeDegrees"))
+            if (jObject.ContainsKey("SunAngleStep"))
             {
-                binSizeDegrees = jObject["BinSizeDegrees"]?.GetValue<double>() ?? double.NaN;
+                sunAngleStep = jObject["SunAngleStep"]?.GetValue<double>() ?? double.NaN;
             }
 
             if (jObject.ContainsKey("Albedo"))
@@ -380,8 +445,8 @@ namespace SAM.Analytical.SolarCalculator
             }
 
             jObject.Add("SkyModel", skyModel.ToString());
-            jObject.Add("CellSize", cellSize);
-            jObject.Add("BinSizeDegrees", binSizeDegrees);
+            jObject.Add("GridSize", gridSize);
+            jObject.Add("SunAngleStep", sunAngleStep);
             jObject.Add("Albedo", albedo);
             jObject.Add("TimeShiftInMinutes", timeShiftInMinutes);
             jObject.Add("GrossArea", grossArea);

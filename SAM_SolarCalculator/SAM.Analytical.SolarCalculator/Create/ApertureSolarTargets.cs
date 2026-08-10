@@ -20,7 +20,12 @@ namespace SAM.Analytical.SolarCalculator
         /// physically meaningless results). Each target's Face3D is re-oriented to the resolved
         /// OUTWARD normal, so flipped aperture winding cannot invert the analysis.
         /// </summary>
-        public static List<ApertureSolarTarget> ApertureSolarTargets(this AnalyticalModel analyticalModel, IEnumerable<Guid> apertureGuids = null, double cellSize = 0.5, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Distance = Core.Tolerance.Distance)
+        /// <param name="analyticalModel">Model supplying panels, apertures and adjacency.</param>
+        /// <param name="apertureGuids">Null/empty = all apertures on sun-exposed external panels.</param>
+        /// <param name="gridSize">Aperture analysis-grid size, m (the AnalysisCell subdivision step).</param>
+        /// <param name="tolerance_Area">Area tolerance.</param>
+        /// <param name="tolerance_Distance">Distance tolerance.</param>
+        public static List<ApertureSolarTarget> ApertureSolarTargets(this AnalyticalModel analyticalModel, IEnumerable<Guid> apertureGuids = null, double gridSize = 0.5, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Distance = Core.Tolerance.Distance)
         {
             AdjacencyCluster adjacencyCluster = analyticalModel?.AdjacencyCluster;
             if (adjacencyCluster == null)
@@ -111,7 +116,7 @@ namespace SAM.Analytical.SolarCalculator
                         face3D.FlipNormal(true);
                     }
 
-                    List<AnalysisCell> analysisCells = Geometry.SolarCalculator.Query.AnalysisCells(face3D, cellSize, tolerance_Area, tolerance_Distance);
+                    List<AnalysisCell> analysisCells = Geometry.SolarCalculator.Query.AnalysisCells(face3D, gridSize, tolerance_Area, tolerance_Distance);
                     if (analysisCells == null || analysisCells.Count == 0)
                     {
                         continue;

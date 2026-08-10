@@ -42,8 +42,11 @@ namespace SAM.Weather.SolarCalculator
             {
                 DateTime sunTime = timeShiftInMinutes == 0 ? dateTime : dateTime.AddMinutes(timeShiftInMinutes);
 
-                Vector3D sunDirection = Geometry.SolarCalculator.Query.SunDirection(location, sunTime, true);
-                if (!Geometry.SolarCalculator.Query.TryGetSunAngles(sunDirection, out double altitude, out double azimuth))
+                // Read the angles from SolarTimes exactly as SAM.Analytical.SolarCalculator.Query
+                // .CachedIrradiance does (Radians, never the whole-degree-rounding Degrees, and no
+                // vector round-trip). Bin membership and bin lookup are then bit-identical
+                // computations, so a valid hour can never fail to resolve to its own bin.
+                if (!Geometry.SolarCalculator.Query.TryGetSunAngles(location, sunTime, out double altitude, out double azimuth))
                 {
                     continue;
                 }
@@ -119,9 +122,21 @@ namespace SAM.Weather.SolarCalculator
         {
             altitudeBin = (int)Math.Floor(altitude / binSizeDegrees);
 
-            // Guard the azimuth == 360 edge (atan2 can return exactly 360 after normalisation rounding).
-            double azimuth_Clammed = azimuth >= 360.0 ? 360.0 - 1e-9 : (azimuth < 0.0 ? 0.0 : azimuth);
-            azimuthBin = (int)Math.Floor(azimuth_Clammed / binSizeDegrees);
+            // Wrap the azimuth into [0, 360) rather than clamping: a clamp would map a small
+            // negative azimuth (355 deg expressed as -5) onto bin 0 instead of the correct northerly
+            // bin, and would make the mapping depend on which caller normalised first.
+            double azimuth_Wrapped = azimuth % 360.0;
+            if (azimuth_Wrapped < 0.0)
+            {
+                azimuth_Wrapped += 360.0;
+            }
+
+            if (azimuth_Wrapped >= 360.0)
+            {
+                azimuth_Wrapped = 360.0 - 1e-9;
+            }
+
+            azimuthBin = (int)Math.Floor(azimuth_Wrapped / binSizeDegrees);
         }
     }
 }

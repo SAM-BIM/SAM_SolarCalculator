@@ -26,10 +26,14 @@ namespace SAM.Analytical.SolarCalculator
         /// integrated over whole hours and converted W/m2 -> kWh/m2 (x 1 h / 1000), clamped so a
         /// component can never go negative.
         ///
-        /// Beam-horizontal radiation is derived explicitly as (global - diffuse): SAM's EPW importer
-        /// never populates the direct-normal field and its semantics vary by creation route, so the
-        /// field is intentionally not read. DNI = beamHorizontal / sin(elevation), capped at
-        /// 5 degrees elevation.
+        /// Beam-horizontal radiation is derived explicitly as (global - diffuse), read from the RAW
+        /// GlobalSolarRadiation and DiffuseSolarRadiation fields. The WeatherHour.Calculated*
+        /// helpers are deliberately NOT used: each of them falls back to DirectSolarRadiation when
+        /// its own field is absent, which would reintroduce exactly the ambiguity B6 removes (SAM's
+        /// EPW importer never populates the direct field, and its semantics vary by creation route —
+        /// beam-horizontal from a SAM-internal producer, true DNI from an EPW field 14 reader).
+        /// An hour missing either raw field is counted in MissingWeatherHours rather than silently
+        /// reinterpreted. DNI = beamHorizontal / sin(elevation), capped at 5 degrees elevation.
         ///
         /// The sun position is sampled at h + SolarVisibilityCache.SunPositionShiftInMinutes — the
         /// shift is read FROM THE CACHE so the bin-construction and evaluation timelines are always
@@ -120,8 +124,11 @@ namespace SAM.Analytical.SolarCalculator
                     continue;
                 }
 
-                double globalSolarRadiation = weatherHour.CalculatedGlobalSolarRadiation();
-                double diffuseSolarRadiation = weatherHour.CalculatedDiffuseSolarRadiation();
+                // RAW fields only. WeatherHour.CalculatedGlobalSolarRadiation() would fall back to
+                // (direct + diffuse) and CalculatedDiffuseSolarRadiation() to (global - direct):
+                // both consume the ambiguous DirectSolarRadiation field. See remarks (B6).
+                double globalSolarRadiation = weatherHour.GlobalSolarRadiation;
+                double diffuseSolarRadiation = weatherHour.DiffuseSolarRadiation;
                 if (double.IsNaN(globalSolarRadiation) || double.IsNaN(diffuseSolarRadiation))
                 {
                     missingWeatherHours++;
@@ -129,31 +136,29 @@ namespace SAM.Analytical.SolarCalculator
                 }
 
                 // Beam-horizontal is derived explicitly from global - diffuse (see remarks); the
-                // direct-solar field is deliberately NOT read.
+                // direct-solar field is never read, on any code path.
                 double beamHorizontal = Math.Max(0.0, globalSolarRadiation - diffuseSolarRadiation);
 
-                // Sun position on the timeline the cache's bins were built from.
+                // Sun position on the timeline the cache's bins were built from. Query.TryGetSunAngles
+                // is the SAME angle source the bins were built with (Angle.Radians, no rounding, no
+                // vector round-trip), so bin membership and bin lookup cannot drift apart.
                 DateTime sunTime = timeShiftInMinutes == 0 ? dateTime : dateTime.AddMinutes(timeShiftInMinutes);
-                Innovative.SolarCalculator.SolarTimes solarTimes = Geometry.SolarCalculator.Create.SolarTimes(location, sunTime);
-                if (solarTimes == null)
+                if (!Geometry.SolarCalculator.Query.TryGetSunAngles(location, sunTime, out double elevationDegrees, out double azimuthDegrees))
                 {
                     missingWeatherHours++;
                     continue;
                 }
 
-                double elevationRadians = System.Convert.ToDouble(solarTimes.SolarElevation.Radians);
-                double azimuthRadians = System.Convert.ToDouble(solarTimes.SolarAzimuth.Radians);
+                double elevationRadians = elevationDegrees * Math.PI / 180.0;
+                double azimuthRadians = azimuthDegrees * Math.PI / 180.0;
 
-                // Angle.Degrees ROUNDS to whole degrees (Innovative.Geometry) — never use it for
-                // sun angles; Radians carries full precision.
-                double elevationDegrees = elevationRadians * 180.0 / Math.PI;
                 if (elevationDegrees < minHorizonAngleDegrees)
                 {
                     belowHorizonHours++;
                     continue;
                 }
 
-                int binIndex = solarVisibilityCache.FindBin(elevationDegrees, azimuthRadians * 180.0 / Math.PI);
+                int binIndex = solarVisibilityCache.FindBin(elevationDegrees, azimuthDegrees);
                 if (binIndex < 0)
                 {
                     // Should not happen when the cache was built for this shift/year; counted loudly
@@ -177,6 +182,10 @@ namespace SAM.Analytical.SolarCalculator
                 {
                     if (!Geometry.SolarCalculator.Query.TryGetPerezCoefficients(directNormalIrradiance, diffuseSolarRadiation, elevationDegrees, sunTime.DayOfYear, out f1, out f2, out _, out _))
                     {
+                        // Unreachable for a valid hour (elevation is already > minHorizonAngle > 0 and
+                        // both radiation values are non-NaN), so the only way here is a degenerate
+                        // weather value. Counted, never silently dropped.
+                        missingWeatherHours++;
                         continue;
                     }
 
