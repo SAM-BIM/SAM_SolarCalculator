@@ -511,9 +511,30 @@ No action is required now; this is recorded so the Stage 5–8 work does not hav
 
 | Kind | Status |
 |---|---|
-| Binary | No released public signature removed or changed. The legacy `Create.Radiation(SolarTimes, double, double, …)` overload, the `calctulateRadiation` parameter spelling on `Modify.Simulate`, and `Weather.SolarCalculator.Create.Radiation(WeatherData, DateTime, Plane, …)` are all untouched. |
+| Binary | **No released public signature removed, renamed or changed.** The legacy `Geometry.SolarCalculator.Create.Radiation(SolarTimes, double tilt, double surfaceAzimuth, …)` overload, the misspelled `calctulateRadiation` parameter on all three `Modify.Simulate` overloads, `Weather.SolarCalculator.Create.Radiation(WeatherData, DateTime, Plane, …)` and `Query.SunDirection(Location, DateTime, bool)` all keep their exact signatures. |
 | Source | No existing enum value renumbered. New enums (`SkyModel`, `SkyPatchSubdivision`, `SunTimeConvention`, `AnalysisPeriodPreset`) are additive. |
-| Behavioural | The legacy isotropic formula and its consumption of `CalculatedDirectSolarRadiation()` are unchanged, and pinned by golden-value tests. The corrected physical conventions live only in the new `Plane`-based overload and the cache evaluation path. |
+| Behavioural | Mostly unchanged — with three **deliberate defect fixes** listed below. |
+
+Behavioural changes to *released* code, all of them intentional fixes with regression tests, none of
+them a convention change:
+
+1. **Fractional time zones are no longer truncated.** `Query.SunDirection(Location, DateTime, bool)`
+   and `Weather.SolarCalculator.Create.Radiation(WeatherData, …)` used
+   `System.Convert.ToInt32(Core.Query.Double(uTC))`, which turned UTC+05:30 into UTC+05:00 and moved
+   the computed sun position by up to 30 minutes. Both now route through
+   `Create.SolarTimes(Location, DateTime)`, which carries the fractional offset. **Results are
+   bit-identical for every whole-hour time zone** and change only where the old value was wrong.
+   Pinned by `SunDirection_FractionalTimeZone_Preserved`.
+2. **`Modify.Simulate(…, merge: true)` returns the merged results.** It previously built the merged
+   list, attached it, and then returned the *un-merged* one. Pinned by
+   `Simulate_MergeTrue_Returns_Merged_Results`.
+3. **`SunExposureFace3Ds` returns null instead of throwing** when the plane search yields nothing.
+   Pinned by `SunExposureFace3Ds_NullPlane_Returns_Null`.
+
+What is explicitly **not** changed: the legacy isotropic radiation formula (inward-normal tilt, +90°
+azimuth rotation) and its consumption of `CalculatedDirectSolarRadiation()`. Both are frozen by
+golden-value tests. The corrected physical conventions live only in the new `Plane`-based overload
+and the cache evaluation path.
 
 Types and members introduced **within this PR** (`ApertureIrradianceResult`, `SimulateApertures`,
 `ApertureSolarTargets`, the caches) are not yet released, so they were renamed freely to the agreed
