@@ -29,6 +29,7 @@ external binary dependency, and is described in **Stage 2** below.
 | 3 | Shading **potential field** (voxel scalar field) | Shaderade/`LB Shade Benefit` *evaluate* a supplied surface. Nothing *generates* the solid. |
 | 4 | Ideal-shape → buildable-device rationaliser | No open-source tool fits overhang/fin/louvre/egg-crate to a target mask with a scored trade-off. |
 | 5 | Anisotropic (Perez) sky | Current model is isotropic — see §2.3. Material for vertical façades. |
+| 6 | Per-element interception attribution + energy-weighted shading metrics | The engine already computes the first-hit blocker and discards it — see §2.5. |
 
 **What is genuinely missing and cannot be fully solved in Phase 1:** a thermal load model. Shaderade's
 definition of "unwanted sun" is *transmitted beam energy during hours when the zone has a net cooling
@@ -159,8 +160,9 @@ Over a year the sun occupies a narrow 2-D band of the sky. Group sun positions a
 2° in (altitude, azimuth). Roughly **600–900 groups** cover all daylight hours at a mid-latitude
 site, against ~4 400 daylight hours. Then:
 
-1. **Build once** (per geometry): for each sun group `g`, run the existing occlusion pass and store a
-   **bitset** `lit[p, g] ∈ {0,1}` over the analysis grid points of every selected aperture.
+1. **Build once** (per geometry): for each sun group `g`, run the existing occlusion pass and store
+   `firstHit[p, g]` over the analysis grid points of every selected aperture — the index of the
+   element that intercepted the sun, or a sentinel for "visible" (§2.5).
 2. **Evaluate any period** `H` (a set of HOYs) with pure arithmetic, no geometry:
 
 ```
@@ -260,7 +262,7 @@ route.
 | `_apertures_` | Voluntary | empty → **all** valid external sun-exposed apertures |
 | `_analysisPeriod_` | Voluntary | empty → Full Year |
 | `_HOYs_` | Voluntary (advanced) | explicit HOYs **override** `_analysisPeriod_` |
-| `_gridSize_` | Voluntary | 0.5 m |
+| `_gridSize_` | **Binding** | 0.5 m |
 | `_sunAngleStep_` | Voluntary (advanced) | 2° |
 | `_recalculate_` | Voluntary | false — reuse/invalidate automatically |
 | `_run` | Binding | false |
@@ -273,6 +275,61 @@ Two consequences worth naming, because they are behaviour and not just wording:
 - **`_HOYs_` beats `_analysisPeriod_`.** When both are supplied the component must say so via
   `AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, …)` rather than silently discarding the period —
   a silently ignored input is how someone reports the wrong season for a year.
+
+### 2.5 Decision: keep the blocker's identity, not just "blocked"
+
+Agreed on PR #12. The engine must record **which element intercepted the sun**, not only that
+something did — so shading performance can be reported per element, energy-weighted.
+
+**This costs almost nothing, because the information is already computed and then discarded.** The
+sampled path already ray-casts and sorts the hits:
+
+```csharp
+List<Tuple<LinkedFace3D, Point3D>> tuples_Intersection =
+    Geometry.Object.Spatial.Query.IntersectionTuples(segment3D, candidates, true, tolerance_Distance);
+…
+if (tuples_Intersection[0].Item1.Guid == sampleCell.MergedGuid && …)
+```
+
+`tuples_Intersection[0].Item1.Guid` **is** the first-hit surface. Today it is compared and thrown
+away. Keeping it turns a boolean engine into an attributing one.
+
+**Storage.** `lit[p, g]` becomes `firstHit[p, g]` — a blocker index into a per-model element table,
+with a reserved sentinel for "visible". 1 bit → 16 bits (`ushort`, 65 535 elements is ample). The
+§2.1 estimate goes from ~450 KB to ~7.2 MB for 20 apertures. Still negligible, so take it.
+
+**Two constraints this imposes, both worth knowing before building:**
+
+1. **Attribution requires the ray path, not the exact path.** The exact mode resolves all occluders
+   simultaneously by polygon clipping — there is no "first" blocker to name. Attribution is therefore
+   defined on the analysis grid and inherits its resolution. This is consistent (the Stage 2
+   structure is grid-based anyway), but it must be stated rather than discovered: a fin narrower than
+   `gridSize` may be under-attributed.
+2. **Generated device elements need stable identity.** A Stage 8 device is fresh `Face3D` geometry
+   that does not exist in the model. Each *element* — the overhang, the left fin, the right fin, each
+   louvre blade — must be registered as context under its own stable GUID, or attribution returns a
+   GUID naming nothing. Build this into `IShadingTypology` from the start; retrofitting identity onto
+   generated geometry later is exactly the "expensive to recover" case.
+
+**First-hit contribution is not removal-loss.** Each blocked ray has exactly one first hit, so
+per-element intercepted energy sums to the system total by construction and the percentages are
+internally consistent. But it is *order-dependent under overlap*: removing an overhang may simply
+expose a fin behind it, so the fin's real marginal value is lower than its removal would suggest, and
+the overhang's is lower than its first-hit share. Report first-hit as **direct contribution**.
+**Marginal contribution** — recompute with one element removed — is the honest measure where elements
+overlap, and is a later refinement, not first implementation.
+
+**Vocabulary.** Intercepted energy is **intercepted**, never "reflected". SAM_SolarCalculator is a
+direct-solar visibility and interception engine; it has no material optical properties and no
+secondary rays. The supported chains are exactly:
+
+```
+sun → intercepted by <ShadeGuid>
+sun → passes shade → aperture → first internal surface
+```
+
+Anything described as reflected solar would require inter-reflection modelling and is a separate
+future capability (§7).
 
 ---
 
@@ -424,9 +481,10 @@ rays through. Get it wrong and everything above it is slow or incorrect.
   Group on (altitude, azimuth); the representative direction is the **irradiance-weighted mean** of
   the member hours' directions, not the group centre — this keeps the bias near zero on high-energy
   groups.
-- `Classes/SolarVisibilityCache.cs` — geometry hash, group list, grid-point index, and the lit bitset
-  (`System.Collections.BitArray` or a packed `ulong[]`). JSON round-trip so it persists on the
-  `SolarModel` and survives a file save. **Internal type — never surfaced in Grasshopper (§2.4).**
+- `Classes/SolarVisibilityCache.cs` — geometry hash, group list, grid-point index, an element table,
+  and `firstHit[p, g]` as a packed `ushort[]` (sentinel = visible) per §2.5. JSON round-trip so it
+  persists on the `SolarModel` and survives a file save. **Internal type — never surfaced in
+  Grasshopper (§2.4).**
 - `Create/SolarVisibilityCache.cs` — build it by calling the existing occlusion pass once per group.
 - `Query/GeometryHash.cs` — stable hash over the context `Face3D` vertex set + the analysis grid, so
   reuse is invalidated automatically when geometry moves. Round coordinates to tolerance before hashing.
@@ -465,10 +523,17 @@ load-bearing method, and a bias analysis of the binning approximation.
 > WeatherData when available, else unweighted).
 >
 > `SolarVisibilityCache`: for a given analysis grid (from Stage 0's `ApertureSolarTarget`) and a set of
-> `SunGroup`, store a packed bitset `lit[gridIndex, groupIndex]`. Build it by running the extracted
-> Part-A occlusion method once per group, in a `Parallel.For`. Include a geometry hash
-> (`Query.GeometryHash`, coordinates rounded to `Core.Tolerance.Distance` before hashing) so reuse is
-> invalidated automatically when geometry changes. Give it `ToJsonObject`/`FromJsonObject`.
+> `SunGroup`, store `firstHit[gridIndex, groupIndex]` as a packed `ushort[]` — the index into an
+> element table of the surface that intercepted the sun, with a reserved sentinel for "visible". Do
+> NOT store a plain visible/blocked bit: §2.5 of the plan requires the blocker's identity, and the
+> sampled path already computes it — `Query.IntersectionTuples(...)` returns hits sorted, so
+> `tuples_Intersection[0].Item1.Guid` is the first-hit surface and is currently discarded. Build it by
+> running the extracted Part-A occlusion method once per group, in a `Parallel.For`. Include a geometry
+> hash (`Query.GeometryHash`, coordinates rounded to `Core.Tolerance.Distance` before hashing) so reuse
+> is invalidated automatically when geometry changes. Give it `ToJsonObject`/`FromJsonObject`.
+>
+> Note that attribution is only available on the ray/sampled path — the exact polygon-clipping path
+> resolves all occluders at once and has no "first" blocker. Build the cache on the ray path.
 >
 > Naming (see §2.4 of `documentation/ShadingOptimisation-Plan.md`): the parameter is **sunAngleStep**,
 > not binSize. `SolarVisibilityCache` stays an internal type name — it is accurate and it is not
@@ -479,7 +544,9 @@ load-bearing method, and a bias analysis of the binning approximation.
 >    within 2 % mean absolute error at a 2° sun-angle step — report the actual figure in test output.
 > 2. Group count at 2° is at least 4× smaller than the daylight-hour count.
 > 3. Changing any context face invalidates the geometry hash.
-> 4. JSON round-trip preserves the bitset exactly.
+> 4. JSON round-trip preserves `firstHit` exactly, element table included.
+> 5. With a single known shade in front of an aperture, every blocked grid point attributes to that
+>    shade's Guid — not to a sentinel and not to a neighbouring surface.
 >
 > Report the measured build time and the bias from grouping. If a 2° step exceeds 2 % MAE, report that
 > honestly and recommend the step that does not — do not tune the test to pass.
@@ -814,23 +881,60 @@ Score   = Capture + λ·Harm − μ·Material              // λ, μ user-expose
 ```
 
 - `Modify/VerifyDevice.cs` — **the honest closer.** Add the device's `Face3D`s to the model as
-  context, re-run Stage 4, and report the *actual* change in wanted and unwanted irradiance. The field
-  is a heuristic; this is the truth. Always report both.
+  context, re-run Stage 4 twice (with and without the device), and report the *actual* change. The
+  field is a heuristic; this is the truth. Always report both.
+- `Classes/ShadingPerformanceResult.cs` — the reported metrics (below).
+
+**The metrics** (agreed on PR #12). All **energy-weighted**, never sun-vector counts — a low-energy
+December morning must not weigh the same as a July noon. Over a period `P`, with `U` = direct energy
+reaching the aperture **unshaded** and `S` = direct energy still admitted **with** the device:
+
+| Metric | Definition |
+|---|---|
+| Direct solar intercepted [kWh] | `U − S` |
+| Direct Shading Efficiency [%] | `(U − S) / U` |
+| Unwanted Solar Blocked [%] | `(U − S) / U` over the **unwanted** period |
+| Wanted Solar Retained [%] | `S / U` over the **wanted** period |
+| Direct contribution of element `e` [%] | `Intercepted(e) / U`, from `firstHit` attribution (§2.5) |
+
+Per-element contributions sum to Direct Shading Efficiency by construction — each blocked ray has
+exactly one first hit. Worked example, matching the review:
+
+```
+Unshaded direct       420 kWh
+Intercepted           310 kWh    Direct Shading Efficiency  73.8 %
+  Overhang            180 kWh    42.9 %
+  Left fin             61 kWh    14.5 %
+  Right fin            54 kWh    12.9 %
+  Louvres              15 kWh     3.6 %
+```
+
+Report these as **direct contribution**. They are *not* removal-loss — see §2.5 on overlap. Marginal
+contribution (recompute with one element removed) is a later refinement; the API should leave room
+for it without implementing it now.
 
 **Difficulty.** High.
 
-**Model + effort.** **Opus, medium-high.** The trig is textbook; the typology abstraction and the
-scoring design need care, and the verify-loop must not be allowed to become optional.
+**Model + effort.** **Opus, medium-high.** The trig is textbook; the typology abstraction, the
+per-element identity plumbing and the scoring design need care, and the verify-loop must not be
+allowed to become optional.
 
 > **Prompt —**
 > Implement shading rationalisation in `SAM_SolarCalculator/SAM.Analytical.SolarCalculator` — fitting
 > buildable devices to the Stage 6 potential field.
 >
 > `IShadingTypology`: a parameter vector (`double[]`) with named bounds, and
-> `List<Face3D> Geometry(ApertureSolarTarget target, double[] parameters)`. Implement `Overhang`
+> `List<ShadingElement> Geometry(ApertureSolarTarget target, double[] parameters)`. Implement `Overhang`
 > (depth, tilt angle, offset above window head, side extension), `VerticalFins` (count, depth, angle,
 > spacing), `HorizontalLouvres` (pitch, depth, blade angle, offset), `EggCrate` (overhang + fins), and
 > `PerforatedScreen` (offset from façade, porosity, depth).
+>
+> **Each element carries a stable Guid and a name** ("Overhang", "Left fin", "Louvre 3") — a
+> `ShadingElement` is `{ Guid, Name, List<Face3D> }`, NOT a bare `List<Face3D>`. Per §2.5 of
+> `documentation/ShadingOptimisation-Plan.md`, per-element performance reporting depends on
+> first-hit attribution naming a real element; generated geometry with no identity cannot be
+> attributed, and retrofitting identity later is the expensive case this is meant to avoid. The Guid
+> must be stable across re-evaluations with the same parameters so results are comparable.
 >
 > `Query.SeedParameters(IShadingTypology, ShadingPotentialField, ApertureSolarTarget)`: derive a sane
 > starting parameter set in closed form rather than starting from random. Find the depth at which
@@ -845,19 +949,116 @@ scoring design need care, and the verify-loop must not be allowed to become opti
 > `Score = Capture + lambda*Harm - mu*Material` with caller-supplied lambda and mu.
 >
 > `Modify.VerifyDevice(AnalyticalModel, ApertureSolarTarget, IShadingTypology, double[] parameters,
-> AnalysisPeriod wanted, AnalysisPeriod unwanted)`: add the device geometry to the model as context,
-> re-run the Stage 4 aperture simulation for both periods, and return the actual percentage change in
-> incident irradiance for each. This is the ground truth — `FitScore` is only a heuristic over the
-> voxel field, and the two can disagree.
+> AnalysisPeriod wanted, AnalysisPeriod unwanted)` → `ShadingPerformanceResult`: register each
+> `ShadingElement` as context under its own Guid, run the Stage 4 aperture simulation **twice** — once
+> without the device (the unshaded baseline `U`) and once with it (`S`) — and compute, energy-weighted
+> from WeatherData, for each period:
+>
+> - direct solar intercepted [kWh] = `U - S`
+> - Direct Shading Efficiency [%] = `(U - S) / U`
+> - Unwanted Solar Blocked [%] = `(U - S) / U` over the unwanted period
+> - Wanted Solar Retained [%] = `S / U` over the wanted period
+> - per-element direct contribution [kWh and %] = `Intercepted(e) / U`, read from the `firstHit`
+>   attribution in the Stage 2 structure
+>
+> Everything is weighted by solar energy per timestep, NOT by counting sun directions — a December
+> morning must not weigh the same as a July noon. Per-element contributions must sum to Direct Shading
+> Efficiency; assert this in a test.
+>
+> Call the per-element figure **direct contribution**. Do NOT call it the loss from removing the
+> element — it is order-dependent under overlap (§2.5). Leave a documented extension point for
+> marginal contribution (recompute with one element removed) but do not implement it now.
+>
+> Never describe intercepted energy as "reflected" — this engine has no material optical properties
+> and no secondary rays (§2.5).
+>
+> `VerifyDevice` is the ground truth — `FitScore` is only a heuristic over the voxel field, and the two
+> can disagree.
 >
 > Tests: on a south-facing window at 51.5° N, the seeded overhang depth is within 25 % of the
 > optimiser's converged depth (so seeding genuinely helps); `VerifyDevice` on a 1 m overhang shows
 > reduced summer and reduced winter irradiance, with the summer reduction larger; a zero-depth device
-> scores `Capture == 0` and `Material == 0`; `FitScore` ranks a deep overhang above a shallow one for
-> a summer-unwanted weighting.
+> scores `Capture == 0`, `Material == 0` and Direct Shading Efficiency 0 %; `FitScore` ranks a deep
+> overhang above a shallow one for a summer-unwanted weighting; for an egg-crate, per-element
+> contributions sum to the system total within floating-point tolerance; an element narrower than
+> `gridSize` produces a warning about attribution resolution rather than a silently low contribution.
 >
 > Do NOT let `VerifyDevice` become optional or skippable in the API — every reported result must be
 > verifiable against a real simulation.
+
+---
+
+### Stage 8.1 — Direct solar penetration into the space
+
+**Goal.** Follow the rays that *get through*. For each unblocked sun path, continue through the
+aperture and find the first internal surface it lands on, so shading can be judged by how much direct
+sun it keeps off the floor — not only by irradiance at the glass line.
+
+**Why.** Irradiance at the aperture plane is the physics; direct sun on the floor at 15:00 in July is
+what the client actually complains about. This is the metric that makes the tool legible to a design
+team, and it is a natural extension of §2.5 — the same ray, one segment further.
+
+**New code** — `SAM.Analytical.SolarCalculator`:
+- `Query/InternalFace3Ds.cs` — the bounding faces of the space behind an aperture, classified
+  floor / wall / ceiling. Note `ToSAM_SolarModel` deliberately *excludes* these (it skips panels
+  shared by two spaces and keeps only sun-exposed ones), so this is a new query, not a filter on the
+  existing set.
+- `Classes/SolarPenetrationResult.cs` — per internal surface and per surface type: direct energy
+  received [kWh], with and without the device, and the reduction [%].
+- `Modify/SimulatePenetration.cs` — for each grid point `p` and sun group `g` where
+  `firstHit[p, g] == visible`, cast a segment from `p` along `direction(g)` into the space and take
+  the first internal hit, energy-weighted exactly as Stage 8.
+
+**Reported as:**
+
+```
+Without shading   direct solar reaching floor   185 kWh
+With shading      direct solar reaching floor    46 kWh
+Floor Solar Reduction                           75.1 %
+```
+
+**One thing to be explicit about.** This is *geometric* penetration — the direct beam incident on the
+aperture, projected onward. It does not apply glazing transmittance. Either state that plainly in the
+result, or multiply by the `ApertureConstruction`'s solar transmittance where one is available. Do
+not leave it ambiguous: a number that looks like transmitted solar gain but is actually incident
+energy is the kind of thing that ends up in a report.
+
+**Difficulty.** Medium — the machinery all exists; the work is the internal-face query and honest
+labelling.
+
+**Model + effort.** **Opus, medium.** Mostly reuse, but the space/aperture adjacency and the
+transmittance boundary are both easy to get quietly wrong.
+
+> **Prompt —**
+> Add direct solar penetration reporting to `SAM_SolarCalculator/SAM.Analytical.SolarCalculator`,
+> extending Stage 8. Read §2.5 and Stage 8.1 of `documentation/ShadingOptimisation-Plan.md` first.
+>
+> `Query.InternalFace3Ds(AnalyticalModel, Aperture)`: the bounding faces of the space the aperture
+> serves, classified floor / wall / ceiling via `PanelType` and surface tilt. Note that
+> `Convert.ToSAM_SolarModel` deliberately excludes internal panels (it skips panels shared by two
+> spaces), so build this from the `AdjacencyCluster` — do not try to filter the SolarModel's set.
+>
+> `Modify.SimulatePenetration(AnalyticalModel, ApertureSolarTarget, SolarVisibilityCache, AnalysisPeriod,
+> WeatherData)`: for every analysis grid point and sun group where the cache says the point is VISIBLE
+> (not intercepted), cast a segment from the grid point along the sun direction into the space and take
+> the first internal surface hit using `Geometry.Object.Spatial.Query.IntersectionTuples`. Accumulate
+> energy-weighted direct solar per internal surface and per surface type, using the same per-timestep
+> DNI·cosθ·Δt weighting as Stage 8 — not sun-vector counts.
+>
+> Return a `SolarPenetrationResult` giving, per surface and per type, direct energy received [kWh] and
+> — when run against a model with and without the device — the reduction [%].
+>
+> Be explicit in the API and XML docs that this is GEOMETRIC penetration of the beam incident on the
+> aperture: it does not apply glazing transmittance. Either state that in the result type's
+> documentation or multiply by the `ApertureConstruction` solar transmittance when one is available and
+> say which you did. Do not leave it ambiguous — a figure that reads as transmitted solar gain but is
+> actually incident energy will end up in a report.
+>
+> Tests: a south-facing window with no shading puts direct solar on the floor in winter (low sun) and
+> less in summer (high sun) for the same room; adding a 1 m overhang reduces summer floor energy more
+> than winter; the sum over all internal surfaces equals the total admitted direct energy from Stage 8
+> within tolerance (nothing lost, nothing double-counted); a fully shaded aperture yields zero
+> penetration rather than null.
 
 ---
 
@@ -961,7 +1162,7 @@ judgement calls: reuse must be visible enough that a stale result is never silen
 > | `_apertures_` | Voluntary | empty → ALL valid external sun-exposed apertures |
 > | `_analysisPeriod_` | Voluntary | empty → Full Year |
 > | `_HOYs_` | Voluntary | explicit HOYs OVERRIDE `_analysisPeriod_` |
-> | `_gridSize_` | Voluntary | 0.5 (metres) |
+> | `_gridSize_` | **Binding** | 0.5 (metres) |
 > | `_sunAngleStep_` | Voluntary | 2 (degrees) |
 > | `_recalculate_` | Voluntary | false |
 > | `_run` | Binding | false |
@@ -1025,15 +1226,19 @@ document, and it is what makes the tool trustworthy in a report.
 > - `SunGroupingBiasTests` — mean absolute error of reuse-based vs exact per-hour annual irradiance at 1°,
 >   2° and 5° sun-angle steps. Emit a table to test output.
 > - `ConvergenceTests` — aperture total vs grid size (0.25/0.5/1.0 m) and field benefit vs voxel size.
+> - `ShadingMetricsTests` — per-element direct contributions sum to Direct Shading Efficiency; solar
+>   penetration across internal surfaces sums to admitted direct energy; both within tolerance.
 > - Confirm the existing SAM-vs-TAS coverage benchmark still passes unchanged.
 >
 > Then write `documentation/ShadingOptimisation-Method.md` covering: the method and its literature
 > basis (Kaftan & Marsh 2005; Sargent, Niemasz & Reinhart 2011 Shaderade; Arumí-Noé 1996; Shaviv),
 > the sun-grouping architecture and its measured bias, and — most importantly — an **assumptions
 > register** listing every approximation with its expected magnitude and direction:
-> isotropic vs Perez sky, no inter-reflection between surfaces, no thermal load model (desirability is
-> approximated — see Stage 5), sun-position grouping, grid and voxel discretisation, and the
-> `minHorizonAngle` cutoff.
+> isotropic vs Perez sky, no inter-reflection between surfaces (and therefore "intercepted", never
+> "reflected"), no thermal load model (desirability is approximated — see Stage 5), sun-position
+> grouping, grid and voxel discretisation, attribution resolution being bounded by `gridSize`,
+> direct contribution not being removal-loss, solar penetration being geometric rather than
+> transmittance-adjusted, and the `minHorizonAngle` cutoff.
 >
 > Write the register so an engineer can decide whether the tool is fit for their specific job. Report
 > real measured numbers from the tests, not estimates. If a validation target is not met, write down
@@ -1053,14 +1258,15 @@ document, and it is what makes the tool trustworthy in a report.
 | 5 | Desirability weighting | **Opus** | Medium |
 | 6 | **Shading potential field** | **Opus** | **High** |
 | 7 | Isosurface extraction | Sonnet | Medium |
-| 8 | **Rationalisation to buildable** | **Opus** | Medium–High |
+| 8 | **Rationalisation to buildable + performance metrics** | **Opus** | Medium–High |
+| 8.1 | Direct solar penetration into the space | **Opus** | Medium |
 | 9 | Optimisation (pattern search, NSGA-II) | Sonnet | Medium |
 | 10 | Grasshopper components | Sonnet | Medium |
 | 11 | Validation + assumptions register | Sonnet (+Opus for the register) | Medium |
 
 **Rule of thumb.** Opus at high effort for the two stages that invent something (2 and 6) and the
-stages where a silent wrong answer is plausible (0, 3, 4, 5, 8). Sonnet for the stages with a clear
-template or a textbook algorithm (1, 7, 9, 10, 11).
+stages where a silent wrong answer is plausible (0, 3, 4, 5, 8, 8.1). Sonnet for the stages with a
+clear template or a textbook algorithm (1, 7, 9, 10, 11).
 
 ---
 
@@ -1069,8 +1275,8 @@ template or a textbook algorithm (1, 7, 9, 10, 11).
 **Slice 1 — useful on its own (Stages 0–4).** Per-aperture irradiance, any period, interactive.
 Ship it, use it, validate it. Nothing about shading design yet, and it is already worth having.
 
-**Slice 2 — the design tool (Stages 5–8).** Desirability, the potential field, the ideal shape, the
-rationalised device. Prototype Stage 6 on a single synthetic south-facing window with no context
+**Slice 2 — the design tool (Stages 5–8.1).** Desirability, the potential field, the ideal shape, the
+rationalised device, and the performance metrics that make it reportable. Prototype Stage 6 on a single synthetic south-facing window with no context
 before running it on a real model — the analytical profile-angle check in the Stage 6 prompt is the
 gate.
 
@@ -1092,7 +1298,9 @@ entirely reasonable.
 | **`Shell` boolean fragility.** | Designed out. Booleans are used only in Stage 7 for display and are allowed to fail (§2.2). |
 | **SAM geometry fidelity** — flipped normals, degenerate faces, apertures lost on empty spaces. | Stage 0 resolves normals against the host panel and space; assert on every fixture. |
 | **Stale reuse.** A silently reused calculation gives a confidently wrong answer. | Automatic invalidation on the geometry hash, a visible `reusedPreviousCalculation` diagnostic output, and `_recalculate_` as a manual override (Stage 10, §2.4). |
-| **No inter-reflection.** Specular and diffuse bounce off context is ignored. | Same limitation as `LB Incident Radiation`; only full Radiance solves it. Documented, not hidden. |
+| **No inter-reflection.** Specular and diffuse bounce off context is ignored. | Same limitation as `LB Incident Radiation`; only full Radiance solves it. Documented, not hidden — and the reason intercepted energy is never described as "reflected" (§2.5). |
+| **Attribution resolution.** A shading element narrower than `gridSize` is under-attributed, because first-hit attribution lives on the analysis grid (§2.5). | Warn when any element's minimum dimension is below `gridSize`. Element totals stay correct in aggregate; only the per-element split degrades. |
+| **First-hit contribution read as removal-loss.** Overlapping elements make the two differ. | Named **direct contribution** throughout, with the distinction stated wherever it is reported. Marginal contribution left as a documented extension point. |
 | **Voxel memory.** Fine voxels × many apertures. | Voxel size is a parameter; the field is per-aperture and disposable. A 3 m × 3 m × 1.5 m volume at 50 mm is ~1.6 M voxels ≈ 13 MB — fine. Warn above a threshold. |
 
 **Explicitly out of scope for Phase 1:** glare (DGP), daylight autonomy, thermal comfort, energy
