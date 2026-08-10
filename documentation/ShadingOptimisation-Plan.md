@@ -61,7 +61,10 @@ Everything below was read from the current `master`. The previous plan flagged s
     A cell is lit only if its ray first hits its **own** merged face *and* that face is front-facing
     (`ProjectedFace.IsSolarCandidate`).
 - Already parallel: `Parallel.For` over timesteps.
-- `minHorizonAngle` culls near-horizon sun; `_timeShift_` defaults to −30 min to match TAS EDSL.
+- `minHorizonAngle` culls near-horizon sun (default `Core.Tolerance.Angle` = **2°**, so near-horizon
+  hours are skipped whole); the legacy `_timeShift_` input defaults to −30 min to match TAS EDSL.
+  **See §2.4.1** — that −30 min is a TAS-compatibility convention, not the EPW weather convention,
+  and the Stage 0–4 workflow defaults to +30 min instead.
 
 **This is the reusable core.** Stages 2 and 6 are built by restructuring it, not replacing it.
 
@@ -276,6 +279,37 @@ Two consequences worth naming, because they are behaviour and not just wording:
   `AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, …)` rather than silently discarding the period —
   a silently ignored input is how someone reports the wrong season for a year.
 
+**Status after Stages 0–4.** The public Stage 0–4 API already speaks this vocabulary, so Stage 10
+passes its inputs straight through rather than translating: `Modify.SimulateApertures` and
+`Create.ApertureSolarTargets` take `gridSize` / `sunAngleStep` / `recalculate` and report
+`reusedPreviousCalculation`; `ApertureIrradianceResult` exposes `GridSize`, `SunAngleStep`,
+`TimeShiftInMinutes` and `SunTimeConvention`. The weather precedence rule is implemented **in
+`SimulateApertures` itself** (supplied → model → null), so it cannot diverge between components.
+`AnalysisPeriod(year, IEnumerable<int> hoursOfYear)` plus `ExplicitHoursOfYear` already models the
+`_HOYs_` override; only the runtime remark remains for Stage 10.
+
+### 2.4.1 Implementation record — where Stages 0–4 diverged from this plan
+
+Recorded so the plan is not read as a description of the code. The full method reference is
+`documentation/Stages0-4-Method.md`.
+
+| Planned here | As built | Why |
+|---|---|---|
+| `SunGroup`, `Create.SunGroups`, `Query.AnalysisGrid` as **type** names | `SunBin`, `Create.SunBins`, `Query.AnalysisCells` | The §2.4 decision governs the **engineer-facing** surface, and it is honoured there. Renaming the internal types as well was judged not worth the churn once the public parameters, results and diagnostics all read `gridSize` / `sunAngleStep`. The mapping is fixed and documented; "bin" and "cell" stay out of the Grasshopper surface. |
+| Stage 2 stores `firstHit[gridIndex, groupIndex]` as `ushort[]` | Stage 2 stores a packed **boolean** lit bitset (`ulong[][]`) | First-hit attribution is a Stage 8 requirement and Stages 0–4 do not consume it. Storing it now would have widened the cache and its serialised form for no current reader. §10 of `Stages0-4-Method.md` records exactly what the change costs (`IntersectionTuples(..., sort: true)` plus `bool[]` → `int[]`) and confirms nothing is discarded that would be expensive to recover. |
+| `Create.SunGroups(Location, IEnumerable<DateTime>, double sunAngleStep)` | same shape, plus a `minHorizonAngle` and an explicit `timeShiftInMinutes` | The sun-sampling offset had to become part of the group definition and of the cache identity (correction B1), otherwise group construction and evaluation can be built on different timelines. |
+| — | `SkyVisibilityCache` (Stage 3) as a **second**, separate cache | Perez needs three obstruction states (sky, horizon band, ground), not one. They are location- and weather-independent, so they invalidate on a different rule than the sun-group cache and belong in their own identity. |
+
+Two statements elsewhere in this plan are superseded by the implementation and should be read with
+§2 of `Stages0-4-Method.md`:
+
+- §1.1's "`_timeShift_` defaults to −30 min to match TAS EDSL" describes the **legacy** Grasshopper
+  input. The new workflow's default is `SunTimeConvention.IntervalStart` (**+30 min**), which is the
+  SAM/EPW weather timeline; −30 min (`IntervalEnd`) is retained explicitly as the TAS EDSL
+  compatibility case. These are one hour apart and must not be conflated.
+- §1.4's radiation formula remains an accurate description of the **legacy** overload, which is
+  frozen for compatibility. The corrected physical path is the new `Plane`/outward-normal overload.
+
 ### 2.5 Decision: keep the blocker's identity, not just "blocked"
 
 Agreed on PR #12. The engine must record **which element intercepted the sun**, not only that
@@ -433,7 +467,11 @@ It must be a plain type, not a Grasshopper concern, so it is testable and reusab
 - `Classes/AnalysisPeriod.cs` — `int Year`, `(int month, int day)` start/end, `int StartHour`,
   `int EndHour`, `int Timestep` (1 = hourly), `IEnumerable<int> HoursOfYear()`,
   `IEnumerable<DateTime> DateTimes()`. Must handle a period that **wraps the year end**
-  (e.g. 1 Nov → 28 Feb — the heating season) and the `_timeShift_` convention (−30 min, TAS EDSL).
+  (e.g. 1 Nov → 28 Feb — the heating season). **As built:** `AnalysisPeriod` deliberately carries
+  *no* time-shift concept at all — it produces weather-timeline hours only, and the sun-sampling
+  offset is a separate, explicit `SunTimeConvention` owned by the visibility cache (§2.4.1). Mixing
+  the two in one type is what made the old `_timeShift_ = −30` default unexplainable.
+  `Timestep != 1` now throws at construction rather than being silently ignored.
 - `Enums/AnalysisPeriodPreset.cs` — `FullYear`, `Summer`, `Winter`, `Equinox`, `CoolingSeason`,
   `HeatingSeason`, `PeakSummerDay`, `PeakWinterDay`, `Custom`.
 - `Create/AnalysisPeriod.cs` — preset → period. Hemisphere-aware: "summer" must flip when
@@ -514,6 +552,14 @@ load-bearing method, and a bias analysis of the binning approximation.
 > a dead store and callers get the wrong data. Fix it and add a regression test.
 >
 > **Part B — sun grouping and the visibility cache.**
+>
+> *(Superseded by the implementation — kept for the record. As built: the type is `SunBin` /
+> `Create.SunBins` with the engineer-facing `sunAngleStep` on the public surface; the representative
+> direction is the angular **group centre**, deliberately NOT DNI-weighted, so the cache is
+> weather-independent and a weather swap cannot force a geometric rebuild; the cache stores a
+> boolean lit bitset rather than `firstHit`, deferred to Stage 8 — see §2.4.1 and §10 of
+> `documentation/Stages0-4-Method.md`; and the signature gained `minHorizonAngle` and an explicit
+> `timeShiftInMinutes` that is part of the cache identity, per correction B1.)*
 >
 > `Create.SunGroups(Core.Location location, IEnumerable<DateTime> dateTimes, double sunAngleStep)`:
 > compute each hour's sun direction via `Geometry.SolarCalculator.Query.SunDirection`, discard hours
