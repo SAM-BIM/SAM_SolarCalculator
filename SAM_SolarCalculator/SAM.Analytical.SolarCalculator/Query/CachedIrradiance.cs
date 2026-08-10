@@ -75,6 +75,7 @@ namespace SAM.Analytical.SolarCalculator
             double[] sunlitHours = new double[cellCount];
 
             // Per-cell fixed quantities: tilt factors and (cache-free) view factors.
+            Vector3D[] normals = new Vector3D[cellCount];
             double[] cosBeta = new double[cellCount];
             double[] sinBeta = new double[cellCount];
             double[] skyViewFactors = new double[cellCount];
@@ -83,6 +84,7 @@ namespace SAM.Analytical.SolarCalculator
             for (int c = 0; c < cellCount; c++)
             {
                 Vector3D normal = cellNormals[c]?.Unit;
+                normals[c] = normal;
                 double nz = normal == null ? 0 : Math.Max(-1.0, Math.Min(1.0, normal.Z));
                 cosBeta[c] = nz;   // tilt of the receiving side from horizontal: cosB = normal . +Z
                 sinBeta[c] = Math.Sqrt(Math.Max(0.0, 1.0 - nz * nz));
@@ -164,7 +166,7 @@ namespace SAM.Analytical.SolarCalculator
 
                 for (int c = 0; c < cellCount; c++)
                 {
-                    Vector3D normal = cellNormals[c];
+                    Vector3D normal = normals[c];
                     if (normal == null)
                     {
                         continue;
