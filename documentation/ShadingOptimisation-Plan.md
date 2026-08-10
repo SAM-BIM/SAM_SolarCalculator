@@ -310,6 +310,25 @@ Two statements elsewhere in this plan are superseded by the implementation and s
 - §1.4's radiation formula remains an accurate description of the **legacy** overload, which is
   frozen for compatibility. The corrected physical path is the new `Plane`/outward-normal overload.
 
+### 2.4.2 Implementation record — where Stages 5–8 diverged from this plan
+
+Recorded so the plan is not read as a description of the code. The full method reference is
+`documentation/Stages5-8-Method.md`.
+
+| Planned here | As built | Why |
+|---|---|---|
+| Stage 7 iso-surface by **marching cubes** | **Marching tetrahedra** | A cube has 256 sign configurations reducing to 15 base cases plus genuinely ambiguous ones (a face with two diagonally opposite corners inside can be joined either way), needing an extended table or an asymptotic decider; getting it wrong punches holes in the surface. A tetrahedron has 16 configurations, all unambiguous. The cost is roughly twice the triangles, which is irrelevant because the mesh is a display and take-off artefact and the scalar field remains the source of truth. |
+| Stage 6 Case B: a vertical fin must beat an overhang on an east window | The test measures **lateral asymmetry** against a symmetric south-facing control | It does not, and forcing it would have been wrong. Most summer beam on an east facade arrives near normal incidence at 30–40° elevation, which is overhang territory; a fin only helps where `cos(incidence)` is already small. Measured 553.5 kWh fin vs 4231.1 kWh overhang, and the overhang wins per voxel too (0.74 vs 1.57 kWh/voxel), so it is not a region-size artefact. |
+| Stage 6 profile-angle zero crossing within **~15 %** of the closed form | A **bracket** between two independently derived bounds, plus a grid-refinement convergence test | The gate compared a **continuum** quantity against a **cell-sampled** one. The field marches from analysis-cell centres, so just above the head its lever arm is 0.151 m against the closed form's 0.026 m — 6× in limiting profile angle. Continuous bound 0.125 m, cell-sampled bound 0.475 m, field 0.325 m, and the error halves as the grid halves. |
+| Stage 8 fit score `Capture + λ·Harm − μ·MaterialFraction` | `UnwantedSolarIntercepted − wantedSolarPenalty × WantedSolarBlocked − materialPenalty × MaterialFraction × AdmittedUnwantedEnergy` | `Harm` is a positive penalty quantity, so **adding** it would reward a device for destroying wanted winter solar. All three terms are positive and both costs are subtracted. Names now state what quantities are rather than which way they point. |
+| Stage 8 `PerforatedScreen` typology | **Omitted, and documented as unsupported** | The direct ray engine is binary. Faking porosity with an opaque face plus a scalar is wrong in exactly the metrics used to size a screen, because real effective transmission depends on incidence angle and perforation depth ratio and varies through the day by far more than the nominal open-area ratio. Preferred to plausible wrong physics. |
+| Stage 8 first-hit stored by widening the Stage 2 cache | A **separate** `SolarAttributionCache` | The visibility cache is 1 bit per cell per sun group and is relied on upstream; attribution is 32 bits, a ~32× widening of a released on-disk format for one downstream reader. Built alongside, discardable, with its own identity — including a hash of the ordered occluder GUID table, because reordering leaves every stored index resolvable and silently pointing at the wrong element. |
+
+Three defects were found and fixed in code these stages build on, all recorded in
+`Stages5-8-Method.md`: the DDA start-voxel choice on lattice-aligned ray origins (§2.5), the
+brute-force reference counting zero-length grazes and truncating rays (§2.5), and
+`ThresholdForCumulativeCapture` returning a level the strict selector then excluded (§3.6).
+
 ### 2.5 Decision: keep the blocker's identity, not just "blocked"
 
 Agreed on PR #12. The engine must record **which element intercepted the sun**, not only that
