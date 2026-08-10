@@ -296,10 +296,15 @@ namespace SAM.Analytical.SolarCalculator
         }
 
         /// <summary>
-        /// Threshold selection by retained benefit: the smallest score tau such that voxels with
-        /// Score &gt;= tau capture at least the given fraction of PositiveTotal. This is the
-        /// engineer-readable "keep the top X % of the benefit" rule. NaN when there is no positive
-        /// benefit; the returned threshold is always one of the actual voxel scores.
+        /// Threshold selection by retained benefit: the engineer-readable "keep the top X % of the
+        /// benefit" rule. NaN when there is no positive benefit.
+        ///
+        /// The returned level is meant for the STRICT selector Query.IdealShadingVoxels uses
+        /// (Score &gt; threshold), so it is not the score of the voxel that tips the total over the
+        /// target but the next distinct score BELOW it. Returning the tipping score itself would
+        /// exclude that voxel — and every voxel tied with it — and quietly deliver slightly less
+        /// benefit than was asked for. With this level the selection is exactly
+        /// { v : Score(v) &gt;= tipping score }, so asking for 90 % returns at least 90 %.
         /// </summary>
         public double ThresholdForCumulativeCapture(double fraction, double wantedSolarPenalty = 1.0)
         {
@@ -326,16 +331,29 @@ namespace SAM.Analytical.SolarCalculator
 
             double cumulative = 0;
             double target = fraction * positiveTotal;
+            double tipping = positives[positives.Count - 1];
             foreach (double score in positives)
             {
                 cumulative += score;
                 if (cumulative >= target)
                 {
+                    tipping = score;
+                    break;
+                }
+            }
+
+            // Drop to the next distinct score below the tipping one so a strict > selector keeps
+            // every voxel at or above it. Zero when the tipping score is already the smallest
+            // positive: > 0 then selects exactly the positive voxels.
+            foreach (double score in positives)
+            {
+                if (score < tipping)
+                {
                     return score;
                 }
             }
 
-            return positives[positives.Count - 1];
+            return 0.0;
         }
 
         /// <summary>Threshold selection as a fraction of the maximum voxel score.</summary>
