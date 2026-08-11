@@ -73,8 +73,81 @@ namespace SAM.Analytical.SolarCalculator
     /// candidate scoring below zero is worse than leaving the aperture alone, which is what lets
     /// Stage 9 answer "no shading is worth building" instead of returning the least-bad geometry.
     /// </summary>
+    /// <summary>How a penalty value sits against the objective's declared domain.</summary>
+    public enum PenaltyValidity
+    {
+        /// <summary>Inside the range this objective was designed and tested for.</summary>
+        Recommended,
+
+        /// <summary>Mathematically valid and meaningful, but outside normal engineering use. The answer is sound; check it is the question you meant to ask.</summary>
+        Extreme,
+
+        /// <summary>Outside the valid domain. The objective would reward the wrong thing, or is not a number at all.</summary>
+        Invalid,
+    }
+
     public class ShadingObjective : IJSAMObject, ISolarObject
     {
+        // ------------------------------------------------------------------- the domain ----
+
+        /// <summary>
+        /// THE VALID DOMAIN OF BOTH PENALTIES: finite and &gt;= 0. There is no upper bound, and
+        /// inventing one would be a UI convenience dressed up as physics.
+        ///
+        /// WHY ZERO IS THE FLOOR, AND WHY IT IS A HARD ONE. Both penalties multiply a POSITIVE
+        /// quantity that is SUBTRACTED from the score:
+        ///
+        ///   Score = UnwantedSolarIntercepted - lambda x WantedSolarBlocked - mu x Cost
+        ///
+        /// A negative lambda turns "- lambda x WantedSolarBlocked" into an ADDITION, so the search
+        /// is paid to destroy the winter sun the brief asked it to preserve, and the deeper the
+        /// device the better it scores — the objective no longer expresses any brief a person would
+        /// write. A negative mu likewise pays for material, and since Cost rises without limit as
+        /// the device grows while benefit saturates, the search runs to the largest device its
+        /// bounds allow. Neither is a strange-but-defensible weighting; each inverts the meaning of
+        /// its own term. They are refused rather than clamped, because silently reading -2 as 0
+        /// would answer a question nobody asked.
+        ///
+        /// If a project genuinely wants to MAXIMISE solar gain, that is a different brief, and it is
+        /// expressed the way the model already supports: swap the wanted and unwanted periods, or
+        /// supply a desirability strategy whose weights carry the sign. The penalties stay weights.
+        ///
+        /// NaN and infinity are refused for the ordinary reason: every candidate's score would be
+        /// NaN or -infinity, no candidate could beat the null device, and the run would report "no
+        /// shading is worth building here" — a confident engineering answer it never earned.
+        /// </summary>
+        public const double MinimumPenalty = 0.0;
+
+        /// <summary>
+        /// Above this, a penalty is <see cref="PenaltyValidity.Extreme"/>: still valid, still
+        /// meaningful, but far outside normal use and worth saying so.
+        ///
+        /// The number is read off the behaviour rather than chosen. Both penalties are exchange
+        /// rates against the SAME unit (kWh of unwanted solar intercepted), so a value of 10 means
+        /// "one kWh of wanted solar lost must be repaid by ten kWh of unwanted solar blocked", or
+        /// "a device covering the whole aperture must repay ten times the aperture's entire admitted
+        /// beam". Measured on the controlled north window (MaterialPenaltyTests): material penalties
+        /// of 5 and above already return NO SHADE with the best candidate scoring -4.8 kWh, i.e. the
+        /// answer has stopped depending on the value and only its magnitude changes. A weighting
+        /// that can no longer change the recommendation is past the point of being a design
+        /// parameter, and 10 is comfortably beyond where that sets in for both penalties.
+        /// </summary>
+        public const double ExtremePenalty = 10.0;
+
+        /// <summary>
+        /// Where a penalty value sits: refused, unusual, or normal. Used by the Grasshopper
+        /// components so the same rule is stated in one place and cannot drift between them.
+        /// </summary>
+        public static PenaltyValidity Validity(double penalty)
+        {
+            if (double.IsNaN(penalty) || double.IsInfinity(penalty) || penalty < MinimumPenalty)
+            {
+                return PenaltyValidity.Invalid;
+            }
+
+            return penalty > ExtremePenalty ? PenaltyValidity.Extreme : PenaltyValidity.Recommended;
+        }
+
         private double wantedSolarPenalty = 1.0;
         private double materialPenalty = 0.1;
         private MaterialCostReference materialCostReference = MaterialCostReference.AdmittedDirectEnergy;
@@ -105,11 +178,33 @@ namespace SAM.Analytical.SolarCalculator
             FromJsonObject(jObject);
         }
 
-        /// <summary>Lambda: kWh of unwanted solar blocked considered worth one kWh of wanted solar lost.</summary>
+        /// <summary>
+        /// Lambda: kWh of unwanted solar blocked considered worth one kWh of wanted solar lost.
+        ///
+        /// Valid: finite, &gt;= 0 (see <see cref="MinimumPenalty"/>). Default 1.0 — an even trade,
+        /// which is the only value that assumes nothing about the brief. Recommended working range
+        /// 0.5 to 2.0: below 1 the search buys deeper devices because winter loss is cheap, above 1
+        /// shallower ones because it is dear. Raising it does NOT change any measured energy; it
+        /// changes which measured design wins.
+        /// </summary>
         public double WantedSolarPenalty { get { return wantedSolarPenalty; } }
 
-        /// <summary>Mu: share of the reference energy charged per unit of MaterialFraction.</summary>
+        /// <summary>
+        /// Mu: share of the reference energy charged per unit of MaterialFraction.
+        ///
+        /// Valid: finite, &gt;= 0 (see <see cref="MinimumPenalty"/>). Default 0.1 — a mild
+        /// preference for the leaner of two near-equal designs, small enough not to override the
+        /// energy answer. 0 sizes on energy alone and tends to return the largest device that still
+        /// helps at all. Raising it shrinks the recommended device and eventually returns NO SHADE,
+        /// which is a real answer and not a failure.
+        /// </summary>
         public double MaterialPenalty { get { return materialPenalty; } }
+
+        /// <summary>Where <see cref="WantedSolarPenalty"/> sits against the declared domain.</summary>
+        public PenaltyValidity WantedSolarPenaltyValidity { get { return Validity(wantedSolarPenalty); } }
+
+        /// <summary>Where <see cref="MaterialPenalty"/> sits against the declared domain.</summary>
+        public PenaltyValidity MaterialPenaltyValidity { get { return Validity(materialPenalty); } }
 
         public MaterialCostReference MaterialCostReference { get { return materialCostReference; } }
 
