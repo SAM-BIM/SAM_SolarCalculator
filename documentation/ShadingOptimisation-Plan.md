@@ -329,6 +329,33 @@ Three defects were found and fixed in code these stages build on, all recorded i
 brute-force reference counting zero-length grazes and truncating rays (§2.5), and
 `ThresholdForCumulativeCapture` returning a level the strict selector then excluded (§3.6).
 
+### 2.4.3 Implementation record — Stage 9, and what its gate review changed in Stages 5–8
+
+Full method reference: `documentation/Stage9-Method.md`.
+
+Stage 9 was gated on an independent re-review of Stages 0–8 before any optimisation was written.
+That review changed three things in the stages below it:
+
+| Found | Change |
+|---|---|
+| The Stage 8 ideal-versus-rationalised comparison represented the Stage 7 selection as one thin plate per voxel. Measured against the voxel solid it stands in for: **28.2 % less** direct solar intercepted and **21.5 points more** wanted solar retained. A shallow ray crosses a voxel without ever meeting the single mid-height plate inside it. | `Query.VoxelSurfaceShadingElements` emits the boundary faces of the selected voxel set — the exact ray-traceable equivalent of the field's own "a ray entered this voxel". `Query.ShadingElements(IdealShadingResult)` converts the actual marching-tetrahedra mesh too. The Stage 8 comparison now uses the solid. The scalar field remains the source of truth. |
+| Two further zero-length phantom visits in the Stage 6 DDA: staircase voxels at exact edge/corner crossings, and `LatticeTolerance` fixed at 1e-9 ceasing to fire beyond ~1e6 m of world offset (error in `q` reaches 4.8e-9 at 1e7 m on an oblique facade — reachable, UTM southern-hemisphere false northing is 1e7 m). | Every axis whose boundary falls at the same point along the ray now steps together; the tolerance is scale-aware, floored at the old 1e-9 so near-origin behaviour is unchanged. Traversal exposed as `Query.TraversedVoxels` so it can be probed directly. |
+| Stage 8 scales the material cost by `AdmittedUnwantedEnergy`, which is **exactly zero** on an aperture with no unwanted solar — precisely the case where the right answer is "build nothing" and a cost term is needed to say so. | **Stage 8 unchanged.** Stage 9's `ShadingObjective` carries an explicit `MaterialCostReference` and defaults to `AdmittedDirectEnergy`. Scaling by *an energy* was confirmed correct: 0 % drift in cost/benefit over a 300× radiation change, against 300× for a bare fraction. |
+
+Reviews of `EggCrate` Guid identity and of attribution-cache scale found no defect. Both are now
+covered by regression tests rather than by argument.
+
+Where Stage 9 itself diverged from §Stage 9 below:
+
+| Planned here | As built | Why |
+|---|---|---|
+| `PatternSearch` **and** `NSGAII` **and** `ParetoFront` | Coarse lattice + compass refinement, **single objective** | Each evaluation is a full attribution rebuild (46–66 ms at 144 cells, provably not reusable between candidates). NSGA-II needs hundreds of evaluations to match what a compass search finds in tens, and introduces a random seed that must be stored and honoured to stay reproducible. A Pareto front is genuinely useful and is **deferred, not rejected**: `ShadingObjective` already exposes Benefit / Harm / Cost separately, which is the input a front needs. |
+| `ShadingOptimisationProblem` holding typology + bounds + objectives + constraints | `ShadingObjective` + `List<ShadingParameter>`, passed separately | The "problem" was three separable things — what to optimise, over what range, and to what end. Splitting them lets the objective be stored with the result and swept without rebuilding the search. |
+| Constraints satisfied by **rejection / resampling** | Constraints as **bounds plus granularity**, enforced by snapping | There are no non-box constraints in these four families. Snapping is cheaper, always feasible by construction, and exactly reproducible — resampling would need the random seed the design avoids. |
+| Objectives including "minimise material area" as a third axis | Material as a **priced cost term** in kWh | Keeps the objective one comparable energy. The raw `MaterialFraction` is still reported on every result, so a caller can rank on it directly. |
+| Tests on a convex synthetic 2-parameter objective and on ZDT1 | Tests on the **real** objective, including an exhaustively enumerated 1-D case | A synthetic convex bowl proves the search descends; it does not prove the search finds the optimum of *this* objective, which is not unimodal — the measured 1-D landscape has a local maximum at 0.35 m against the global one at 0.25 m. The optimiser reaches the enumerated global optimum in 10 evaluations of 30 lattice points. |
+| — (not planned) | **Element counts capped by the analysis resolution** | Found in validation, and it matters because the failure looks like success. Blades pitched finer than the analysis grid shade *between* the sample points: an 11-blade array reported 100 % of unwanted solar blocked with 100 % of wanted solar retained. The accounting was correct; the geometry was finer than the analysis measuring it. |
+
 ### 2.5 Decision: keep the blocker's identity, not just "blocked"
 
 Agreed on PR #12. The engine must record **which element intercepted the sun**, not only that
@@ -1128,6 +1155,10 @@ transmittance boundary are both easy to get quietly wrong.
 ---
 
 ### Stage 9 — Optimisation
+
+> **IMPLEMENTED.** The method reference is `documentation/Stage9-Method.md`; the divergences from
+> what is planned below are recorded in §2.4.3. The plan text is retained unedited as the original
+> intent. The no-external-dependency decision held; the algorithm choice did not.
 
 **Goal.** Search each typology's parameter space against the objectives. Because Stage 2 made each
 evaluation cheap, this can be plain C# — no Galapagos, Wallacei, or Opossum dependency.

@@ -170,6 +170,51 @@ DDA vs brute force: sum|diff| = 0, sum|reference| = 7555.39, relative = 0
 
 **Exact agreement.**
 
+### 2.5.1 Two further phantom visits, found at the Stage 9 gate review
+
+The cross-check above passes because it exercises one workload. Probing the traversal *directly*
+with synthetic rays — `Query.TraversedVoxels`, which marches the same production code — found two
+more ways to report a zero-length visit. Both are fixed; the cross-check above still gives exact
+agreement afterwards.
+
+**Defect 3, simultaneous boundary crossings.** A ray leaving a voxel exactly through an **edge or a
+corner** enters the diagonal neighbour. The DDA stepped one axis at a time and reported the
+intervening *staircase* voxels, each touched with zero path length. From local (0.5, 0.375, 0.375)
+along (1, 1, 1) on a 0.25 m grid it reported 6 voxels where 4 are entered. Reachable with any
+axis-aligned or diagonal sun direction on a regular grid. Every axis whose boundary falls at the
+same point along the ray now steps together.
+
+**Defect 4, the lattice tolerance was not scale-aware.** `LatticeTolerance` was a fixed `1e-9` in
+voxel units. The coincidence test runs on `q = p / voxelSize`, and `p` comes from
+`ShadingVolume.TryToLocal` as a **difference of world coordinates**, so its error grows with how far
+from the origin the model is sited — and an oblique aperture frame turns that into a three-term dot
+product, so the cancellation is real rather than exact. Measured on a 37° facade:
+
+| world offset | error in `q` | fixed 1e-9 fires? | scale-aware fires? |
+|---|---|---|---|
+| 0 | 2.0e-13 | yes | yes |
+| 1e5 m | 1.0e-11 | yes | yes |
+| 1.2e6 m | 4.9e-10 | yes (marginal) | yes |
+| **1e7 m** | **4.8e-9** | **no** | yes |
+| **1e8 m** | **3.4e-9** | **no** | yes |
+
+Beyond roughly 1e6 m the test stops firing and the negative-direction start voxel reverts to exactly
+the phantom it exists to prevent. This is reachable: UK OSGB northings run to ~1.2e6 m and UTM
+southern-hemisphere zones carry a false northing of 1e7 m. The tolerance is now proportional to the
+volume origin's world magnitude, expressed in voxels, **floored at the old 1e-9** so behaviour near
+the origin is bit-for-bit unchanged.
+
+Verified end to end: 165 ray/grid cases across three world offsets, every step-sign combination, and
+origins on / just inside / just outside lattice planes, all match an independent positive-path-length
+box traversal with **zero mismatches**.
+
+**Not a defect: rays lying *in* a lattice plane.** A ray with a zero direction component whose origin
+sits exactly on that axis's plane has zero cross-section with the voxels on both sides. Crediting
+neither would delete a real ray's whole contribution; crediting both would double it. The traversal
+credits the **lower-index** side, consistently, and this is documented as a deterministic tie-break
+rather than asserted against — it is reachable in practice, since a due-south facade produces a sun
+group with no across-facade component at all.
+
 ### 2.6 Context filtering — proven, not asserted
 
 A voxel only receives energy from a sun group in which the cell is **lit** in the Stage 0–4
@@ -448,27 +493,58 @@ the score of a device that blocks wanted solar.
 The material term is scaled by admitted unwanted energy so the penalty is in kWh and comparable to
 the other two, rather than an arbitrary mix of units.
 
+**The choice of *which* energy was re-examined at the Stage 9 gate review.** Scaling by an energy is
+right — it is what makes the objective scale linearly with the site's radiation, so two identical
+buildings under weather differing only in magnitude get the same device. Measured over a 300×
+radiation change, the energy-scaled cost/benefit ratio moves by **0 %** while a bare-fraction cost
+moves by **300×**. But `AdmittedUnwantedEnergy` specifically goes to **exactly zero** on an aperture
+with no unwanted solar, taking the whole cost term with it, and that is precisely the case where the
+right answer is "build nothing". Stage 8's behaviour is **unchanged** — it is only ever used on
+apertures that have an unwanted-solar problem — and Stage 9 defaults to `AdmittedDirectEnergy`
+instead. See `Stage9-Method.md` §3.
+
 This is **not** Stage 9. It is a small, ordered, fully deterministic candidate evaluation.
 
 ### 4.8 Ideal vs rationalised — measured
 
-2 m × 1 m south window, London, summer unwanted / winter wanted, `gridSize` 0.25, `voxelSize` 0.1:
+2 m × 1 m south window, London, summer unwanted / winter wanted, `gridSize` 0.25, `voxelSize` 0.1.
+
+**The ideal is represented by the boundary faces of its selected voxel set**, not by a plate at each
+voxel centre. The plate stand-in was measured at the Stage 9 gate review and is badly biased: a
+shallow ray crosses a voxel without ever meeting the single mid-height plate inside it. All three
+representations of the *same* selection, through the *same* first-hit engine:
+
+| representation | elements | intercepted | efficiency | unwanted blocked | wanted retained |
+|---|---|---|---|---|---|
+| plates (superseded) | 2005 | 1230.3 kWh | 45.5 % | 97.4 % | 98.7 % |
+| **voxel solid** | 2500 | **1714.1 kWh** | **63.4 %** | **100 %** | **77.2 %** |
+| Stage 7 mesh (triangles) | 13968 | 1026.5 kWh | 38.0 % | 88.1 % | 99.5 % |
+
+Plates understate interception by **28.2 %** and overstate wanted-solar retention by **21.5 points**.
+The voxel solid is the correct reference because the Stage 6 field credits a voxel when a ray
+**enters** it, so the boundary surface of the selected voxels intercepts exactly the rays the field
+counted. The extracted mesh is smaller again because the iso-surface interpolates *inside* the
+boundary voxels; it is the shape a user is shown, and `Query.ShadingElements(IdealShadingResult)`
+converts it for the ray engine when that is what is wanted.
+
+The headline comparison, on the corrected representation:
 
 | | Direct intercepted | Efficiency | Unwanted blocked | Wanted retained |
 |---|---|---|---|---|
-| Unshaded baseline | — | — | — | — |
-| **Ideal (Stage 7)** | 1230.3 kWh | 45.5 % | **97.4 %** | **98.7 %** |
+| **Ideal (Stage 7, voxel solid)** | 1714.1 kWh | 63.4 % | **100 %** | **77.2 %** |
 | **Rationalised** (0.34 m overhang) | 688.7 kWh | 25.5 % | **59.5 %** | **94.2 %** |
 
 Baseline admitted: direct **2704.1 kWh**, unwanted **450.9 kWh**, wanted **1091.2 kWh**.
 
-Simplification cost: **37.9 points** of unwanted blocked, **4.5 points** of wanted retained.
+Simplification cost: **40.5 points** of unwanted blocked, and simplification *gains* **17 points** of
+wanted retained.
 
-The ideal shape wins by that much because it is free to be **non-convex** and thread between the
-summer and winter sun paths, which a single plate cannot. Both figures come from the **same
-first-hit engine** — the ideal is rendered as ray-traceable plates rather than compared as a field
-statistic — so they are genuinely comparable. The comparison is reported, not tuned to make
-rationalisation look good.
+That sign is the interesting part and it was hidden by the plate representation. The ideal blocks
+*everything* unwanted — and pays 22.8 points of winter sun for it. The Stage 6 field is a **per-voxel
+marginal value**: it answers "how useful would material at *this* voxel be", independently. Filling
+every above-threshold voxel is not a jointly optimised solid, and the union over-shades. This is the
+direct argument for Stage 9 optimising against the energy objective rather than fitting geometry to
+the Stage 7 mesh, and it is why Stage 9 is not required to beat the ideal.
 
 ### 4.9 Monotonic metric sanity
 
@@ -517,6 +593,27 @@ makes 5° more attractive on cost and leaves 2° still the better accuracy trade
 
 **Ratio ≈ 32×.** This is why attribution is a separate, discardable cache rather than a widening of
 the visibility format.
+
+**Measured rather than extrapolated**, on an 8 m × 4.5 m south wall at `gridSize` 0.25 with a
+36-element egg crate:
+
+| SunGroups | cells | samples | elements | visibility storage | attribution storage | ratio |
+|---|---|---|---|---|---|---|
+| 675 | 576 | 388 800 | 12 | 47.5 kB | 1518.9 kB | **32×** |
+
+Managed allocation during the build is asserted **≥ `StorageBytes`**, so the reported figure is a
+real model of the cost rather than an underestimate that ignores the jagged array and object
+headers. Only that one-sided claim is asserted: the counter (`GC.GetTotalAllocatedBytes`) is
+process-wide and xUnit runs test classes concurrently, so the upper side is unusable in a full run.
+Measured in isolation the ratio is about **2×** — the payload allocated once in the builder and again
+by the cache's defensive clone. Build rate **0.745 M samples/s**.
+
+**Attribution cannot be reused across candidates.** Every candidate's own faces are in the occluder
+set, so the first hit changes with every parameter and the attribution table hash differs for every
+candidate — verified, 5 distinct hashes over 5 depths. Only the **base visibility cache** is
+reusable, and it is the expensive one to compute. Measured **46–66 ms per candidate** at 144 cells
+(the spread is contention with concurrently running tests, not variance in the work). This is the
+cost model Stage 9's search is built against.
 
 ---
 
