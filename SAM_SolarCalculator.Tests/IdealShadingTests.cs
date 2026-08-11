@@ -199,15 +199,15 @@ namespace SAM.SolarCalculator.Tests
             IdealShadingResult capture50 = Analytical.SolarCalculator.Create.IdealShadingResult(field, ShadingThresholdMethod.CumulativeCapture, 0.5);
             IdealShadingResult maxHalf = Analytical.SolarCalculator.Create.IdealShadingResult(field, ShadingThresholdMethod.MaxFraction, 0.5);
 
-            output.WriteLine($"capture 90 %: threshold {capture90.Threshold:0.###} kWh, {capture90.SelectedVoxelCount} voxels, captured {capture90.CapturedBenefitFraction * 100:0.#} %, {capture90.RegionCount} regions");
-            output.WriteLine($"capture 50 %: threshold {capture50.Threshold:0.###} kWh, {capture50.SelectedVoxelCount} voxels, captured {capture50.CapturedBenefitFraction * 100:0.#} %");
-            output.WriteLine($"max fraction 0.5: threshold {maxHalf.Threshold:0.###} kWh, {maxHalf.SelectedVoxelCount} voxels, captured {maxHalf.CapturedBenefitFraction * 100:0.#} %");
+            output.WriteLine($"capture 90 %: threshold {capture90.Threshold:0.###} kWh, {capture90.SelectedVoxelCount} voxels, captured {capture90.CapturedPotentialFraction * 100:0.#} %, {capture90.RegionCount} regions");
+            output.WriteLine($"capture 50 %: threshold {capture50.Threshold:0.###} kWh, {capture50.SelectedVoxelCount} voxels, captured {capture50.CapturedPotentialFraction * 100:0.#} %");
+            output.WriteLine($"max fraction 0.5: threshold {maxHalf.Threshold:0.###} kWh, {maxHalf.SelectedVoxelCount} voxels, captured {maxHalf.CapturedPotentialFraction * 100:0.#} %");
 
             // Asking for more benefit must lower the bar and take more voxels.
             Assert.True(capture90.Threshold < capture50.Threshold);
             Assert.True(capture90.SelectedVoxelCount > capture50.SelectedVoxelCount);
-            Assert.True(capture90.CapturedBenefitFraction >= 0.9);
-            Assert.True(capture50.CapturedBenefitFraction >= 0.5);
+            Assert.True(capture90.CapturedPotentialFraction >= 0.9);
+            Assert.True(capture50.CapturedPotentialFraction >= 0.5);
 
             // MaxFraction is exactly half of the best voxel.
             Assert.Equal(0.5 * field.MaxScore(), maxHalf.Threshold, 9);
@@ -305,7 +305,7 @@ namespace SAM.SolarCalculator.Tests
             Assert.Equal(result.RequireFacadeContact, restored.RequireFacadeContact);
             Assert.Equal(result.VoxelIndices, restored.VoxelIndices);
             Assert.Equal(result.RegionSizes, restored.RegionSizes);
-            Assert.Equal(result.CapturedBenefitFraction, restored.CapturedBenefitFraction, 12);
+            Assert.Equal(result.CapturedPotentialFraction, restored.CapturedPotentialFraction, 12);
             Assert.Equal(result.ProjectedArea, restored.ProjectedArea, 12);
             Assert.Equal(result.HasMesh, restored.HasMesh);
             Assert.Equal(result.Mesh.TrianglesCount, restored.Mesh.TrianglesCount);

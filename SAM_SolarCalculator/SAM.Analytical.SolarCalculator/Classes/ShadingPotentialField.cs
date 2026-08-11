@@ -225,7 +225,24 @@ namespace SAM.Analytical.SolarCalculator
             return result;
         }
 
-        /// <summary>Sum of the positive voxel scores, kWh — the total available shading benefit.</summary>
+        /// <summary>
+        /// Sum of the POSITIVE voxel scores — the total positive shading potential of the field.
+        ///
+        /// THIS IS NOT AN ENERGY SAVING, and reading it as one is the single most damaging
+        /// misunderstanding this class can cause. Each voxel independently accumulates the beam that
+        /// would pass through it, and a single solar ray passes through MANY voxels along its path,
+        /// contributing to every one of them. Summing the field therefore counts the same kWh over
+        /// and over, once per voxel the ray crosses. A real device occupies a thin surface, not the
+        /// whole volume, and intercepts each ray exactly once: its saving is bounded by the
+        /// aperture's admitted unwanted beam and is typically a small fraction of this total.
+        ///
+        /// The unit is inherited from the per-voxel accumulations (kWh of aperture-plane beam) but
+        /// the SUM is a path-length-weighted cumulative potential, not a quantity of energy anything
+        /// could save. It is useful for exactly what Stage 7 uses it for — RANKING locations and
+        /// choosing a threshold — and for nothing that looks like a saving. Only
+        /// <see cref="ShadingPerformance"/>, which builds real geometry and traces it, states what a
+        /// device saves.
+        /// </summary>
         public double PositiveTotal(double wantedSolarPenalty = 1.0)
         {
             if (unwantedEnergy == null)
@@ -246,7 +263,14 @@ namespace SAM.Analytical.SolarCalculator
             return result;
         }
 
-        /// <summary>Sum of the negative voxel scores, kWh (&lt;= 0) — the total wanted-solar jeopardy.</summary>
+        /// <summary>
+        /// Sum of the NEGATIVE voxel scores (&lt;= 0) — the total negative shading potential, i.e.
+        /// the wanted-solar risk carried by the locations that should stay open.
+        ///
+        /// The same caution as <see cref="PositiveTotal"/> applies in full: this is a cumulative
+        /// spatial potential summed over voxels a ray passes through, NOT the wanted solar any
+        /// device would destroy. Only a traced device reports that.
+        /// </summary>
         public double NegativeTotal(double wantedSolarPenalty = 1.0)
         {
             if (unwantedEnergy == null)

@@ -36,7 +36,12 @@ namespace SAM.Analytical.SolarCalculator
     /// </summary>
     public class IdealShadingResult : IJSAMObject, ISolarObject
     {
-        public const int CurrentSchemaVersion = 1;
+        /// <summary>
+        /// 2 — CapturedBenefitFraction became CapturedPotentialFraction (Stage 10.2). The quantity is
+        /// unchanged; the old name asserted it was a share of solar energy, which it is not. Schema 1
+        /// files still load, reading the old key.
+        /// </summary>
+        public const int CurrentSchemaVersion = 2;
 
         private int schemaVersion = CurrentSchemaVersion;
         private Guid apertureGuid;
@@ -48,7 +53,7 @@ namespace SAM.Analytical.SolarCalculator
         private bool keepLargestRegionOnly;
         private List<int> voxelIndices;
         private List<int> regionSizes;
-        private double capturedBenefitFraction = double.NaN;
+        private double capturedPotentialFraction = double.NaN;
         private double projectedArea = double.NaN;
         private double enclosedVolume = double.NaN;
         private double maxProjectionDepth = double.NaN;
@@ -69,7 +74,7 @@ namespace SAM.Analytical.SolarCalculator
             bool keepLargestRegionOnly,
             IEnumerable<int> voxelIndices,
             IEnumerable<int> regionSizes,
-            double capturedBenefitFraction,
+            double capturedPotentialFraction,
             double projectedArea,
             double enclosedVolume,
             double maxProjectionDepth,
@@ -89,7 +94,7 @@ namespace SAM.Analytical.SolarCalculator
             this.keepLargestRegionOnly = keepLargestRegionOnly;
             this.voxelIndices = voxelIndices == null ? new List<int>() : new List<int>(voxelIndices);
             this.regionSizes = regionSizes == null ? new List<int>() : new List<int>(regionSizes);
-            this.capturedBenefitFraction = capturedBenefitFraction;
+            this.capturedPotentialFraction = capturedPotentialFraction;
             this.projectedArea = projectedArea;
             this.enclosedVolume = enclosedVolume;
             this.maxProjectionDepth = maxProjectionDepth;
@@ -115,7 +120,7 @@ namespace SAM.Analytical.SolarCalculator
                 keepLargestRegionOnly = idealShadingResult.keepLargestRegionOnly;
                 voxelIndices = new List<int>(idealShadingResult.voxelIndices ?? new List<int>());
                 regionSizes = new List<int>(idealShadingResult.regionSizes ?? new List<int>());
-                capturedBenefitFraction = idealShadingResult.capturedBenefitFraction;
+                capturedPotentialFraction = idealShadingResult.capturedPotentialFraction;
                 projectedArea = idealShadingResult.projectedArea;
                 enclosedVolume = idealShadingResult.enclosedVolume;
                 maxProjectionDepth = idealShadingResult.maxProjectionDepth;
@@ -161,8 +166,25 @@ namespace SAM.Analytical.SolarCalculator
 
         public int RegionCount { get { return regionSizes == null ? 0 : regionSizes.Count; } }
 
-        /// <summary>Share of the field's total positive benefit the selection captures.</summary>
-        public double CapturedBenefitFraction { get { return capturedBenefitFraction; } }
+        /// <summary>
+        /// Share of the FIELD'S POSITIVE SHADING POTENTIAL that the selected region contains:
+        /// sum of the selected voxels' positive scores over
+        /// <see cref="ShadingPotentialField.PositiveTotal"/>.
+        ///
+        /// IT IS NOT A SHARE OF ANY SOLAR ENERGY, and it was called CapturedBenefitFraction until
+        /// Stage 10.2, which is precisely how it got read as one. Both numerator and denominator are
+        /// sums over voxels, and a single ray contributes to every voxel along its path — so this is
+        /// a ratio of spatial potentials, and "captures 90 %" means the region holds 90 % of the
+        /// field's positive potential, NOT that a device built there would block 90 % of the
+        /// unwanted solar. It will not: the region is a volume, a device is a surface, and the
+        /// Stage 7 mesh is display geometry that in testing intercepted materially less than the
+        /// region it draws.
+        ///
+        /// What it IS good for is the job Stage 7 gives it: choosing a threshold, and comparing two
+        /// thresholds on the same field. For what a device blocks, build one and measure it with
+        /// <see cref="ShadingPerformance"/>.
+        /// </summary>
+        public double CapturedPotentialFraction { get { return capturedPotentialFraction; } }
 
         /// <summary>Selection footprint projected on the aperture plane, m2.</summary>
         public double ProjectedArea { get { return projectedArea; } }
@@ -209,7 +231,10 @@ namespace SAM.Analytical.SolarCalculator
             if (jObject.ContainsKey("WantedSolarPenalty")) { wantedSolarPenalty = jObject["WantedSolarPenalty"]?.GetValue<double>() ?? 1.0; }
             if (jObject.ContainsKey("RequireFacadeContact")) { requireFacadeContact = jObject["RequireFacadeContact"]?.GetValue<bool>() ?? false; }
             if (jObject.ContainsKey("KeepLargestRegionOnly")) { keepLargestRegionOnly = jObject["KeepLargestRegionOnly"]?.GetValue<bool>() ?? false; }
-            if (jObject.ContainsKey("CapturedBenefitFraction")) { capturedBenefitFraction = jObject["CapturedBenefitFraction"]?.GetValue<double>() ?? double.NaN; }
+            // Renamed at Stage 10.2. The old key is still read so a saved schema-1 result keeps its
+            // number instead of silently coming back NaN; only the new key is ever written.
+            if (jObject.ContainsKey("CapturedPotentialFraction")) { capturedPotentialFraction = jObject["CapturedPotentialFraction"]?.GetValue<double>() ?? double.NaN; }
+            else if (jObject.ContainsKey("CapturedBenefitFraction")) { capturedPotentialFraction = jObject["CapturedBenefitFraction"]?.GetValue<double>() ?? double.NaN; }
             if (jObject.ContainsKey("ProjectedArea")) { projectedArea = jObject["ProjectedArea"]?.GetValue<double>() ?? double.NaN; }
             if (jObject.ContainsKey("EnclosedVolume")) { enclosedVolume = jObject["EnclosedVolume"]?.GetValue<double>() ?? double.NaN; }
             if (jObject.ContainsKey("MaxProjectionDepth")) { maxProjectionDepth = jObject["MaxProjectionDepth"]?.GetValue<double>() ?? double.NaN; }
@@ -239,7 +264,7 @@ namespace SAM.Analytical.SolarCalculator
             jObject.Add("WantedSolarPenalty", wantedSolarPenalty);
             jObject.Add("RequireFacadeContact", requireFacadeContact);
             jObject.Add("KeepLargestRegionOnly", keepLargestRegionOnly);
-            jObject.Add("CapturedBenefitFraction", capturedBenefitFraction);
+            jObject.Add("CapturedPotentialFraction", capturedPotentialFraction);
             jObject.Add("ProjectedArea", projectedArea);
             jObject.Add("EnclosedVolume", enclosedVolume);
             jObject.Add("MaxProjectionDepth", maxProjectionDepth);

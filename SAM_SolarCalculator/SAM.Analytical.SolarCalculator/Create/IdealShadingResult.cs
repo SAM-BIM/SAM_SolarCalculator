@@ -77,7 +77,7 @@ namespace SAM.Analytical.SolarCalculator
             }
 
             Query.TryGetIdealShadingMetrics(field, voxelIndices, wantedSolarPenalty,
-                out double projectedArea, out double enclosedVolume, out double maxProjectionDepth, out double capturedBenefitFraction);
+                out double projectedArea, out double enclosedVolume, out double maxProjectionDepth, out double capturedPotentialFraction);
 
             Mesh3D mesh = null;
             string meshFailureReason = null;
@@ -110,7 +110,7 @@ namespace SAM.Analytical.SolarCalculator
             return new IdealShadingResult(
                 field.ApertureGuid, threshold, thresholdMethod, thresholdParameter, wantedSolarPenalty,
                 requireFacadeContact, keepLargestRegionOnly, voxelIndices, regionSizes,
-                capturedBenefitFraction, projectedArea, enclosedVolume, maxProjectionDepth,
+                capturedPotentialFraction, projectedArea, enclosedVolume, maxProjectionDepth,
                 field.DesirabilityStrategyName, field.GridSize, field.SunAngleStep, volume.VoxelSize,
                 mesh, meshFailureReason);
         }

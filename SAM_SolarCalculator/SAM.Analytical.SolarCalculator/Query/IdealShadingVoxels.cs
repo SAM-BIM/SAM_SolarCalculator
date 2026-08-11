@@ -175,12 +175,12 @@ namespace SAM.Analytical.SolarCalculator
         /// outward projection depth, and the benefit captured (sum of positive scores over the set
         /// as a fraction of the field's PositiveTotal).
         /// </summary>
-        public static bool TryGetIdealShadingMetrics(this ShadingPotentialField field, IEnumerable<int> voxelIndices, double wantedSolarPenalty, out double projectedArea, out double volume, out double maxProjectionDepth, out double capturedBenefitFraction)
+        public static bool TryGetIdealShadingMetrics(this ShadingPotentialField field, IEnumerable<int> voxelIndices, double wantedSolarPenalty, out double projectedArea, out double volume, out double maxProjectionDepth, out double capturedPotentialFraction)
         {
             projectedArea = double.NaN;
             volume = double.NaN;
             maxProjectionDepth = double.NaN;
-            capturedBenefitFraction = double.NaN;
+            capturedPotentialFraction = double.NaN;
 
             ShadingVolume shadingVolume = field?.Volume;
             if (shadingVolume == null || voxelIndices == null)
@@ -221,7 +221,7 @@ namespace SAM.Analytical.SolarCalculator
             maxProjectionDepth = (maxK + 1) * voxelSize;
 
             double positiveTotal = field.PositiveTotal(wantedSolarPenalty);
-            capturedBenefitFraction = positiveTotal > 0 ? captured / positiveTotal : double.NaN;
+            capturedPotentialFraction = positiveTotal > 0 ? captured / positiveTotal : double.NaN;
             return true;
         }
     }
