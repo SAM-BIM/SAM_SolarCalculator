@@ -589,6 +589,13 @@ namespace SAM.SolarCalculator.Tests
             //
             // The cap ties blade pitch to the grid: a device may only be credited for shading the
             // analysis can resolve.
+            //
+            // STAGE 10.2 raised the cap from one grid spacing to Create.MinimumElementPitchInGridSizes
+            // of them. At pitch = grid there is exactly ONE sample per lit/shaded stripe period and,
+            // the lattices being commensurate, it sits at the same place in every period — so the
+            // measured shaded fraction can only come out 0 or 1 and is decided by phase. See
+            // ResolutionConvergenceTests for the measurement, and Create.MinimumElementPitchInGridSizes
+            // for why two is the threshold rather than a rounder-looking number.
             OptimisationFixture.Scenario scenario = OptimisationFixture.SouthSeasonal();
 
             Analytical.SolarCalculator.Query.TryGetApertureLocalBounds(scenario.Target, out double minX, out double maxX, out double minY, out double maxY);
@@ -602,18 +609,21 @@ namespace SAM.SolarCalculator.Tests
             ShadingParameter louvreCount = louvreParameters.Find(x => x.Name == "Count");
             ShadingParameter finCount = finParameters.Find(x => x.Name == "Count");
 
-            output.WriteLine($"aperture {maxX - minX:0.##} m across x {maxY - minY:0.##} m up, analysis grid {gridSize:0.##} m");
+            double minimumPitch = Analytical.SolarCalculator.Create.MinimumElementPitchInGridSizes * gridSize;
+
+            output.WriteLine($"aperture {maxX - minX:0.##} m across x {maxY - minY:0.##} m up, analysis grid {gridSize:0.##} m, minimum feature size {minimumPitch:0.##} m");
             output.WriteLine($"louvre count capped at {louvreCount.Maximum:0} (declared bound 24), pitch >= {(maxY - minY) / (louvreCount.Maximum - 1):0.###} m");
             output.WriteLine($"fin count capped at {finCount.Maximum:0} (declared bound 24), pitch >= {(maxX - minX) / (finCount.Maximum - 1):0.###} m");
 
             // Blades run up the aperture, fins across it, so the caps come from different spans.
-            Assert.Equal(Math.Floor((maxY - minY) / gridSize + 1.0), louvreCount.Maximum);
-            Assert.Equal(Math.Floor((maxX - minX) / gridSize + 1.0), finCount.Maximum);
+            Assert.Equal(Math.Floor((maxY - minY) / minimumPitch + 1.0 + 1e-9), louvreCount.Maximum);
+            Assert.Equal(Math.Floor((maxX - minX) / minimumPitch + 1.0 + 1e-9), finCount.Maximum);
             Assert.True(louvreCount.Maximum < 24, "the cap must actually bite against the declared bound");
 
-            // The resulting pitch is never finer than the grid.
-            Assert.True((maxY - minY) / (louvreCount.Maximum - 1) >= gridSize - 1e-9);
-            Assert.True((maxX - minX) / (finCount.Maximum - 1) >= gridSize - 1e-9);
+            // The resulting pitch is never finer than the minimum feature size — which is what makes
+            // the device Stage 9 proposes come back WITHOUT a resolution warning.
+            Assert.True((maxY - minY) / (louvreCount.Maximum - 1) >= minimumPitch - 1e-9);
+            Assert.True((maxX - minX) / (finCount.Maximum - 1) >= minimumPitch - 1e-9);
 
             // With no resolution supplied the declared bounds stand, so the cap is opt-in and
             // cannot silently narrow a caller's own parameter set.

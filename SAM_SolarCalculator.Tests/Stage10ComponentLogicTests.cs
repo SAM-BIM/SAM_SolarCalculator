@@ -114,8 +114,12 @@ namespace SAM.SolarCalculator.Tests
                 new HorizontalLouvres(0.3, 11), target, 0.25, out string message, out double pitch);
 
             Assert.Equal(ShadingResolutionState.BelowResolutionLimit, state);
-            Assert.Contains("below the reliable analysis resolution", message);
-            Assert.Contains("Reduce GridSize", message);
+            Assert.Contains("at or below the analysis grid", message);
+            Assert.Contains("at most one sample point per gap", message);
+
+            // The message has to say what to DO, and both routes out are stated: space the elements
+            // further apart, or refine the grid to the size that would resolve this spacing.
+            Assert.Contains("reduce GridSize to at most 0.05 m", message);
             Assert.Equal(0.1, pitch, 6);
             output.WriteLine(message);
         }
@@ -130,8 +134,9 @@ namespace SAM.SolarCalculator.Tests
                 new HorizontalLouvres(0.3, 4), target, 0.25, out string message, out double pitch);
 
             Assert.Equal(ShadingResolutionState.NearResolutionLimit, state);
-            Assert.Contains("close to the solar-analysis grid resolution", message);
+            Assert.Contains("below the minimum feature size", message);
             Assert.InRange(pitch, 0.3, 0.34);
+            output.WriteLine(message);
         }
 
         [Fact]
@@ -378,7 +383,7 @@ namespace SAM.SolarCalculator.Tests
             IdealShadingResult ideal = Analytical.SolarCalculator.Create.IdealShadingResult(field, ShadingThresholdMethod.CumulativeCapture, 0.9);
             IdealShadingResult reloadedIdeal = RoundTrip(ideal);
             Assert.Equal(ideal.SelectedVoxelCount, reloadedIdeal.SelectedVoxelCount);
-            Assert.Equal(ideal.CapturedBenefitFraction, reloadedIdeal.CapturedBenefitFraction, 9);
+            Assert.Equal(ideal.CapturedPotentialFraction, reloadedIdeal.CapturedPotentialFraction, 9);
             Assert.Equal(ideal.Threshold, reloadedIdeal.Threshold, 9);
 
             IShadingTypology device = new HorizontalLouvres(0.35, 3, 15.0);

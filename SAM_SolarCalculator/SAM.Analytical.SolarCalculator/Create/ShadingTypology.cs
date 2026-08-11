@@ -18,6 +18,57 @@ namespace SAM.Analytical.SolarCalculator
         };
 
         /// <summary>
+        /// THE MINIMUM FEATURE-SIZE RULE: a repeated element array may not be spaced more finely
+        /// than TWO analysis cells, and Stage 9 will not propose one that is.
+        ///
+        /// WHY A RULE IS NEEDED AT ALL. Performance is measured by asking, per analysis cell,
+        /// whether that cell's single interior sample point is lit. A blade array of pitch p casts
+        /// lit/shaded stripes of period p across the glass. The sample lattice has period g. The
+        /// number of samples falling inside one stripe period is p / g, and THAT is the resolution
+        /// with which the shaded fraction of each period can be estimated.
+        ///
+        /// WHY THE THRESHOLD IS TWO, and not a round number chosen for looking safe. At p = g there
+        /// is exactly ONE sample per period, and — because the two lattices are then commensurate —
+        /// it sits at the SAME relative position within every period. The estimator of the shaded
+        /// fraction is therefore degenerate: it can return only 0 or 1 per period, and which one it
+        /// returns is decided by the phase between the device and the grid rather than by the
+        /// device. Two is simply the first ratio at which the estimator has any interior resolution
+        /// at all. It is not an accuracy target; it is the point at which the measurement stops
+        /// being a coin toss.
+        ///
+        /// MEASURED (MultiAzimuth fixture, fins of fixed 0.25 m pitch measured on a series of grids
+        /// against a 0.04 m reference, phases 0 and half a pitch — ResolutionConvergenceTests):
+        ///
+        ///   pitch / GridSize   worst error in unwanted-solar-blocked
+        ///   1.0                26.5 percentage points  (and 100.0 % reported where the truth is 97.7 %)
+        ///   2.0                 1.9 percentage points
+        ///
+        /// The exactly-100 % reading at p = g is the failure mode Stage 9 named and did not fully
+        /// prevent: it looks like a triumph and is an artefact. Note that the error does NOT fall
+        /// monotonically with the ratio — 1.25, 1.5 and 3.0 all produce larger errors than 2.0 on
+        /// this fixture — so no ratio makes element-level numbers reliable on its own, and the rule
+        /// is justified by the degeneracy argument above rather than by a convergence plateau that
+        /// the data does not show.
+        ///
+        /// WHY IT IS ALSO TWO ON THE REPORTING SIDE. Query.ShadingResolution warns below this same
+        /// ratio. Before Stage 10.2 the optimiser was capped at pitch >= 1 x GridSize while the
+        /// warning fired below 2 x GridSize, so on any aperture where more elements kept helping the
+        /// search rode its own cap and the result ALWAYS carried a resolution warning — and refining
+        /// the grid never cleared it, because the cap moved down with the grid. The two numbers are
+        /// now the same number, so a result produced inside Stage 9's own declared reliable bounds
+        /// comes back without a warning, and a warning again means what it says.
+        /// </summary>
+        public const double MinimumElementPitchInGridSizes = 2.0;
+
+        /// <summary>
+        /// Absorbs floating-point representation error when the cap is computed. Without it a span
+        /// and grid that divide exactly in decimal (1.0 m at 0.1 m) can floor one element short,
+        /// which would make the permitted count jitter with the arithmetic rather than with the
+        /// geometry.
+        /// </summary>
+        private const double ResolutionCapTolerance = 1e-9;
+
+        /// <summary>
         /// A default-parameterised typology by family name, or null for an unknown name.
         ///
         /// This is what lets an OptimisedShadingResult rebuild its winning device from a stored
@@ -51,16 +102,10 @@ namespace SAM.Analytical.SolarCalculator
         /// is no porosity, no transmittance and no blade thickness, because the ray engine
         /// underneath is binary and would silently produce numbers that look like a screen's
         /// without being one.
-        /// </summary>
+        ///
         /// ELEMENT COUNTS ARE CAPPED BY THE ANALYSIS RESOLUTION when a target and grid size are
-        /// supplied, and this is not a tuning choice. Blades spaced more finely than the analysis
-        /// grid are shading between the sample points: with a 1 m aperture sampled at 0.5 m there
-        /// are two rows of cells, and an eleven-blade array can sit so that every sample sits just
-        /// under a blade while the gaps between samples stay open. The measured result then reads
-        /// "100 % of unwanted solar blocked, 100 % of wanted solar retained", which is an artefact
-        /// of where the samples happen to fall and not a property of the device. Capping the count
-        /// so blade pitch is at least the grid size means a candidate can only be credited for
-        /// shading the analysis can actually see. Refine the grid to justify a finer device.
+        /// supplied, and this is not a tuning choice — see
+        /// <see cref="MinimumElementPitchInGridSizes"/> for the rule and the evidence behind it.
         /// </summary>
         /// <param name="typology">The family whose bounds the ranges are intersected with.</param>
         /// <param name="maximumDepth">Optional cap on any depth-like parameter, m. NaN for none.</param>
@@ -78,9 +123,11 @@ namespace SAM.Analytical.SolarCalculator
             if (target != null && !double.IsNaN(gridSize) && gridSize > 0
                 && Query.TryGetApertureLocalBounds(target, out double minX, out double maxX, out double minY, out double maxY))
             {
-                // count <= span / gridSize + 1 keeps the pitch span/(count-1) at or above the grid.
-                maximumAcross = (maxX - minX) / gridSize + 1.0;
-                maximumUp = (maxY - minY) / gridSize + 1.0;
+                // Pitch is span / (count - 1), so count <= span / minimumPitch + 1 keeps the pitch at
+                // or above the minimum feature size.
+                double minimumPitch = MinimumElementPitchInGridSizes * gridSize;
+                maximumAcross = (maxX - minX) / minimumPitch + 1.0;
+                maximumUp = (maxY - minY) / minimumPitch + 1.0;
             }
 
             List<ShadingParameter> result = new List<ShadingParameter>();
@@ -135,8 +182,8 @@ namespace SAM.Analytical.SolarCalculator
 
         /// <summary>
         /// The declared maximum, narrowed to what the analysis grid can resolve. Never drops below
-        /// 1 — a single blade is always representable — and leaves the maximum alone when no
-        /// resolution was supplied.
+        /// 1 — a single element has no pitch and is always representable — and leaves the maximum
+        /// alone when no resolution was supplied.
         /// </summary>
         private static double ResolutionCap(double maximum, double resolutionLimit)
         {
@@ -145,7 +192,7 @@ namespace SAM.Analytical.SolarCalculator
                 return maximum;
             }
 
-            return Math.Max(1.0, Math.Min(maximum, Math.Floor(resolutionLimit)));
+            return Math.Max(1.0, Math.Min(maximum, Math.Floor(resolutionLimit + ResolutionCapTolerance)));
         }
     }
 }
