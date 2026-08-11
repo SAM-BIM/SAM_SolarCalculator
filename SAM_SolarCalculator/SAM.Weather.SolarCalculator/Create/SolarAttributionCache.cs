@@ -44,6 +44,10 @@ namespace SAM.Weather.SolarCalculator
         /// <param name="occluders">Context plus any candidate shading faces, in a stable order.</param>
         /// <param name="analysisCells">The window of cells to attribute, in visibility-cache order.</param>
         /// <param name="cellIndexOffset">Where that window starts in the visibility cache's cell space. 0 when the cache was built for these cells alone.</param>
+        /// <param name="tolerance_Area">Area tolerance.</param>
+        /// <param name="tolerance_Snap">Snap tolerance (also the ray-start offset).</param>
+        /// <param name="tolerance_Angle">Angle tolerance, RADIANS.</param>
+        /// <param name="tolerance_Distance">Distance tolerance.</param>
         public static SolarAttributionCache SolarAttributionCache(this SolarVisibilityCache solarVisibilityCache, List<LinkedFace3D> occluders, List<AnalysisCell> analysisCells, int cellIndexOffset = 0, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance)
         {
             List<SunBin> bins = solarVisibilityCache?.Bins;

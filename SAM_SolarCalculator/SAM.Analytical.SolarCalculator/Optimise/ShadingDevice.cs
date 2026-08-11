@@ -46,9 +46,16 @@ namespace SAM.Analytical.SolarCalculator
         /// material, then lexicographically smaller parameters — so the ranking is reproducible and
         /// a tie between two families is broken the same way every time.
         /// </summary>
+        /// <param name="target">The aperture.</param>
+        /// <param name="baseVisibilityCache">Visibility with CONTEXT ONLY.</param>
+        /// <param name="desirability">Stage 5 per-group energies for this aperture.</param>
+        /// <param name="contextOccluders">Existing context.</param>
+        /// <param name="objective">The objective. Null for the Stage 9 default.</param>
+        /// <param name="field">The Stage 6 map, for the seeded depth. Optional.</param>
         /// <param name="typologyNames">Families to consider. Null means the eligible ones.</param>
-        /// <returns>Results best first. EMPTY when nothing is eligible, which is itself an answer.</returns>
+        /// <param name="maximumEvaluations">Hard budget on distinct candidate evaluations per family.</param>
         /// <param name="cellIndexOffset">This target's first cell index within baseVisibilityCache when the cache spans the whole model.</param>
+        /// <returns>Results best first. EMPTY when nothing is eligible, which is itself an answer.</returns>
         public static List<OptimisedShadingResult> ShadingDevice(this ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, ShadingObjective objective = null, ShadingPotentialField field = null, IEnumerable<string> typologyNames = null, int maximumEvaluations = 400, int cellIndexOffset = 0)
         {
             if (target == null || baseVisibilityCache == null || desirability == null)

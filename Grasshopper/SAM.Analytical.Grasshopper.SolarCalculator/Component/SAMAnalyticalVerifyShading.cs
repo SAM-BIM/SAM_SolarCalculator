@@ -23,9 +23,14 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         public override Guid ComponentGuid => new Guid("7f3c9a10-5b28-4e63-9a41-6c0d2e7b1107");
 
         /// <summary>
-        /// The latest version of this component
+        /// The latest version of this component.
+        ///
+        /// 1.0.1 — the device is now checked against the aperture it was designed for and refused
+        /// when they disagree, instead of being measured on whatever target happened to be wired in.
+        /// The null device ("build nothing") verifies as a real answer. Added verificationSummary /
+        /// status / apertureGuid / azimuth for multi-window runs.
         /// </summary>
-        public override string LatestComponentVersion => "1.0.0";
+        public override string LatestComponentVersion => "1.0.1";
 
         /// <summary>
         /// Provides an Icon for the component.
@@ -36,7 +41,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
 
         public SAMAnalyticalVerifyShading()
           : base("SAMAnalytical.VerifyShading", "SAMAnalytical.VerifyShading",
-              "SUMMARY\nMeasures what a shading device actually does to one window: the direct solar the window admits without it, how much of that the device stops, and how the stopped energy splits between the solar you wanted blocked and the solar you wanted kept.\n\nThis is the ground-truth node. Every candidate is built as real geometry and traced against the real sun path and the real surroundings — nothing here is a rule of thumb or a profile-angle estimate.\n\nINPUTS\n  _analyticalModel — the SAM Analytical Model.\n  _apertureSolarTarget — the window, from ApertureSolarTargets.\n  _shadingDevice — the device to test: a device from RationaliseShading, or a result from it.\n  _weatherData_ / _unwantedPeriod_ / _wantedPeriod_ / _desirability_ — the brief. Use the SAME brief that produced the device, or the percentages will not compare.\n  _gridSize_ / _sunAngleStep_ / _recalculate_ — as on ApertureIrradiance.\n  _run — nothing happens until this is true.\n\nOUTPUTS\n  shadingPerformance — the full result object.\n  baselineDirectSolar — direct solar the window admits with the surroundings in place and NO device [kWh]. This is the denominator of the efficiency.\n  directSolarIntercepted — of that, how much the device stops [kWh].\n  directShadingEfficiency — intercepted / baseline [%].\n  unwantedSolarBlocked — [%] of the unwanted solar the window would have admitted.\n  wantedSolarRetained — [%] of the wanted solar that still gets through.\n  admittedUnwantedSolar / admittedWantedSolar — the unshaded totals behind those percentages [kWh].\n  elementNames / elementGuids / elementEnergy — which part of the device stops what [kWh], credited to the element the sun reaches FIRST, so overlapping parts never double-count.\n  unattributedEnergy — energy stopped by something that is not the device [kWh]. It should be zero; anything else means the model and the device disagree and is shown rather than folded into a total.\n  materialFraction — device area / window area.\n  shadingGeometry — the device as surfaces.\n  reusedPreviousCalculation / successful.\n\nNOTES\nCONTEXT IS NEVER CREDITED TO THE DEVICE. Solar already blocked by another building or by the roof is outside the baseline, so a device placed in permanent shade scores near zero — which is the correct answer.\nUNAVAILABLE IS NOT ZERO. When a percentage has no denominator — no unwanted solar in the brief, no wanted solar, nothing admitted at all — it is reported as NaN, never as 0 % or 100 %.\nDirect beam only. Diffuse sky and ground-reflected solar are not part of these figures, and no reflection off the device is modelled: intercepted solar is stopped, not redirected.\nElement spacing finer than the analysis grid cannot be resolved; the node warns when a device is close to that limit.\n\nEXAMPLE\nRationaliseShading → VerifyShading, then compare directShadingEfficiency and wantedSolarRetained between two devices under the same brief.",
+              "SUMMARY\nMeasures what a shading device actually does to one window: the direct solar the window admits without it, how much of that the device stops, and how the stopped energy splits between the solar you wanted blocked and the solar you wanted kept.\n\nThis is the ground-truth node. Every candidate is built as real geometry and traced against the real sun path and the real surroundings — nothing here is a rule of thumb or a profile-angle estimate.\n\nINPUTS\n  _analyticalModel — the SAM Analytical Model.\n  _apertureSolarTarget — the window, from ApertureSolarTargets.\n  _shadingDevice — the device to test: a device from RationaliseShading, or a result from it. Devices from RationaliseShading remember which window they were designed for, and verifying one against a DIFFERENT window is refused rather than measured — a correct measurement of the wrong design is the worst answer this node could give.\n  _weatherData_ / _unwantedPeriod_ / _wantedPeriod_ / _desirability_ — the brief. Use the SAME brief that produced the device, or the percentages will not compare.\n  _gridSize_ / _sunAngleStep_ / _recalculate_ — as on ApertureIrradiance.\n  _run — nothing happens until this is true.\n\nOUTPUTS\n  shadingPerformance — the full result object.\n  verificationSummary — the measured answer in one line, e.g. '180° | Overhang | 742 kWh baseline | 618 kWh intercepted | 83.2% unwanted blocked | 95.6% wanted retained'.\n  status — OK / NO SHADE / WARNING.\n  apertureGuid / azimuth — which window this result is about.\n  baselineDirectSolar — direct solar the window admits with the surroundings in place and NO device [kWh]. This is the denominator of the efficiency.\n  directSolarIntercepted — of that, how much the device stops [kWh].\n  directShadingEfficiency — intercepted / baseline [%].\n  unwantedSolarBlocked — [%] of the unwanted solar the window would have admitted.\n  wantedSolarRetained — [%] of the wanted solar that still gets through.\n  admittedUnwantedSolar / admittedWantedSolar — the unshaded totals behind those percentages [kWh].\n  elementNames / elementGuids / elementEnergy — which part of the device stops what [kWh], credited to the element the sun reaches FIRST, so overlapping parts never double-count.\n  unattributedEnergy — energy stopped by something that is not the device [kWh]. It should be zero; anything else means the model and the device disagree and is shown rather than folded into a total.\n  materialFraction — device area / window area.\n  shadingGeometry — the device as surfaces.\n  reusedPreviousCalculation / successful.\n\nNOTES\nCONTEXT IS NEVER CREDITED TO THE DEVICE. Solar already blocked by another building or by the roof is outside the baseline, so a device placed in permanent shade scores near zero — which is the correct answer.\nUNAVAILABLE IS NOT ZERO. When a percentage has no denominator — no unwanted solar in the brief, no wanted solar, nothing admitted at all — it is reported as NaN, never as 0 % or 100 %.\nDirect beam only. Diffuse sky and ground-reflected solar are not part of these figures, and no reflection off the device is modelled: intercepted solar is stopped, not redirected.\nElement spacing finer than the analysis grid cannot be resolved; the node warns when a device is close to that limit.\n\nEXAMPLE\nRationaliseShading → VerifyShading, then compare directShadingEfficiency and wantedSolarRetained between two devices under the same brief.",
               "SAM", "Solar")
         {
         }
@@ -81,6 +86,10 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             {
                 List<GH_SAMParam> result = new List<GH_SAMParam>();
                 result.Add(new GH_SAMParam(new GooSAMObjectParam() { Name = "shadingPerformance", NickName = "shadingPerformance", Description = "The measured performance of the device on this window", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "verificationSummary", NickName = "verificationSummary", Description = "The measured answer in one line: baseline, intercepted, and the two percentages the design is judged on", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "status", NickName = "status", Description = "OK / NO SHADE / WARNING / NOT EVALUATED. Readable across many apertures at once", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "apertureGuid", NickName = "apertureGuid", Description = "The aperture this result belongs to", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "azimuth", NickName = "azimuth", Description = "Compass direction the window faces [°]", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "baselineDirectSolar", NickName = "baselineDirectSolar", Description = "Direct solar admitted with the surroundings in place and no device [kWh]", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "directSolarIntercepted", NickName = "directSolarIntercepted", Description = "Of that, how much the device stops [kWh]", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "directShadingEfficiency", NickName = "directShadingEfficiency", Description = "Intercepted / baseline [%]. NaN when nothing is admitted", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
@@ -177,7 +186,16 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 return;
             }
 
+            // ---- the device, and WHICH APERTURE IT WAS DESIGNED FOR.
+            //
+            // A bare IShadingTypology is a rule, not a design: it will happily be built against any
+            // target and measured correctly, which is precisely how a ten-window script produces a
+            // number that is arithmetically right and about the wrong facade. Whenever the wire
+            // carries an identity, it is checked here and a disagreement is an error, not a shrug.
             IShadingTypology typology = null;
+            Guid deviceApertureGuid = Guid.Empty;
+            bool identityCarried = false;
+
             index = Params.IndexOfInputParam("_shadingDevice");
             if (index != -1)
             {
@@ -185,7 +203,23 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 if (dataAccess.GetData(index, ref objectWrapper) && objectWrapper?.Value != null)
                 {
                     object @object = Query.Unwrap(objectWrapper);
-                    typology = @object as IShadingTypology ?? (@object as OptimisedShadingResult)?.Typology();
+
+                    if (@object is ShadingDevice shadingDevice)
+                    {
+                        typology = shadingDevice.Typology;
+                        deviceApertureGuid = shadingDevice.ApertureGuid;
+                        identityCarried = true;
+                    }
+                    else if (@object is OptimisedShadingResult optimisedShadingResult)
+                    {
+                        typology = optimisedShadingResult.Typology();
+                        deviceApertureGuid = optimisedShadingResult.ApertureGuid;
+                        identityCarried = true;
+                    }
+                    else
+                    {
+                        typology = @object as IShadingTypology;
+                    }
                 }
             }
 
@@ -193,6 +227,19 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             {
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Please supply a shading device, or an optimised shading result, from SAMAnalytical.RationaliseShading.");
                 return;
+            }
+
+            if (identityCarried && deviceApertureGuid != Guid.Empty && deviceApertureGuid != inputTarget.ApertureGuid)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, string.Format(
+                    "This device was designed for aperture {0}, but it is being verified against aperture {1}. The result would be a correct measurement of the wrong design. Match the device to its own target — with several windows, wire _apertureSolarTarget_ and _shadingDevice_ straight through from the same RationaliseShading branch rather than reordering or flattening either one.",
+                    deviceApertureGuid, inputTarget.ApertureGuid));
+                return;
+            }
+
+            if (!identityCarried)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, "This device carries no aperture identity, so it is being taken on trust as belonging to the connected window. Devices from SAMAnalytical.RationaliseShading carry theirs and are checked.");
             }
 
             WeatherData weatherData = Object<WeatherData>(dataAccess, "_weatherData_", out bool weatherSupplied, out bool weatherWrongType);
@@ -274,11 +321,17 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, resolutionMessage);
             }
 
-            ShadingPerformance performance = SolarCreate.ShadingPerformance(setup.Target, setup.Context.SolarVisibilityCache, setup.Desirability, setup.Context.ContextOccluders, typology);
+            ShadingPerformance performance = SolarCreate.ShadingPerformance(setup.Target, setup.Context.SolarVisibilityCache, setup.Desirability, setup.Context.ContextOccluders, typology, setup.CellIndexOffset);
             if (performance == null)
             {
-                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "The device could not be measured on this window. Check that it produces geometry in front of the opening.");
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "The device could not be measured on this window: the aperture, the solar calculation and the device geometry do not describe the same analysis points. Check that _gridSize_ is the same value used for the targets, that the target came from THIS model, and that the device produces geometry in front of the opening.");
                 return;
+            }
+
+            bool noShading = typology is NoShading;
+            if (noShading)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, "This is the null device: the recommendation was to leave this window unshaded. The figures below are that answer measured, not a failed run — nothing is intercepted, so none of the unwanted solar is blocked and all of the wanted solar is kept.");
             }
 
             if (Math.Abs(performance.UnattributedInterceptedEnergy) > 1e-9)
@@ -313,6 +366,44 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             if (index != -1)
             {
                 dataAccess.SetData(index, new GooSAMObject(performance));
+            }
+
+            index = Params.IndexOfOutputParam("verificationSummary");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, SolarQuery.VerificationSummary(performance, setup.Target.Azimuth));
+            }
+
+            index = Params.IndexOfOutputParam("status");
+            if (index != -1)
+            {
+                ShadingDesignStatus status;
+                if (noShading)
+                {
+                    status = ShadingDesignStatus.NoShading;
+                }
+                else if (resolutionState != ShadingResolutionState.Resolved || Math.Abs(performance.UnattributedInterceptedEnergy) > 1e-9)
+                {
+                    status = ShadingDesignStatus.Warning;
+                }
+                else
+                {
+                    status = ShadingDesignStatus.Ok;
+                }
+
+                dataAccess.SetData(index, SolarQuery.StatusText(status));
+            }
+
+            index = Params.IndexOfOutputParam("apertureGuid");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, setup.Target.ApertureGuid.ToString());
+            }
+
+            index = Params.IndexOfOutputParam("azimuth");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, setup.Target.Azimuth);
             }
 
             SetNumber(dataAccess, "baselineDirectSolar", performance.AdmittedDirectEnergy);

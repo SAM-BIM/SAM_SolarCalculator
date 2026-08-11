@@ -200,7 +200,11 @@ namespace SAM.Analytical.SolarCalculator
         /// it — and MultiApertureShadingTests asserts the two routes agree numerically rather than
         /// leaving the argument above to stand on its own.
         /// </summary>
+        /// <param name="target">The aperture.</param>
+        /// <param name="baseVisibilityCache">Visibility with CONTEXT ONLY: what the candidate may be credited for.</param>
+        /// <param name="desirability">Stage 5 per-group energies for this aperture.</param>
         /// <param name="contextOccluders">The physical surroundings. Present for API symmetry and for callers that pass an unrelated base cache; the shading answer takes context from baseVisibilityCache.</param>
+        /// <param name="typology">The candidate device.</param>
         /// <param name="cellIndexOffset">This target's first cell index within baseVisibilityCache. Use ApertureShadingSetup.CellIndexOffset; 0 when the cache covers this target alone.</param>
         public static ShadingPerformance ShadingPerformance(this ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, IShadingTypology typology, int cellIndexOffset = 0)
         {

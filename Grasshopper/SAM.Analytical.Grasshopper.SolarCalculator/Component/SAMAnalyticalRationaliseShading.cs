@@ -24,9 +24,16 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         public override Guid ComponentGuid => new Guid("7f3c9a10-5b28-4e63-9a41-6c0d2e7b1106");
 
         /// <summary>
-        /// The latest version of this component
+        /// The latest version of this component.
+        ///
+        /// 1.0.1 — shadingDevice now carries the aperture it was designed for, so VerifyShading can
+        /// refuse a device that belongs to another window instead of measuring it and reporting a
+        /// number that is right about the wrong design. A "build nothing" answer is now emitted as
+        /// the null device rather than as the least-bad candidate, which is available separately on
+        /// bestCandidateDevice. Added designSummary / status / apertureGuid / azimuth so a
+        /// ten-window run reads as a table; objectiveScore demoted out of the headline.
         /// </summary>
-        public override string LatestComponentVersion => "1.0.0";
+        public override string LatestComponentVersion => "1.0.1";
 
         /// <summary>
         /// Provides an Icon for the component.
@@ -37,7 +44,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
 
         public SAMAnalyticalRationaliseShading()
           : base("SAMAnalytical.RationaliseShading", "SAMAnalytical.RationaliseShading",
-              "SUMMARY\nProduces a BUILDABLE shading device for one window and sizes it against energy, not against the look of the ideal shape. Every candidate is built as real geometry and ray-traced through the same engine that verifies the final answer.\n\nFamilies: Overhang, HorizontalLouvres, VerticalFins, EggCrate.\n*Each candidate is a full ray-tracing run; comparing all four families on one window takes seconds to minutes.*\n\nINPUTS\n  _analyticalModel — the SAM Analytical Model.\n  _apertureSolarTarget — the window, from ApertureSolarTargets.\n  _shadingPotentialField_ — the map from ShadingPotentialField. Optional: it gives the search a physically sensible starting depth. It never decides the answer.\n  _typologies_ — families to try, by name. Empty = every family capable of acting on this window's problem.\n  _weatherData_ / _unwantedPeriod_ / _wantedPeriod_ / _desirability_ — the brief, exactly as on ShadingPotentialField. Use the SAME brief throughout or the numbers will not compare.\n  _wantedSolarPenalty_ — how many kWh of unwanted solar blocked is worth one kWh of wanted solar lost. Default 1.0.\n  _materialPenalty_ — the share of the window's own admitted solar a designer will forgo per unit of device area. Default 0.1.\n  _optimise_ — true (default) searches each family's sizes for the best. False returns the quicker seeded candidate sweep instead.\n  _maximumEvaluations_ — hard ceiling on candidates per family. Default 400.\n  _gridSize_ / _sunAngleStep_ / _recalculate_ — as on ApertureIrradiance.\n  _run — nothing happens until this is true.\n\nOUTPUTS (best family first)\n  shadingDevice — the winning device. Feed it to VerifyShading.\n  shadingGeometry — the winning device as surfaces.\n  optimisedShadingResults — the full result per family (optimised mode only).\n  typologies — family names in ranked order.\n  parameterNames / parameterValues — the sizes chosen, per family. Depths and offsets in m, counts as whole elements, tilts in degrees.\n  objectiveScore — Benefit − penalty × Harm − penalty × Cost [kWh]. Zero means 'build nothing'.\n  benefit — unwanted solar intercepted [kWh].\n  harm — wanted solar destroyed [kWh].\n  cost — material priced in [kWh].\n  materialFraction — device area / window area.\n  unwantedSolarBlocked — [%], unavailable (NaN) when there is no unwanted solar.\n  wantedSolarRetained — [%], unavailable (NaN) when there is no wanted solar.\n  directSolarIntercepted — total direct beam the device stops [kWh].\n  evaluations / iterations — how much searching it took.\n  termination — why the search stopped.\n  recommendsNoShading — true when nothing beats leaving the window alone.\n  reusedPreviousCalculation / successful.\n\nNOTES\nREAD THE PHYSICAL NUMBERS, NOT ONLY THE SCORE. Two families often finish within a fraction of a percent of each other with very different material quantities; which one is right is a judgement about the brief, and the score cannot make it for you.\nSCORE ZERO IS MEANINGFUL. Building nothing scores exactly zero, so a negative score means the device is worse than no device. When that is the best available, recommendsNoShading is set.\nElement spacing finer than the analysis grid cannot be resolved: the node caps it and warns when a device gets close. Reduce _gridSize_ to justify a finer device.\nNo perforated or translucent screens: the engine is opaque-or-clear, and a porosity factor would produce screen-like numbers that are not a screen's.\nEach window is treated on its own — a device here does not shade its neighbour.\n\nEXAMPLE\nShadingPotentialField → RationaliseShading (_optimise_ = true, _run = true) → VerifyShading.",
+              "SUMMARY\nProduces a BUILDABLE shading device for one window and sizes it against energy, not against the look of the ideal shape. Every candidate is built as real geometry and ray-traced through the same engine that verifies the final answer.\n\nFamilies: Overhang, HorizontalLouvres, VerticalFins, EggCrate.\n*Each candidate is a full ray-tracing run; comparing all four families on one window takes seconds to minutes.*\n\nINPUTS\n  _analyticalModel — the SAM Analytical Model.\n  _apertureSolarTarget — the window, from ApertureSolarTargets.\n  _shadingPotentialField_ — the map from ShadingPotentialField. Optional: it gives the search a physically sensible starting depth. It never decides the answer.\n  _typologies_ — families to try, by name. Empty = every family capable of acting on this window's problem.\n  _weatherData_ / _unwantedPeriod_ / _wantedPeriod_ / _desirability_ — the brief, exactly as on ShadingPotentialField. Use the SAME brief throughout or the numbers will not compare.\n  _wantedSolarPenalty_ — how important preserving wanted solar is, relative to blocking unwanted solar. DIMENSIONLESS. Default 1.0.\n      1.0  equal energy weighting: losing 1 kWh of wanted solar costs exactly what gaining 1 kWh of blocked unwanted solar earns.\n      2.0  strongly protect wanted/winter solar: losing 1 kWh of wanted solar now needs about 2 kWh of unwanted solar blocked to justify it, so the search buys shallower devices.\n      0.5  prioritise blocking unwanted solar: losing 1 kWh of wanted solar only costs 0.5 kWh in the objective, so the search buys deeper ones.\n      Change it and the recommended DEPTH changes; it does not change any measured energy.\n  _materialPenalty_ — how reluctant the search is to buy extra device area for a small further gain. DIMENSIONLESS. Default 0.1.\n      0 sizes on energy alone and tends to return the largest device that still helps at all; 0.1 quietly prefers the leaner of two near-equal designs; raise it when buildability or cost matters more than the last few kWh.\n  _optimise_ — true (default) searches each family's sizes for the best. False returns the quicker seeded candidate sweep instead.\n  _maximumEvaluations_ — hard ceiling on candidates per family. Default 400.\n  _gridSize_ / _sunAngleStep_ / _recalculate_ — as on ApertureIrradiance.\n  _run — nothing happens until this is true.\n\nOUTPUTS (best family first)\n  shadingDevice — the RECOMMENDED device, tagged with the aperture it was designed for. Feed it to VerifyShading. When nothing beats leaving the window alone this is the null device, which verifies honestly rather than failing.\n  shadingGeometry — the recommended device as surfaces. Empty when no shading is recommended.\n  designSummary — the whole answer in one line, e.g. '180° | Overhang | Depth 0.57 m | 83.2% unwanted blocked | 95.6% wanted retained | 308 kWh benefit | 6 kWh wanted solar lost'.\n  status — OK / NO SHADE / WARNING / NOT EVALUATED.\n  apertureGuid / azimuth — which window this result is about, so a ten-window run stays readable.\n  bestCandidateDevice — the least-bad candidate, always supplied. DIAGNOSTIC, not a recommendation.\n  optimisedShadingResults — the full result per family (optimised mode only).\n  typologies — family names in ranked order.\n  parameterNames / parameterValues — the sizes chosen, per family. Depths and offsets in m, counts as whole elements, tilts in degrees.\n  objectiveScore — Benefit − penalty × Harm − penalty × Cost [kWh]. Zero means 'build nothing'.\n  benefit — unwanted solar intercepted [kWh].\n  harm — wanted solar destroyed [kWh].\n  cost — material priced in [kWh].\n  materialFraction — device area / window area.\n  unwantedSolarBlocked — [%], unavailable (NaN) when there is no unwanted solar.\n  wantedSolarRetained — [%], unavailable (NaN) when there is no wanted solar.\n  directSolarIntercepted — total direct beam the device stops [kWh].\n  evaluations / iterations — how much searching it took.\n  termination — why the search stopped.\n  recommendsNoShading — true when nothing beats leaving the window alone.\n  reusedPreviousCalculation / successful.\n\nNOTES\nREAD THE PHYSICAL NUMBERS, NOT ONLY THE SCORE. Two families often finish within a fraction of a percent of each other with very different material quantities; which one is right is a judgement about the brief, and the score cannot make it for you.\nSCORE ZERO IS MEANINGFUL. Building nothing scores exactly zero, so a negative score means the device is worse than no device. When that is the best available, recommendsNoShading is set — and 'no shading is worth building here' is a SUCCESSFUL engineering answer, not a failed run. It is reported as status NO SHADE, shadingDevice carries the null device so it can still be verified, and the design that lost is on bestCandidateDevice. A run that could not be measured at all reports NOT EVALUATED instead, and is never dressed up as a recommendation.\nElement spacing finer than the analysis grid cannot be resolved: the node caps it and warns when a device gets close. Reduce _gridSize_ to justify a finer device.\nNo perforated or translucent screens: the engine is opaque-or-clear, and a porosity factor would produce screen-like numbers that are not a screen's.\nEach window is treated on its own — a device here does not shade its neighbour.\n\nEXAMPLE\nShadingPotentialField → RationaliseShading (_optimise_ = true, _run = true) → VerifyShading.",
               "SAM", "Solar")
         {
         }
@@ -59,8 +66,8 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_GenericObject() { Name = "_wantedPeriod_", NickName = "_wantedPeriod_", Description = "Hours whose solar should be kept.\nDefault: winter", Access = GH_ParamAccess.item, Optional = true }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_GenericObject() { Name = "_desirability_", NickName = "_desirability_", Description = "A full desirability strategy. When supplied it overrides the two periods", Access = GH_ParamAccess.item, Optional = true }, ParamVisibility.Voluntary));
 
-                result.Add(new GH_SAMParam(Number("_wantedSolarPenalty_", "How many kWh of unwanted solar blocked is worth one kWh of wanted solar lost.\nDefault 1.0", 1.0), ParamVisibility.Voluntary));
-                result.Add(new GH_SAMParam(Number("_materialPenalty_", "Share of the window's admitted solar forgone per unit of device area.\nDefault 0.1", 0.1), ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(Number("_wantedSolarPenalty_", "Importance of preserving wanted solar relative to blocking unwanted solar. Dimensionless.\n1.0 = equal importance; >1 protects wanted solar more; <1 prioritises blocking unwanted solar.\nDefault 1.0", 1.0), ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(Number("_materialPenalty_", "How much device is too much: how reluctant the search is to buy extra shading area for a small further gain. Dimensionless.\n0 = size on energy alone; 0.1 (default) is a mild preference for the leaner of two near-equal designs; raise it to favour smaller devices.\nDefault 0.1", 0.1), ParamVisibility.Voluntary));
 
                 global::Grasshopper.Kernel.Parameters.Param_Boolean optimise = new global::Grasshopper.Kernel.Parameters.Param_Boolean() { Name = "_optimise_", NickName = "_optimise_", Description = "True (default) searches each family's sizes. False runs the quicker seeded candidate sweep", Access = GH_ParamAccess.item };
                 optimise.SetPersistentData(true);
@@ -90,13 +97,18 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             get
             {
                 List<GH_SAMParam> result = new List<GH_SAMParam>();
-                result.Add(new GH_SAMParam(new GooSAMObjectParam() { Name = "shadingDevice", NickName = "shadingDevice", Description = "The winning device. Feed it to SAMAnalytical.VerifyShading", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Brep() { Name = "shadingGeometry", NickName = "shadingGeometry", Description = "The winning device as surfaces", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new GooSAMObjectParam() { Name = "shadingDevice", NickName = "shadingDevice", Description = "The RECOMMENDED device, carrying the aperture it was designed for. Feed it to SAMAnalytical.VerifyShading.\nWhen nothing beats leaving the window alone this is the null device, which verifies honestly as 0 % blocked / 100 % retained", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Brep() { Name = "shadingGeometry", NickName = "shadingGeometry", Description = "The recommended device as surfaces. Empty when no shading is recommended", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "designSummary", NickName = "designSummary", Description = "The engineering answer in one line: what to build, how big, what it blocks, what it keeps and what it costs", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "status", NickName = "status", Description = "OK / NO SHADE / WARNING / NOT EVALUATED. Readable across many apertures at once", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "apertureGuid", NickName = "apertureGuid", Description = "The aperture this result belongs to", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "azimuth", NickName = "azimuth", Description = "Compass direction the window faces [°]", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new GooSAMObjectParam() { Name = "bestCandidateDevice", NickName = "bestCandidateDevice", Description = "The least-bad candidate, ALWAYS supplied — diagnostic geometry, not a recommendation.\nWhen no shading is recommended this is what the search would have built, so the recommendation can be checked rather than taken on trust", Access = GH_ParamAccess.item }, ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(new GooSAMObjectParam() { Name = "optimisedShadingResults", NickName = "optimisedShadingResults", Description = "Full result per family, best first (optimised mode only)", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "typologies", NickName = "typologies", Description = "Family names, best first", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "parameterNames", NickName = "parameterNames", Description = "Size parameter names of the winning device", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "parameterValues", NickName = "parameterValues", Description = "Sizes of the winning device: depths and offsets [m], counts, tilts [°]", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "objectiveScore", NickName = "objectiveScore", Description = "Benefit − penalty × Harm − penalty × Cost [kWh], per family. Zero = build nothing", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "objectiveScore", NickName = "objectiveScore", Description = "Benefit − penalty × Harm − penalty × Cost [kWh], per family. Zero = build nothing.\nA comparison aid, NOT the headline: two designs a fraction of a percent apart in score can do very different things", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "benefit", NickName = "benefit", Description = "Unwanted solar intercepted [kWh]", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "harm", NickName = "harm", Description = "Wanted solar destroyed [kWh]", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "cost", NickName = "cost", Description = "Material priced in [kWh]", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
@@ -371,11 +383,21 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             {
                 optimisedResults = Optimise.ShadingDevice(
                     setup.Target, setup.Context.SolarVisibilityCache, setup.Desirability, setup.Context.ContextOccluders,
-                    objective, field, typologyNames.Count == 0 ? null : typologyNames, maximumEvaluations);
+                    objective, field, typologyNames.Count == 0 ? null : typologyNames, maximumEvaluations, setup.CellIndexOffset);
 
                 if (optimisedResults == null || optimisedResults.Count == 0)
                 {
                     AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, "No shading family can act on this window's solar problem: no unwanted solar reaches it over the hours requested. No device is recommended.");
+                    SetNoDevice(dataAccess, setup.Target, "No shading family can act on this window's solar problem", ShadingDesignStatus.NoShading);
+                    return;
+                }
+
+                // Every family failing to produce a MEASURED candidate is a fault in the setup, not
+                // an engineering answer, and must not be reported as "no shading needed".
+                if (optimisedResults.TrueForAll(x => x.Termination == ShadingOptimisationTermination.EvaluationFailed))
+                {
+                    AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "No candidate could be measured on this window: the aperture, the solar calculation and the candidate geometry do not describe the same analysis points. Check that _gridSize_ is the same value used for the targets and that the target came from THIS model.");
+                    SetNoDevice(dataAccess, setup.Target, "Not evaluated", ShadingDesignStatus.NotEvaluated);
                     return;
                 }
 
@@ -400,7 +422,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
 
                 foreach (string name in names)
                 {
-                    IShadingTypology device = SolarCreate.RationalisedShading(field, setup.Target, setup.Context.SolarVisibilityCache, setup.Desirability, setup.Context.ContextOccluders, name, out ShadingPerformance performance, wantedSolarPenalty, materialPenalty);
+                    IShadingTypology device = SolarCreate.RationalisedShading(field, setup.Target, setup.Context.SolarVisibilityCache, setup.Desirability, setup.Context.ContextOccluders, name, out ShadingPerformance performance, wantedSolarPenalty, materialPenalty, setup.CellIndexOffset);
                     if (device == null || performance == null)
                     {
                         continue;
@@ -413,6 +435,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 if (devices.Count == 0)
                 {
                     AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, "No buildable device could be produced for this window under the brief given.");
+                    SetNoDevice(dataAccess, setup.Target, "No buildable device under this brief", ShadingDesignStatus.NoShading);
                     return;
                 }
 
@@ -440,9 +463,10 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             IShadingTypology best = devices.Count == 0 ? null : devices[0];
 
             // Element spacing the analysis grid cannot resolve would be reported as a triumph.
+            ShadingResolutionState resolutionState = ShadingResolutionState.Resolved;
             if (best != null)
             {
-                ShadingResolutionState resolutionState = SolarQuery.ShadingResolution(best, setup.Target, gridSize, out string resolutionMessage, out double _);
+                resolutionState = SolarQuery.ShadingResolution(best, setup.Target, gridSize, out string resolutionMessage, out double _);
                 if (resolutionState == ShadingResolutionState.BelowResolutionLimit)
                 {
                     AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, resolutionMessage);
@@ -456,19 +480,60 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             bool recommendsNoShading = optimise && optimisedResults.Count != 0 && optimisedResults[0].RecommendsNoShading;
             if (recommendsNoShading)
             {
-                AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, "No device beats leaving this window unshaded. The geometry below is the least-bad candidate, shown so the recommendation can be checked rather than taken on trust.");
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, "No device beats leaving this window unshaded. That is a successful answer, not a failure: shadingDevice carries the null device so it can be verified, and the least-bad candidate is on bestCandidateDevice so the recommendation can be checked rather than taken on trust.");
             }
+
+            // The RECOMMENDATION and the DIAGNOSTIC are different things and are kept on different
+            // wires. Handing the least-bad candidate out as "the device" is how a rejected design
+            // ends up built.
+            IShadingTypology recommended = recommendsNoShading ? new NoShading() : best;
 
             index = Params.IndexOfOutputParam("shadingDevice");
             if (index != -1)
             {
-                dataAccess.SetData(index, best == null ? null : new GooSAMObject(best));
+                dataAccess.SetData(index, recommended == null ? null : new GooSAMObject(new ShadingDevice(setup.Target.ApertureGuid, recommended)));
             }
 
             index = Params.IndexOfOutputParam("shadingGeometry");
             if (index != -1)
             {
-                dataAccess.SetDataList(index, Geometry(best, setup.Target));
+                dataAccess.SetDataList(index, Geometry(recommended, setup.Target));
+            }
+
+            index = Params.IndexOfOutputParam("bestCandidateDevice");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, best == null ? null : new GooSAMObject(new ShadingDevice(setup.Target.ApertureGuid, best)));
+            }
+
+            index = Params.IndexOfOutputParam("designSummary");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, optimise && optimisedResults.Count != 0
+                    ? SolarQuery.DesignSummary(optimisedResults[0], setup.Target.Azimuth)
+                    : SweepSummary(best, performances.Count == 0 ? null : performances[0], setup.Target.Azimuth));
+            }
+
+            index = Params.IndexOfOutputParam("status");
+            if (index != -1)
+            {
+                ShadingDesignStatus status = optimise && optimisedResults.Count != 0
+                    ? SolarQuery.DesignStatus(optimisedResults[0], resolutionState)
+                    : (resolutionState == ShadingResolutionState.Resolved ? ShadingDesignStatus.Ok : ShadingDesignStatus.Warning);
+
+                dataAccess.SetData(index, SolarQuery.StatusText(status));
+            }
+
+            index = Params.IndexOfOutputParam("apertureGuid");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, setup.Target.ApertureGuid.ToString());
+            }
+
+            index = Params.IndexOfOutputParam("azimuth");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, setup.Target.Azimuth);
             }
 
             index = Params.IndexOfOutputParam("optimisedShadingResults");
@@ -538,6 +603,65 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             {
                 dataAccess.SetData(index_Successful, true);
             }
+        }
+
+        /// <summary>
+        /// The identity and status outputs for a run that produced no device at all.
+        ///
+        /// An early return that leaves every wire empty is the reason a batch of ten windows becomes
+        /// unreadable: the branches that failed look identical to the branches that were never asked
+        /// to run. The aperture, its azimuth, a status and a reason are always written, even when
+        /// there is no design to report.
+        /// </summary>
+        private void SetNoDevice(IGH_DataAccess dataAccess, ApertureSolarTarget target, string reason, ShadingDesignStatus status)
+        {
+            int index = Params.IndexOfOutputParam("shadingDevice");
+            if (index != -1 && status == ShadingDesignStatus.NoShading)
+            {
+                // Nothing to build IS the answer here, so it goes out as the verifiable null device.
+                dataAccess.SetData(index, new GooSAMObject(new ShadingDevice(target.ApertureGuid, new NoShading())));
+            }
+
+            index = Params.IndexOfOutputParam("designSummary");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:0}° | {1}", target.Azimuth, reason));
+            }
+
+            index = Params.IndexOfOutputParam("status");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, SolarQuery.StatusText(status));
+            }
+
+            index = Params.IndexOfOutputParam("apertureGuid");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, target.ApertureGuid.ToString());
+            }
+
+            index = Params.IndexOfOutputParam("azimuth");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, target.Azimuth);
+            }
+
+            index = Params.IndexOfOutputParam("recommendsNoShading");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, status == ShadingDesignStatus.NoShading);
+            }
+        }
+
+        /// <summary>The one-line story for the seeded-sweep path, which has no OptimisedShadingResult.</summary>
+        private static string SweepSummary(IShadingTypology typology, ShadingPerformance performance, double azimuth)
+        {
+            if (typology == null || performance == null)
+            {
+                return string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:0}° | no device", azimuth);
+            }
+
+            return SolarQuery.VerificationSummary(performance, azimuth);
         }
 
         /// <summary>The same metric read from whichever path produced the devices.</summary>

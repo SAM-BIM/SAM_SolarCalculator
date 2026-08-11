@@ -129,7 +129,15 @@ namespace SAM.Analytical.SolarCalculator
         /// evaluation — enough to produce a credible practical device and an honest ideal-versus-
         /// rationalised comparison, not a general optimiser.
         /// </summary>
+        /// <param name="field">The Stage 6 map, for the seeded depth.</param>
+        /// <param name="target">The aperture.</param>
+        /// <param name="baseVisibilityCache">Visibility with CONTEXT ONLY.</param>
+        /// <param name="desirability">Stage 5 per-group energies for this aperture.</param>
+        /// <param name="contextOccluders">Existing context.</param>
+        /// <param name="typologyName">Family to sweep.</param>
         /// <param name="performance">Performance of the winning candidate.</param>
+        /// <param name="wantedSolarPenalty">Importance of preserving wanted solar, relative to blocking unwanted solar.</param>
+        /// <param name="materialPenalty">Reluctance to buy device area for a small further gain.</param>
         /// <param name="cellIndexOffset">This target's first cell index within baseVisibilityCache when the cache spans the whole model.</param>
         public static IShadingTypology RationalisedShading(this ShadingPotentialField field, ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, string typologyName, out ShadingPerformance performance, double wantedSolarPenalty = 1.0, double materialPenalty = 0.1, int cellIndexOffset = 0)
         {

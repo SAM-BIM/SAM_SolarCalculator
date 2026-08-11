@@ -24,9 +24,14 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         public override Guid ComponentGuid => new Guid("7f3c9a10-5b28-4e63-9a41-6c0d2e7b1104");
 
         /// <summary>
-        /// The latest version of this component
+        /// The latest version of this component.
+        ///
+        /// 1.0.1 — added _previewMode_ (Points / Voxels / None) and a legend output, and made the
+        /// red/blue convention explicit everywhere it is described. Manual testing found the map was
+        /// read as "where the sun is" rather than as "where shading material is worth putting", and
+        /// the two are not the same picture.
         /// </summary>
-        public override string LatestComponentVersion => "1.0.0";
+        public override string LatestComponentVersion => "1.0.1";
 
         /// <summary>
         /// Provides an Icon for the component.
@@ -37,7 +42,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
 
         public SAMAnalyticalShadingPotentialField()
           : base("SAMAnalytical.ShadingPotentialField", "SAMAnalytical.ShadingPotentialField",
-              "SUMMARY\nMaps the space in front of ONE window and answers, everywhere in it: if shading material were placed here, how much solar would it intercept, and would that solar be unwanted or wanted?\n\nThe answer is in kWh, from the real sun path, the real weather and the real surroundings. Solar that a neighbouring building already blocks is never counted, so a shading device can never take credit for it.\n*This node casts rays and takes time on the first run for a given model and grid.*\n\nINPUTS\n  _analyticalModel — the SAM Analytical Model.\n  _apertureSolarTarget — the window to study, from ApertureSolarTargets.\n  _weatherData_ — hourly weather. Supplied weather wins; otherwise the weather attached to the model.\n  _unwantedPeriod_ — hours whose solar you want blocked (typically summer).\n  _wantedPeriod_ — hours whose solar you want kept (typically winter).\n  _desirability_ — a full weighting strategy. When supplied it WINS over the two periods.\n  _maxDepth_ — how far out from the glass to look [m]. Default 1.0 m.\n  _voxelSize_ — resolution of the map [m]. Default 0.1 m. Smaller is finer and slower.\n  _marginAbove_ / _marginBelow_ / _marginSides_ — how far past the opening the studied space extends [m]. Defaults 0.5, 0.0, 0.3 m.\n  _wantedSolarPenalty_ — how many kWh of unwanted solar blocked is worth one kWh of wanted solar lost. Default 1.0.\n  _gridSize_ — the analysis grid size [m]. Keep it the same as the one used for the targets. Default 0.5 m.\n  _sunAngleStep_ — how finely similar sun positions are grouped [°]. Default 2°.\n  _recalculate_ — true forces the solar calculation to be redone even when it could be reused.\n  _run — nothing happens until this is true.\n\nOUTPUTS\n  shadingPotentialField — the map itself. Feed it to IdealShadingShape and RationaliseShading.\n  previewPoints / previewColours — the coloured map, if you want to drive your own display. RED where shading blocks unwanted solar, BLUE where it would destroy wanted solar, and near-zero points are left out.\n  positiveTotal — total benefit available [kWh].\n  negativeTotal — total wanted solar at risk [kWh, negative].\n  maxScore / minScore — best and worst single location [kWh].\n  voxelCount — number of points in the map.\n  reusedPreviousCalculation — true when no ray casting was needed.\n  successful — true when a map was produced.\n\nNOTES\nWith no periods and no strategy, the default brief is summer unwanted, winter wanted, flipped automatically in the southern hemisphere. State your own periods for any real study.\nThe map answers for each location INDEPENDENTLY — 'how useful is material HERE'. Filling every red point is therefore not the best possible device, which is why RationaliseShading optimises against energy rather than copying the shape.\nDirect beam only. Diffuse sky is not part of shading desirability.\n\nEXAMPLE\nApertureSolarTargets → ShadingPotentialField (summer unwanted, winter wanted) → IdealShadingShape → RationaliseShading.",
+              "SUMMARY\nMaps the space in front of ONE window and answers, everywhere in it: if shading material were placed here, how much solar would it intercept, and would that solar be unwanted or wanted?\n\nThe answer is in kWh, from the real sun path, the real weather and the real surroundings. Solar that a neighbouring building already blocks is never counted, so a shading device can never take credit for it.\n*This node casts rays and takes time on the first run for a given model and grid.*\n\nHOW TO READ THE COLOURS\nThe colour is NOT 'how much sun is here'. It is the VALUE OF PUTTING SHADING MATERIAL AT THAT LOCATION.\n  RED  = SHADE HERE. Material here blocks solar you asked to block. Stronger red, bigger gain.\n  BLUE = KEEP OPEN. Material here would destroy solar you asked to KEEP. Stronger blue, worse the loss.\n  grey = neither; almost no beam passes through, so material here does nothing. Near-zero locations are left out entirely.\nSo the map is a set of instructions, not a heat map: fill the red, stay out of the blue. The legend output says the same thing next to the geometry.\n\nINPUTS\n  _analyticalModel — the SAM Analytical Model.\n  _apertureSolarTarget — the window to study, from ApertureSolarTargets.\n  _weatherData_ — hourly weather. Supplied weather wins; otherwise the weather attached to the model.\n  _unwantedPeriod_ — hours whose solar you want blocked (typically summer).\n  _wantedPeriod_ — hours whose solar you want kept (typically winter).\n  _desirability_ — a full weighting strategy. When supplied it WINS over the two periods.\n  _maxDepth_ — how far out from the glass to look [m]. Default 1.0 m.\n  _voxelSize_ — resolution of the map [m]. Default 0.1 m. Smaller is finer and slower.\n  _marginAbove_ / _marginBelow_ / _marginSides_ — how far past the opening the studied space extends [m]. Defaults 0.5, 0.0, 0.3 m.\n  _wantedSolarPenalty_ — how important preserving wanted solar is, relative to blocking unwanted solar. DIMENSIONLESS. 1.0 = equal importance; 2.0 strongly protects wanted/winter solar; 0.5 prioritises blocking unwanted solar. It changes where the map turns from red to blue, not any measured energy. Default 1.0.\n  _previewMode_ — Points (default), Voxels or None. Display only; the numbers never change. Large maps fall back to points automatically.\n  _gridSize_ — the analysis grid size [m]. Keep it the same as the one used for the targets. Default 0.5 m.\n  _sunAngleStep_ — how finely similar sun positions are grouped [°]. Default 2°.\n  _recalculate_ — true forces the solar calculation to be redone even when it could be reused.\n  _run — nothing happens until this is true.\n\nOUTPUTS\n  shadingPotentialField — the map itself. Feed it to IdealShadingShape and RationaliseShading.\n  legend — what the colours mean and the two totals, as text to panel beside the map.\n  previewPoints / previewColours — the coloured map, if you want to drive your own display. RED where shading blocks unwanted solar, BLUE where it would destroy wanted solar, and near-zero locations are left out.\n  positiveTotal — total benefit available [kWh].\n  negativeTotal — total wanted solar at risk [kWh, negative].\n  maxScore / minScore — best and worst single location [kWh].\n  voxelCount — number of points in the map.\n  reusedPreviousCalculation — true when no ray casting was needed.\n  successful — true when a map was produced.\n\nNOTES\nWith no periods and no strategy, the default brief is summer unwanted, winter wanted, flipped automatically in the southern hemisphere. State your own periods for any real study.\nThe map answers for each location INDEPENDENTLY — 'how useful is material HERE'. Filling every red point is therefore not the best possible device, which is why RationaliseShading optimises against energy rather than copying the shape.\nDirect beam only. Diffuse sky is not part of shading desirability.\n\nEXAMPLE\nApertureSolarTargets → ShadingPotentialField (summer unwanted, winter wanted) → IdealShadingShape → RationaliseShading.",
               "SAM", "Solar")
         {
         }
@@ -59,7 +64,12 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 result.Add(new GH_SAMParam(Number("_marginAbove_", "How far above the opening the studied space extends [m].\nDefault 0.5 m", 0.5), ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(Number("_marginBelow_", "How far below the opening the studied space extends [m].\nDefault 0.0 m", 0.0), ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(Number("_marginSides_", "How far either side of the opening the studied space extends [m].\nDefault 0.3 m", 0.3), ParamVisibility.Voluntary));
-                result.Add(new GH_SAMParam(Number("_wantedSolarPenalty_", "How many kWh of unwanted solar blocked is worth one kWh of wanted solar lost.\nDefault 1.0", 1.0), ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(Number("_wantedSolarPenalty_", "Importance of preserving wanted solar relative to blocking unwanted solar. Dimensionless.\n1.0 = equal importance; >1 protects wanted solar more; <1 prioritises blocking unwanted solar.\nDefault 1.0", 1.0), ParamVisibility.Voluntary));
+
+                global::Grasshopper.Kernel.Parameters.Param_String previewMode = new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "_previewMode_", NickName = "_previewMode_", Description = "How the map is drawn: Points (default, cheap), Voxels (shaded cells, for smaller maps), None.\nThe numbers are the same whichever you choose", Access = GH_ParamAccess.item, Optional = true };
+                previewMode.SetPersistentData("Points");
+                result.Add(new GH_SAMParam(previewMode, ParamVisibility.Voluntary));
+
                 result.Add(new GH_SAMParam(Number("_gridSize_", "The analysis grid size [m]. Keep it the same as the targets.\nDefault 0.5 m", 0.5), ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(Number("_sunAngleStep_", "How finely similar sun positions are grouped [°].\nDefault 2°", 2.0), ParamVisibility.Voluntary));
 
@@ -81,8 +91,9 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             {
                 List<GH_SAMParam> result = new List<GH_SAMParam>();
                 result.Add(new GH_SAMParam(new GooShadingPotentialFieldParam() { Name = "shadingPotentialField", NickName = "shadingPotentialField", Description = "Where shading would help and where it would harm, in kWh", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Point() { Name = "previewPoints", NickName = "previewPoints", Description = "Points of the coloured map (near-zero points omitted)", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Colour() { Name = "previewColours", NickName = "previewColours", Description = "Colour per preview point: red = blocks unwanted solar, blue = destroys wanted solar", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "legend", NickName = "legend", Description = "What the colours mean, plus the two totals. Panel it next to the map", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Point() { Name = "previewPoints", NickName = "previewPoints", Description = "Points of the coloured map (near-zero locations omitted)", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Colour() { Name = "previewColours", NickName = "previewColours", Description = "Colour per preview point.\nRED = shade here, it blocks unwanted solar. BLUE = keep open, shading here would destroy wanted solar", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "positiveTotal", NickName = "positiveTotal", Description = "Total shading benefit available [kWh]", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "negativeTotal", NickName = "negativeTotal", Description = "Total wanted solar at risk [kWh, negative]", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "maxScore", NickName = "maxScore", Description = "Best single location [kWh]", Access = GH_ParamAccess.item }, ParamVisibility.Voluntary));
@@ -286,10 +297,29 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, "No unwanted solar reaches this aperture over the period requested: nothing here is worth shading.");
             }
 
+            ShadingFieldPreviewMode previewMode = ShadingFieldPreviewMode.Points;
+            index = Params.IndexOfInputParam("_previewMode_");
+            if (index != -1)
+            {
+                string previewModeText = null;
+                if (dataAccess.GetData(index, ref previewModeText) && !string.IsNullOrWhiteSpace(previewModeText)
+                    && !Enum.TryParse(previewModeText.Trim(), true, out previewMode))
+                {
+                    AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, string.Format("'{0}' is not a preview mode. Use Points, Voxels or None. Showing points.", previewModeText));
+                    previewMode = ShadingFieldPreviewMode.Points;
+                }
+            }
+
             index = Params.IndexOfOutputParam("shadingPotentialField");
             if (index != -1)
             {
-                dataAccess.SetData(index, new GooShadingPotentialField(field));
+                dataAccess.SetData(index, new GooShadingPotentialField(field, previewMode, wantedSolarPenalty));
+            }
+
+            index = Params.IndexOfOutputParam("legend");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, GooShadingPotentialField.Legend(field, wantedSolarPenalty));
             }
 
             // The numbers are already final; a preview problem must never take them down with it.
