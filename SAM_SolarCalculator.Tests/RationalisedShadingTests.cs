@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-3.0-or-later
+﻿// SPDX-License-Identifier: LGPL-3.0-or-later
 // Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
 
 using System;
@@ -258,14 +258,23 @@ namespace SAM.SolarCalculator.Tests
             ShadingVolume volume = Analytical.SolarCalculator.Create.ShadingVolume(target, maxDepth: 1.5, up: 1.0, down: 0.2, left: 0.5, right: 0.5, voxelSize: 0.1);
             ShadingPotentialField field = Analytical.SolarCalculator.Create.ShadingPotentialField(target, baseCache, desirability, volume);
 
-            // --- ideal: the selected voxels, each as an opaque box face set is impractical, so the
-            //     ideal is represented by its voxel columns as thin horizontal plates at the voxel
-            //     centres. That is the closest ray-traceable stand-in for the extracted shape.
+            // --- ideal: the BOUNDARY FACES of the selected voxel set.
+            //
+            // This used to be a thin horizontal plate at each voxel centre, described as the
+            // closest ray-traceable stand-in. Gate 0 Review A measured that stand-in against the
+            // voxel solid it stands in for and found it badly biased on this very case: 28 % less
+            // direct solar intercepted and 21.5 points more wanted solar retained, because a
+            // shallow ray crosses a voxel without ever meeting the single mid-height plate inside
+            // it. The comparison below is the headline ideal-versus-rationalised number, so it now
+            // uses the representation that actually means what the Stage 6 field means — the field
+            // credits a voxel when a ray ENTERS it, and the boundary surface of the selected voxels
+            // intercepts exactly those rays. See IdealRepresentationTests for the three-way
+            // measurement.
             IdealShadingResult ideal = Analytical.SolarCalculator.Create.IdealShadingResult(
                 field, ShadingThresholdMethod.CumulativeCapture, 0.9, 1.0, true, false);
             Assert.True(ideal.SelectedVoxelCount > 0);
 
-            List<ShadingElement> idealElements = IdealAsPlates(target, volume, ideal);
+            List<ShadingElement> idealElements = Analytical.SolarCalculator.Query.VoxelSurfaceShadingElements(volume, ideal.VoxelIndices);
             List<LinkedFace3D> idealOccluders = new List<LinkedFace3D>();
             foreach (ShadingElement element in idealElements)
             {
@@ -281,7 +290,7 @@ namespace SAM.SolarCalculator.Tests
                 field, target, baseCache, desirability, new List<LinkedFace3D>(), "Overhang", out ShadingPerformance rationalised);
 
             output.WriteLine($"unshaded baseline: admitted direct {idealPerformance.AdmittedDirectEnergy:0.#} kWh, unwanted {idealPerformance.AdmittedUnwantedEnergy:0.#} kWh, wanted {idealPerformance.AdmittedWantedEnergy:0.#} kWh");
-            output.WriteLine($"ideal (Stage 7, {idealElements.Count} plates): intercepted {idealPerformance.DirectSolarIntercepted:0.#} kWh, efficiency {idealPerformance.DirectShadingEfficiency * 100:0.#} %, unwanted blocked {idealPerformance.UnwantedSolarBlocked * 100:0.#} %, wanted retained {idealPerformance.WantedSolarRetained * 100:0.#} %");
+            output.WriteLine($"ideal (Stage 7, {idealElements.Count} boundary faces): intercepted {idealPerformance.DirectSolarIntercepted:0.#} kWh, efficiency {idealPerformance.DirectShadingEfficiency * 100:0.#} %, unwanted blocked {idealPerformance.UnwantedSolarBlocked * 100:0.#} %, wanted retained {idealPerformance.WantedSolarRetained * 100:0.#} %");
             output.WriteLine($"rationalised ({best.Name} {best.GetParameter("Depth"):0.##} m): intercepted {rationalised.DirectSolarIntercepted:0.#} kWh, efficiency {rationalised.DirectShadingEfficiency * 100:0.#} %, unwanted blocked {rationalised.UnwantedSolarBlocked * 100:0.#} %, wanted retained {rationalised.WantedSolarRetained * 100:0.#} %");
             output.WriteLine($"simplification cost: {(idealPerformance.UnwantedSolarBlocked - rationalised.UnwantedSolarBlocked) * 100:0.#} points of unwanted blocked, {(idealPerformance.WantedSolarRetained - rationalised.WantedSolarRetained) * 100:0.#} points of wanted retained");
 
@@ -300,57 +309,5 @@ namespace SAM.SolarCalculator.Tests
             Assert.True(rationalised.UnwantedSolarBlocked > 0.2);
         }
 
-        /// <summary>
-        /// The Stage 7 selection rendered as ray-traceable geometry: one horizontal plate per
-        /// selected voxel, at the voxel centre, sized to the voxel. Crude, but it is the honest way
-        /// to put the ideal shape through the same first-hit engine as a real device rather than
-        /// comparing a ray-traced device against a field statistic.
-        /// </summary>
-        private static List<ShadingElement> IdealAsPlates(ApertureSolarTarget target, ShadingVolume volume, IdealShadingResult ideal)
-        {
-            List<ShadingElement> result = new List<ShadingElement>();
-            double half = 0.5 * volume.VoxelSize;
-            Plane plane = target.Plane;
-            Vector3D axisX = plane.AxisX;
-            Vector3D axisY = plane.AxisY;
-            Vector3D axisZ = plane.Normal;
-
-            foreach (int index in ideal.VoxelIndices)
-            {
-                Point3D centre = volume.GetCentre(index);
-                if (centre == null)
-                {
-                    continue;
-                }
-
-                List<Point3D> points = new List<Point3D>
-                {
-                    Offset(centre, axisX, -half, axisZ, -half),
-                    Offset(centre, axisX, half, axisZ, -half),
-                    Offset(centre, axisX, half, axisZ, half),
-                    Offset(centre, axisX, -half, axisZ, half),
-                };
-
-                result.Add(new ShadingElement(DeterministicGuid(index), "Voxel plate " + index, new Face3D(new Polygon3D(points))));
-            }
-
-            return result;
-        }
-
-        private static Point3D Offset(Point3D origin, Vector3D a, double da, Vector3D b, double db)
-        {
-            return new Point3D(
-                origin.X + da * a.X + db * b.X,
-                origin.Y + da * a.Y + db * b.Y,
-                origin.Z + da * a.Z + db * b.Z);
-        }
-
-        private static Guid DeterministicGuid(int index)
-        {
-            byte[] bytes = new byte[16];
-            BitConverter.GetBytes(index).CopyTo(bytes, 0);
-            bytes[15] = 0x7A;
-            return new Guid(bytes);
-        }
     }
 }
