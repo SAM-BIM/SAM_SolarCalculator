@@ -1,0 +1,235 @@
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
+
+using Grasshopper.Kernel;
+using Grasshopper.Kernel.Types;
+using SAM.Analytical.Grasshopper.SolarCalculator.Properties;
+using SAM.Analytical.SolarCalculator;
+using SAM.Core.Grasshopper;
+using System;
+using System.Collections.Generic;
+
+namespace SAM.Analytical.Grasshopper.SolarCalculator
+{
+    public class SAMAnalyticalApertureSolarTargets : GH_SAMVariableOutputParameterComponent
+    {
+        /// <summary>
+        /// Gets the unique ID for this component. Do not change this ID after release.
+        /// </summary>
+        public override Guid ComponentGuid => new Guid("7f3c9a10-5b28-4e63-9a41-6c0d2e7b1102");
+
+        /// <summary>
+        /// The latest version of this component
+        /// </summary>
+        public override string LatestComponentVersion => "1.0.0";
+
+        /// <summary>
+        /// Provides an Icon for the component.
+        /// </summary>
+        protected override System.Drawing.Bitmap Icon => Resources.SAM_SolarCalculator;
+
+        public override GH_Exposure Exposure => GH_Exposure.primary;
+
+        public SAMAnalyticalApertureSolarTargets()
+          : base("SAMAnalytical.ApertureSolarTargets", "SAMAnalytical.ApertureSolarTargets",
+              "SUMMARY\nPicks the windows and doors that can receive sun and prepares each one for solar analysis: the opening face with its OUTWARD direction resolved from the model's adjacency (never trusted to the way the surface happens to be drawn), its orientation, and the grid of sample points the calculation uses.\n\nThis is the first node of the shading workflow. Everything downstream identifies an aperture by the target produced here.\n\nINPUTS\n  _analyticalModel — the SAM Analytical Model.\n  _apertures_ — the apertures to analyse, as SAM Apertures or their Guids. LEAVE EMPTY for every external sun-exposed aperture in the model.\n  _gridSize_ — spacing of the sample points across each opening, m. Default 0.5 m. It sets the finest shading detail the analysis can resolve, so keep the same value for the whole workflow.\n\nOUTPUTS\n  apertureSolarTargets — one target per analysed aperture. Wire into ApertureIrradiance, ShadingPotentialField, RationaliseShading and VerifyShading.\n  apertureGuids — the aperture identity behind each target.\n  azimuths — compass direction each opening faces, degrees (0 north, 90 east, 180 south, 270 west).\n  tilts — angle from horizontal, degrees (90 = vertical window).\n  areas — gross opening area, m².\n  cellCounts — sample points per opening.\n  gridSize — the grid size used, so downstream nodes can be wired from it rather than retyped.\n  count — number of targets.\n\nNOTES\nApertures in internal walls are never analysed: they receive no direct sun and any result would be meaningless. If one is asked for by name it is reported, not silently dropped.\nAn aperture too small to hold a single sample point at the chosen grid produces no target; reduce _gridSize_ if you need it.\n\nEXAMPLE\nAnalyticalModel → ApertureSolarTargets (leave _apertures_ empty) → ApertureIrradiance. Check the azimuths against the model before running anything expensive.",
+              "SAM", "Solar")
+        {
+        }
+
+        protected override GH_SAMParam[] Inputs
+        {
+            get
+            {
+                List<GH_SAMParam> result = new List<GH_SAMParam>();
+                result.Add(new GH_SAMParam(new GooAnalyticalModelParam() { Name = "_analyticalModel", NickName = "_analyticalModel", Description = "SAM Analytical Model", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+
+                global::Grasshopper.Kernel.Parameters.Param_GenericObject apertures = new global::Grasshopper.Kernel.Parameters.Param_GenericObject() { Name = "_apertures_", NickName = "_apertures_", Description = "Apertures to analyse, as SAM Apertures or Guids.\nEmpty = every external sun-exposed aperture in the model", Access = GH_ParamAccess.list, Optional = true };
+                result.Add(new GH_SAMParam(apertures, ParamVisibility.Binding));
+
+                global::Grasshopper.Kernel.Parameters.Param_Number gridSize = new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "_gridSize_", NickName = "_gridSize_", Description = "Spacing of the analysis sample points across each opening [m].\nDefault 0.5 m", Access = GH_ParamAccess.item };
+                gridSize.SetPersistentData(0.5);
+                result.Add(new GH_SAMParam(gridSize, ParamVisibility.Binding));
+
+                return result.ToArray();
+            }
+        }
+
+        protected override GH_SAMParam[] Outputs
+        {
+            get
+            {
+                List<GH_SAMParam> result = new List<GH_SAMParam>();
+                result.Add(new GH_SAMParam(new GooApertureSolarTargetParam() { Name = "apertureSolarTargets", NickName = "apertureSolarTargets", Description = "Apertures prepared for solar analysis", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "apertureGuids", NickName = "apertureGuids", Description = "Aperture Guid behind each target", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "azimuths", NickName = "azimuths", Description = "Compass direction each opening faces [°]", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "tilts", NickName = "tilts", Description = "Angle from horizontal [°]. 90 = vertical", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "areas", NickName = "areas", Description = "Gross opening area [m²]", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Integer() { Name = "cellCounts", NickName = "cellCounts", Description = "Sample points per opening", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "gridSize", NickName = "gridSize", Description = "The analysis grid size used [m]", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Integer() { Name = "count", NickName = "count", Description = "Number of targets", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                return result.ToArray();
+            }
+        }
+
+        /// <summary>The requested aperture Guids, from Apertures, Guids or Guid strings.</summary>
+        internal static List<Guid> ApertureGuids(IEnumerable<GH_ObjectWrapper> objectWrappers, out int unrecognised)
+        {
+            unrecognised = 0;
+
+            List<Guid> result = new List<Guid>();
+            if (objectWrappers == null)
+            {
+                return result;
+            }
+
+            foreach (GH_ObjectWrapper objectWrapper in objectWrappers)
+            {
+                object @object = Query.Unwrap(objectWrapper);
+                if (@object == null)
+                {
+                    continue;
+                }
+
+                if (@object is Aperture aperture)
+                {
+                    result.Add(aperture.Guid);
+                    continue;
+                }
+
+                if (@object is Guid guid)
+                {
+                    result.Add(guid);
+                    continue;
+                }
+
+                if (@object is string text && Guid.TryParse(text, out Guid parsed))
+                {
+                    result.Add(parsed);
+                    continue;
+                }
+
+                unrecognised++;
+            }
+
+            return result;
+        }
+
+        protected override void SolveInstance(IGH_DataAccess dataAccess)
+        {
+            int index = Params.IndexOfInputParam("_analyticalModel");
+            AnalyticalModel analyticalModel = null;
+            if (index == -1 || !dataAccess.GetData(index, ref analyticalModel) || analyticalModel == null)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Please supply a valid SAM AnalyticalModel.");
+                return;
+            }
+
+            double gridSize = 0.5;
+            index = Params.IndexOfInputParam("_gridSize_");
+            if (index != -1)
+            {
+                double gridSize_Temp = gridSize;
+                if (dataAccess.GetData(index, ref gridSize_Temp) && !double.IsNaN(gridSize_Temp))
+                {
+                    gridSize = gridSize_Temp;
+                }
+            }
+
+            if (double.IsNaN(gridSize) || gridSize <= 0)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "_gridSize_ must be greater than zero. It is the spacing of the analysis sample points, in metres.");
+                return;
+            }
+
+            List<Guid> apertureGuids = new List<Guid>();
+            index = Params.IndexOfInputParam("_apertures_");
+            if (index != -1)
+            {
+                List<GH_ObjectWrapper> objectWrappers = new List<GH_ObjectWrapper>();
+                if (dataAccess.GetDataList(index, objectWrappers))
+                {
+                    apertureGuids = ApertureGuids(objectWrappers, out int unrecognised);
+                    if (unrecognised > 0)
+                    {
+                        AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, string.Format("{0} item(s) on _apertures_ were neither a SAM Aperture nor an aperture Guid and were ignored.", unrecognised));
+                    }
+                }
+            }
+
+            List<ApertureSolarTarget> targets = analyticalModel.ApertureSolarTargets(apertureGuids.Count == 0 ? null : apertureGuids, gridSize);
+            if (targets == null || targets.Count == 0)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, apertureGuids.Count == 0
+                    ? "No valid external sun-exposed apertures were found in this model."
+                    : "None of the requested apertures could be analysed. Apertures in internal walls are excluded, and an opening smaller than one grid cell produces no target.");
+                return;
+            }
+
+            if (apertureGuids.Count != 0)
+            {
+                List<string> missing = new List<string>();
+                foreach (Guid apertureGuid in apertureGuids)
+                {
+                    if (targets.Find(x => x.ApertureGuid == apertureGuid) == null)
+                    {
+                        missing.Add(apertureGuid.ToString());
+                    }
+                }
+
+                if (missing.Count != 0)
+                {
+                    AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, string.Format("{0} requested aperture(s) produced no target and were excluded: an aperture in an internal wall, or one too small for a single sample point at this grid size. First: {1}.", missing.Count, missing[0]));
+                }
+            }
+
+            index = Params.IndexOfOutputParam("apertureSolarTargets");
+            if (index != -1)
+            {
+                dataAccess.SetDataList(index, targets.ConvertAll(x => new GooApertureSolarTarget(x)));
+            }
+
+            index = Params.IndexOfOutputParam("apertureGuids");
+            if (index != -1)
+            {
+                dataAccess.SetDataList(index, targets.ConvertAll(x => x.ApertureGuid.ToString()));
+            }
+
+            index = Params.IndexOfOutputParam("azimuths");
+            if (index != -1)
+            {
+                dataAccess.SetDataList(index, targets.ConvertAll(x => x.Azimuth));
+            }
+
+            index = Params.IndexOfOutputParam("tilts");
+            if (index != -1)
+            {
+                dataAccess.SetDataList(index, targets.ConvertAll(x => x.Tilt));
+            }
+
+            index = Params.IndexOfOutputParam("areas");
+            if (index != -1)
+            {
+                dataAccess.SetDataList(index, targets.ConvertAll(x => x.GrossArea));
+            }
+
+            index = Params.IndexOfOutputParam("cellCounts");
+            if (index != -1)
+            {
+                dataAccess.SetDataList(index, targets.ConvertAll(x => x.CellCount));
+            }
+
+            index = Params.IndexOfOutputParam("gridSize");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, gridSize);
+            }
+
+            index = Params.IndexOfOutputParam("count");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, targets.Count);
+            }
+        }
+    }
+}
