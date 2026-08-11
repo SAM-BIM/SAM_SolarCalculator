@@ -29,8 +29,14 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// when they disagree, instead of being measured on whatever target happened to be wired in.
         /// The null device ("build nothing") verifies as a real answer. Added verificationSummary /
         /// status / apertureGuid / azimuth for multi-window runs.
+        ///
+        /// 1.0.2 — the NEUTRAL residual is exposed. Under the default seasonal brief part of the
+        /// admitted beam is in neither the unwanted nor the wanted period, so a window admitting
+        /// 61.3 kWh with 46.0 unwanted and 0.0 wanted looked as though 15.3 kWh had gone missing.
+        /// admittedNeutralSolar, neutralSolarIntercepted and accountingSummary make both balances
+        /// close, and unwantedSolarIntercepted / wantedSolarBlocked are now on their own wires.
         /// </summary>
-        public override string LatestComponentVersion => "1.0.1";
+        public override string LatestComponentVersion => "1.0.2";
 
         /// <summary>
         /// Provides an Icon for the component.
@@ -97,6 +103,11 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "wantedSolarRetained", NickName = "wantedSolarRetained", Description = "Wanted solar retained [%]. NaN when there is no wanted solar", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "admittedUnwantedSolar", NickName = "admittedUnwantedSolar", Description = "Unwanted direct solar admitted without the device [kWh]", Access = GH_ParamAccess.item }, ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "admittedWantedSolar", NickName = "admittedWantedSolar", Description = "Wanted direct solar admitted without the device [kWh]", Access = GH_ParamAccess.item }, ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "admittedNeutralSolar", NickName = "admittedNeutralSolar", Description = "Direct solar admitted that the brief claimed NEITHER way [kWh] — under the default brief, the spring and autumn beam that is in neither the unwanted nor the wanted period.\n\nThis is what makes the numbers add up:\nbaselineDirectSolar = admittedUnwantedSolar + admittedWantedSolar + admittedNeutralSolar", Access = GH_ParamAccess.item }, ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "unwantedSolarIntercepted", NickName = "unwantedSolarIntercepted", Description = "The part of what the device stops that you asked to block [kWh]", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "wantedSolarBlocked", NickName = "wantedSolarBlocked", Description = "The part of what the device stops that you asked to keep [kWh] — the price of the design", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "neutralSolarIntercepted", NickName = "neutralSolarIntercepted", Description = "The part of what the device stops that the brief claimed neither way [kWh].\n\ndirectSolarIntercepted = unwantedSolarIntercepted + wantedSolarBlocked + neutralSolarIntercepted", Access = GH_ParamAccess.item }, ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "accountingSummary", NickName = "accountingSummary", Description = "The two energy balances written out, so the headline numbers can be reconciled by eye:\n'Admitted without the device: 61.3 kWh = 46 unwanted + 0 wanted + 15.3 neither'", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "elementNames", NickName = "elementNames", Description = "Name of each part of the device", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "elementGuids", NickName = "elementGuids", Description = "Identity of each part of the device", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "elementEnergy", NickName = "elementEnergy", Description = "Direct solar stopped by each part [kWh], credited to the part the sun reaches first", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
@@ -413,7 +424,17 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             SetNumber(dataAccess, "wantedSolarRetained", Query.Percentage(performance.WantedSolarRetained));
             SetNumber(dataAccess, "admittedUnwantedSolar", performance.AdmittedUnwantedEnergy);
             SetNumber(dataAccess, "admittedWantedSolar", performance.AdmittedWantedEnergy);
+            SetNumber(dataAccess, "admittedNeutralSolar", performance.AdmittedNeutralEnergy);
+            SetNumber(dataAccess, "unwantedSolarIntercepted", performance.UnwantedSolarIntercepted);
+            SetNumber(dataAccess, "wantedSolarBlocked", performance.WantedSolarBlocked);
+            SetNumber(dataAccess, "neutralSolarIntercepted", performance.NeutralSolarIntercepted);
             SetNumber(dataAccess, "unattributedEnergy", performance.UnattributedInterceptedEnergy);
+
+            index = Params.IndexOfOutputParam("accountingSummary");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, SolarQuery.AccountingSummary(performance));
+            }
             SetNumber(dataAccess, "materialFraction", performance.MaterialFraction);
 
             index = Params.IndexOfOutputParam("elementNames");

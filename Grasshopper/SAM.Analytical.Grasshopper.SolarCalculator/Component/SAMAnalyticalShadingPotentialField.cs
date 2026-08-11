@@ -30,8 +30,15 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// red/blue convention explicit everywhere it is described. Manual testing found the map was
         /// read as "where the sun is" rather than as "where shading material is worth putting", and
         /// the two are not the same picture.
+        ///
+        /// 1.0.2 — TERMINOLOGY. positiveTotal / negativeTotal are renamed
+        /// positiveShadingPotential / negativeShadingPotential and no longer carry a kWh label:
+        /// manual testing read "benefit 5504 kWh" as a saving, when the totals sum a value that
+        /// every voxel along a ray's path receives and are not an amount of energy anything could
+        /// save. "Jeopardy" is gone. The negative total is reported as a positive magnitude, and the
+        /// legend now states what the totals are NOT.
         /// </summary>
-        public override string LatestComponentVersion => "1.0.1";
+        public override string LatestComponentVersion => "1.0.2";
 
         /// <summary>
         /// Provides an Icon for the component.
@@ -64,7 +71,14 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 result.Add(new GH_SAMParam(Number("_marginAbove_", "How far above the opening the studied space extends [m].\nDefault 0.5 m", 0.5), ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(Number("_marginBelow_", "How far below the opening the studied space extends [m].\nDefault 0.0 m", 0.0), ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(Number("_marginSides_", "How far either side of the opening the studied space extends [m].\nDefault 0.3 m", 0.3), ParamVisibility.Voluntary));
-                result.Add(new GH_SAMParam(Number("_wantedSolarPenalty_", "Importance of preserving wanted solar relative to blocking unwanted solar. Dimensionless.\n1.0 = equal importance; >1 protects wanted solar more; <1 prioritises blocking unwanted solar.\nDefault 1.0", 1.0), ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(Number("_wantedSolarPenalty_",
+                    "How many kWh of unwanted solar blocked are worth one kWh of wanted solar lost. DIMENSIONLESS WEIGHT.\nHere it decides only how the map is SCORED and coloured: potential = unwanted − penalty × wanted.\n\n"
+                    + "ALLOWED: any finite number from 0 upwards. There is no upper limit.\n"
+                    + "NORMAL: 0.5 to 2.0.\n"
+                    + "DEFAULT: 1.0.\n\n"
+                    + "RAISE IT and the BLUE keep-open region grows: more of the space in front of the window is judged too valuable to fill.\n"
+                    + "NEGATIVE IS REFUSED: it would colour the keep-open region as though shading it were a gain.\n\n"
+                    + "Use the SAME value on RationaliseShading, or the map and the device are answering different questions.", 1.0), ParamVisibility.Voluntary));
 
                 global::Grasshopper.Kernel.Parameters.Param_String previewMode = new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "_previewMode_", NickName = "_previewMode_", Description = "How the map is drawn: Points (default, cheap), Voxels (shaded cells, for smaller maps), None.\nThe numbers are the same whichever you choose", Access = GH_ParamAccess.item, Optional = true };
                 previewMode.SetPersistentData("Points");
@@ -90,15 +104,15 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             get
             {
                 List<GH_SAMParam> result = new List<GH_SAMParam>();
-                result.Add(new GH_SAMParam(new GooShadingPotentialFieldParam() { Name = "shadingPotentialField", NickName = "shadingPotentialField", Description = "Where shading would help and where it would harm, in kWh", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "legend", NickName = "legend", Description = "What the colours mean, plus the two totals. Panel it next to the map", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new GooShadingPotentialFieldParam() { Name = "shadingPotentialField", NickName = "shadingPotentialField", Description = "Where shading material would help, and where it would harm", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "legend", NickName = "legend", Description = "What the colours mean, the two totals, and what those totals are NOT. Panel it next to the map", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Point() { Name = "previewPoints", NickName = "previewPoints", Description = "Points of the coloured map (near-zero locations omitted)", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Colour() { Name = "previewColours", NickName = "previewColours", Description = "Colour per preview point.\nRED = shade here, it blocks unwanted solar. BLUE = keep open, shading here would destroy wanted solar", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "positiveTotal", NickName = "positiveTotal", Description = "Total shading benefit available [kWh]", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "negativeTotal", NickName = "negativeTotal", Description = "Total wanted solar at risk [kWh, negative]", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "maxScore", NickName = "maxScore", Description = "Best single location [kWh]", Access = GH_ParamAccess.item }, ParamVisibility.Voluntary));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "minScore", NickName = "minScore", Description = "Worst single location [kWh]", Access = GH_ParamAccess.item }, ParamVisibility.Voluntary));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Integer() { Name = "voxelCount", NickName = "voxelCount", Description = "Number of points in the map", Access = GH_ParamAccess.item }, ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Colour() { Name = "previewColours", NickName = "previewColours", Description = "Colour per preview point.\nRED = SHADE HERE, it blocks solar you asked to block. BLUE = KEEP OPEN, material here would block solar you asked to keep", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "positiveShadingPotential", NickName = "positiveShadingPotential", Description = "Sum of the positive location values — the size of the SHADE-HERE opportunity.\n\nNOT AN ENERGY SAVING, and no unit is given because it is not kWh of anything. One solar ray passes through many locations and is counted at every one, so this total counts the same solar repeatedly. Use it to rank locations and compare thresholds. For what a device actually saves, read VerifyShading", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "negativeShadingPotential", NickName = "negativeShadingPotential", Description = "Sum of the negative location values, as a positive magnitude — the size of the KEEP-OPEN risk.\n\nSame caution as positiveShadingPotential: a cumulative spatial total, not wanted solar any device would destroy", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "maxScore", NickName = "maxScore", Description = "Value of the single best location [kWh].\nA per-location value IS an energy: the beam a piece of material there would intercept over the year", Access = GH_ParamAccess.item }, ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "minScore", NickName = "minScore", Description = "Value of the single worst location [kWh]. Negative: wanted solar that material there would destroy", Access = GH_ParamAccess.item }, ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Integer() { Name = "voxelCount", NickName = "voxelCount", Description = "Number of candidate locations in the map", Access = GH_ParamAccess.item }, ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Boolean() { Name = "reusedPreviousCalculation", NickName = "reusedPreviousCalculation", Description = "True when no ray casting was needed", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Boolean() { Name = "successful", NickName = "successful", Description = "Successful?", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 return result.ToArray();
@@ -253,6 +267,18 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 return;
             }
 
+            // Here the penalty only decides how the map is SCORED and coloured — Score(v) =
+            // unwanted(v) - penalty x wanted(v) — but the sign argument is the same one the
+            // optimiser makes: negative would turn the wanted-solar term into a reward, so the blue
+            // "keep open" region would colour red and the map would recommend the opposite.
+            if (ShadingObjective.Validity(wantedSolarPenalty) == PenaltyValidity.Invalid)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, string.Format(
+                    "_wantedSolarPenalty_ must be a finite number of zero or more (it is {0}). It is a dimensionless weight: 1.0 trades one kWh of wanted solar for one kWh of unwanted solar blocked. A negative value would colour the keep-open region as though shading it were a gain.",
+                    wantedSolarPenalty));
+                return;
+            }
+
             bool recalculate = false;
             index = Params.IndexOfInputParam("_recalculate_");
             if (index != -1)
@@ -344,16 +370,18 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, "The preview could not be drawn: " + exception.Message + ". The numerical results are unaffected.");
             }
 
-            index = Params.IndexOfOutputParam("positiveTotal");
+            index = Params.IndexOfOutputParam("positiveShadingPotential");
             if (index != -1)
             {
                 dataAccess.SetData(index, positiveTotal);
             }
 
-            index = Params.IndexOfOutputParam("negativeTotal");
+            index = Params.IndexOfOutputParam("negativeShadingPotential");
             if (index != -1)
             {
-                dataAccess.SetData(index, field.NegativeTotal(wantedSolarPenalty));
+                // As a POSITIVE magnitude: "negative shading potential 22.2" reads as a size, where
+                // "-22.2" invited being added to the positive total and cancelling part of it.
+                dataAccess.SetData(index, Math.Abs(field.NegativeTotal(wantedSolarPenalty)));
             }
 
             index = Params.IndexOfOutputParam("maxScore");

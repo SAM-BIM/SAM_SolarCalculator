@@ -20,9 +20,14 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         public override Guid ComponentGuid => new Guid("7f3c9a10-5b28-4e63-9a41-6c0d2e7b1105");
 
         /// <summary>
-        /// The latest version of this component
+        /// The latest version of this component.
+        ///
+        /// 1.0.1 — capturedFraction is renamed capturedPotentialFraction. Manual testing read
+        /// "captures 90 % of the benefit" as "blocks 90 % of the unwanted solar"; it is a share of
+        /// the field's positive potential, a sum over voxels, and this shape was never traced. The
+        /// quantity is unchanged. _wantedSolarPenalty_ now refuses negative values.
         /// </summary>
-        public override string LatestComponentVersion => "1.0.0";
+        public override string LatestComponentVersion => "1.0.1";
 
         /// <summary>
         /// Provides an Icon for the component.
@@ -33,7 +38,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
 
         public SAMAnalyticalIdealShadingShape()
           : base("SAMAnalytical.IdealShadingShape", "SAMAnalytical.IdealShadingShape",
-              "SUMMARY\nTurns the shading potential map into a SHAPE: the region in front of the window most worth filling with material, at a threshold you choose. It is a design aid — the shape it draws is not a buildable device, and RationaliseShading is what produces one.\n\nINPUTS\n  _shadingPotentialField — the map, from ShadingPotentialField.\n  _thresholdMethod_ — how the cut level is chosen:\n    CumulativeCapture (default) — keep the locations that together deliver the share of the benefit asked for in _threshold_.\n    MaxFraction — keep everything above a share of the single best location.\n    Absolute — _threshold_ is a level in kWh.\n  _threshold_ — the share (0-1) or the kWh level. Default 0.9, i.e. keep 90 % of the available benefit.\n  _wantedSolarPenalty_ — how many kWh of unwanted solar blocked is worth one kWh of wanted solar lost. Default 1.0. Use the same value as the map and the device.\n  _requireFacadeContact_ — drop pieces that float free of the facade. Default false.\n  _keepLargestRegionOnly_ — keep only the biggest connected piece. Default false.\n\nOUTPUTS\n  idealShadingResult — the result object.\n  mesh — DISPLAY geometry only, see the note below.\n  threshold — the kWh level actually used.\n  capturedFraction — the share of the total available benefit this shape captures, 0-1.\n  voxelCount / regionCount / regionSizes — size and connectedness of the selected region.\n  projectedArea [m²], enclosedVolume [m³], maxProjectionDepth [m] — take-off quantities of the region.\n  meshNote — why no mesh was produced, when there is none.\n\nNOTES\nDISPLAY GEOMETRY VS PERFORMANCE. The mesh is drawn from the selected region for viewing and take-off. It is NOT the geometry the performance numbers describe: in testing the mesh intercepted materially less solar than the region it represents. Judge shading with VerifyShading on a real device, never by the look of this mesh.\nAn empty result is a legitimate answer: it means nothing in front of this window is worth shading under the brief you gave.\nThe ideal shape over-shades on purpose — it blocks everything unwanted and pays for it in lost winter sun. That is why it beats the buildable devices on paper and is not a design.\n\nEXAMPLE\nShadingPotentialField → IdealShadingShape (_threshold_ 0.9) to see WHERE the problem is, then RationaliseShading to get something buildable.",
+              "SUMMARY\nTurns the shading potential map into a SHAPE: the region in front of the window most worth filling with material, at a threshold you choose. It is a design aid — the shape it draws is not a buildable device, and RationaliseShading is what produces one.\n\nINPUTS\n  _shadingPotentialField — the map, from ShadingPotentialField.\n  _thresholdMethod_ — how the cut level is chosen:\n    CumulativeCapture (default) — keep the locations that together deliver the share of the benefit asked for in _threshold_.\n    MaxFraction — keep everything above a share of the single best location.\n    Absolute — _threshold_ is a level in kWh.\n  _threshold_ — the share (0-1) or the kWh level. Default 0.9, i.e. keep 90 % of the available benefit.\n  _wantedSolarPenalty_ — how many kWh of unwanted solar blocked is worth one kWh of wanted solar lost. Default 1.0. Use the same value as the map and the device.\n  _requireFacadeContact_ — drop pieces that float free of the facade. Default false.\n  _keepLargestRegionOnly_ — keep only the biggest connected piece. Default false.\n\nOUTPUTS\n  idealShadingResult — the result object.\n  mesh — DISPLAY geometry only, see the note below.\n  threshold — the kWh level actually used.\n  capturedPotentialFraction — the share of the map's POSITIVE SHADING POTENTIAL this shape holds, 0-1. NOT a share of solar energy, and NOT what a device here would block: both parts of the ratio are sums over map locations, and one ray is counted at every location along its path.\n  voxelCount / regionCount / regionSizes — size and connectedness of the selected region.\n  projectedArea [m²], enclosedVolume [m³], maxProjectionDepth [m] — take-off quantities of the region.\n  meshNote — why no mesh was produced, when there is none.\n\nNOTES\nDISPLAY GEOMETRY VS PERFORMANCE. The mesh is drawn from the selected region for viewing and take-off. It is NOT the geometry the performance numbers describe: in testing the mesh intercepted materially less solar than the region it represents. Judge shading with VerifyShading on a real device, never by the look of this mesh.\nAn empty result is a legitimate answer: it means nothing in front of this window is worth shading under the brief you gave.\nThe ideal shape over-shades on purpose — it blocks everything unwanted and pays for it in lost winter sun. That is why it beats the buildable devices on paper and is not a design.\n\nEXAMPLE\nShadingPotentialField → IdealShadingShape (_threshold_ 0.9) to see WHERE the problem is, then RationaliseShading to get something buildable.",
               "SAM", "Solar")
         {
         }
@@ -51,7 +56,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 threshold.SetPersistentData(0.9);
                 result.Add(new GH_SAMParam(threshold, ParamVisibility.Binding));
 
-                global::Grasshopper.Kernel.Parameters.Param_Number wantedSolarPenalty = new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "_wantedSolarPenalty_", NickName = "_wantedSolarPenalty_", Description = "How many kWh of unwanted solar blocked is worth one kWh of wanted solar lost.\nDefault 1.0", Access = GH_ParamAccess.item };
+                global::Grasshopper.Kernel.Parameters.Param_Number wantedSolarPenalty = new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "_wantedSolarPenalty_", NickName = "_wantedSolarPenalty_", Description = "How many kWh of unwanted solar blocked are worth one kWh of wanted solar lost. DIMENSIONLESS WEIGHT.\n\nALLOWED: any finite number from 0 upwards. There is no upper limit.\nNORMAL: 0.5 to 2.0.\nDEFAULT: 1.0.\n\nRAISE IT and the selected shape shrinks away from the region that carries wanted solar.\nNEGATIVE IS REFUSED: it would select the region that destroys wanted solar.\n\nUse the SAME value as the map it came from.", Access = GH_ParamAccess.item };
                 wantedSolarPenalty.SetPersistentData(1.0);
                 result.Add(new GH_SAMParam(wantedSolarPenalty, ParamVisibility.Voluntary));
 
@@ -75,7 +80,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 result.Add(new GH_SAMParam(new GooIdealShadingResultParam() { Name = "idealShadingResult", NickName = "idealShadingResult", Description = "The ideal shading region and its numbers", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Mesh() { Name = "mesh", NickName = "mesh", Description = "DISPLAY geometry of the region. Not the verified performance geometry", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "threshold", NickName = "threshold", Description = "The kWh level actually used", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "capturedFraction", NickName = "capturedFraction", Description = "Share of the available benefit this region captures, 0-1", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "capturedPotentialFraction", NickName = "capturedPotentialFraction", Description = "Share of the map's POSITIVE SHADING POTENTIAL held by this region, 0-1.\n\nNOT a share of solar energy. Both the numerator and the denominator are sums over map locations, and one solar ray is counted at every location along its path — so '90 %' means this region holds 90 % of the map's positive potential, NOT that a device built here would block 90 % of the unwanted solar. It will not: this region is a volume, a device is a surface, and this shape was never ray-traced.\n\nUse it to choose a threshold and to compare two thresholds on the same map. For what a device blocks, build one and read VerifyShading", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Integer() { Name = "voxelCount", NickName = "voxelCount", Description = "Number of selected locations", Access = GH_ParamAccess.item }, ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Integer() { Name = "regionCount", NickName = "regionCount", Description = "Number of separate connected pieces", Access = GH_ParamAccess.item }, ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Integer() { Name = "regionSizes", NickName = "regionSizes", Description = "Size of each connected piece, largest first", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
@@ -140,6 +145,14 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 }
             }
 
+            if (ShadingObjective.Validity(wantedSolarPenalty) == PenaltyValidity.Invalid)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, string.Format(
+                    "_wantedSolarPenalty_ must be a finite number of zero or more (it is {0}). It is a dimensionless weight: 1.0 trades one kWh of wanted solar for one kWh of unwanted solar blocked. A negative value would select the region that destroys wanted solar.",
+                    wantedSolarPenalty));
+                return;
+            }
+
             bool requireFacadeContact = false;
             index = Params.IndexOfInputParam("_requireFacadeContact_");
             if (index != -1)
@@ -189,10 +202,10 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 dataAccess.SetData(index, idealShadingResult.Threshold);
             }
 
-            index = Params.IndexOfOutputParam("capturedFraction");
+            index = Params.IndexOfOutputParam("capturedPotentialFraction");
             if (index != -1)
             {
-                dataAccess.SetData(index, idealShadingResult.CapturedBenefitFraction);
+                dataAccess.SetData(index, idealShadingResult.CapturedPotentialFraction);
             }
 
             index = Params.IndexOfOutputParam("voxelCount");

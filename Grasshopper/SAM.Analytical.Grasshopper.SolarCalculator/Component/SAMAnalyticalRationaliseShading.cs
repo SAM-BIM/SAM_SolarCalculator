@@ -32,8 +32,15 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// the null device rather than as the least-bad candidate, which is available separately on
         /// bestCandidateDevice. Added designSummary / status / apertureGuid / azimuth so a
         /// ten-window run reads as a table; objectiveScore demoted out of the headline.
+        ///
+        /// 1.0.2 — element spacing is now capped at the MINIMUM FEATURE SIZE (two analysis cells)
+        /// rather than one, so the search can no longer ride the sampling limit and a result
+        /// produced inside its own reliable bounds comes back without a resolution warning. The
+        /// penalties refuse negative values outright and remark on extreme ones. benefit / harm are
+        /// renamed unwantedSolarIntercepted / wantedSolarBlocked, and neutralSolarIntercepted is
+        /// added so the three parts sum to what the device stops.
         /// </summary>
-        public override string LatestComponentVersion => "1.0.1";
+        public override string LatestComponentVersion => "1.0.2";
 
         /// <summary>
         /// Provides an Icon for the component.
@@ -66,8 +73,24 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_GenericObject() { Name = "_wantedPeriod_", NickName = "_wantedPeriod_", Description = "Hours whose solar should be kept.\nDefault: winter", Access = GH_ParamAccess.item, Optional = true }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_GenericObject() { Name = "_desirability_", NickName = "_desirability_", Description = "A full desirability strategy. When supplied it overrides the two periods", Access = GH_ParamAccess.item, Optional = true }, ParamVisibility.Voluntary));
 
-                result.Add(new GH_SAMParam(Number("_wantedSolarPenalty_", "Importance of preserving wanted solar relative to blocking unwanted solar. Dimensionless.\n1.0 = equal importance; >1 protects wanted solar more; <1 prioritises blocking unwanted solar.\nDefault 1.0", 1.0), ParamVisibility.Voluntary));
-                result.Add(new GH_SAMParam(Number("_materialPenalty_", "How much device is too much: how reluctant the search is to buy extra shading area for a small further gain. Dimensionless.\n0 = size on energy alone; 0.1 (default) is a mild preference for the leaner of two near-equal designs; raise it to favour smaller devices.\nDefault 0.1", 0.1), ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(Number("_wantedSolarPenalty_",
+                    "How many kWh of unwanted solar blocked are worth one kWh of wanted solar lost. DIMENSIONLESS WEIGHT.\n\n"
+                    + "ALLOWED: any finite number from 0 upwards. There is no upper limit.\n"
+                    + "NORMAL: 0.5 to 2.0.\n"
+                    + "DEFAULT: 1.0 — an even trade, which assumes nothing about the brief.\n\n"
+                    + "RAISE IT and wanted solar is protected harder, so the search buys SHALLOWER devices and accepts less unwanted solar blocked. Lower it and it buys deeper ones.\n"
+                    + "It changes which measured design WINS. It never changes a measured energy.\n\n"
+                    + "Above 10 the answer is usually 'build nothing' whatever the exact value.\n"
+                    + "NEGATIVE IS REFUSED: it would pay the search to destroy the solar you asked to keep. To design for maximum gain, swap _unwantedPeriod_ and _wantedPeriod_ instead.", 1.0), ParamVisibility.Voluntary));
+
+                result.Add(new GH_SAMParam(Number("_materialPenalty_",
+                    "How reluctant the search is to buy extra device area for a small further gain. DIMENSIONLESS WEIGHT: the share of the window's whole admitted beam charged per unit of (device area / window area).\n\n"
+                    + "ALLOWED: any finite number from 0 upwards. There is no upper limit.\n"
+                    + "NORMAL: 0 to 1.0.\n"
+                    + "DEFAULT: 0.1 — a mild preference for the leaner of two near-equal designs, small enough not to override the energy answer.\n\n"
+                    + "RAISE IT and the recommended device SHRINKS; past a point nothing beats leaving the window alone and the answer becomes NO SHADE, which is a real answer and not a failure. 0 sizes on energy alone and tends to return the largest device that still helps at all.\n\n"
+                    + "Above 10 the answer is 'build nothing' whatever the exact value.\n"
+                    + "NEGATIVE IS REFUSED: it would pay the search to buy material, returning the largest device the bounds allow.", 0.1), ParamVisibility.Voluntary));
 
                 global::Grasshopper.Kernel.Parameters.Param_Boolean optimise = new global::Grasshopper.Kernel.Parameters.Param_Boolean() { Name = "_optimise_", NickName = "_optimise_", Description = "True (default) searches each family's sizes. False runs the quicker seeded candidate sweep", Access = GH_ParamAccess.item };
                 optimise.SetPersistentData(true);
@@ -109,8 +132,12 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "parameterNames", NickName = "parameterNames", Description = "Size parameter names of the winning device", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "parameterValues", NickName = "parameterValues", Description = "Sizes of the winning device: depths and offsets [m], counts, tilts [°]", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "objectiveScore", NickName = "objectiveScore", Description = "Benefit − penalty × Harm − penalty × Cost [kWh], per family. Zero = build nothing.\nA comparison aid, NOT the headline: two designs a fraction of a percent apart in score can do very different things", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "benefit", NickName = "benefit", Description = "Unwanted solar intercepted [kWh]", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "harm", NickName = "harm", Description = "Wanted solar destroyed [kWh]", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
+                // Named for the PHYSICAL QUANTITY, not for the role it plays in the objective.
+                // "benefit 46 kWh" was read during manual testing as "this saves 46 kWh"; it is the
+                // unwanted beam the device intercepts, which is a narrower and checkable claim.
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "unwantedSolarIntercepted", NickName = "unwantedSolarIntercepted", Description = "Unwanted direct solar the device intercepts [kWh]. The objective's Benefit term", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "wantedSolarBlocked", NickName = "wantedSolarBlocked", Description = "Wanted direct solar the device destroys [kWh]. The objective's Harm term", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "neutralSolarIntercepted", NickName = "neutralSolarIntercepted", Description = "Direct solar the device intercepts that the brief claimed neither way [kWh].\n\ndirectSolarIntercepted = unwantedSolarIntercepted + wantedSolarBlocked + neutralSolarIntercepted", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "cost", NickName = "cost", Description = "Material priced in [kWh]", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "materialFraction", NickName = "materialFraction", Description = "Device area / window area", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "unwantedSolarBlocked", NickName = "unwantedSolarBlocked", Description = "Unwanted solar blocked [%]. NaN when there is no unwanted solar", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
@@ -319,10 +346,43 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 return;
             }
 
-            if (wantedSolarPenalty < 0 || materialPenalty < 0)
+            // The penalties are dimensionless weights on POSITIVE quantities that the score
+            // SUBTRACTS, so a negative value flips the meaning of its own term: a negative wanted
+            // penalty pays the search to destroy the solar the brief asked it to keep, and a
+            // negative material penalty pays it to buy material. Refused rather than clamped —
+            // reading -2 as 0 would answer a question nobody asked. To maximise gain instead, swap
+            // the wanted and unwanted periods.
+            if (ShadingObjective.Validity(wantedSolarPenalty) == PenaltyValidity.Invalid)
             {
-                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "_wantedSolarPenalty_ and _materialPenalty_ must be zero or greater.");
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, string.Format(
+                    "_wantedSolarPenalty_ must be a finite number of zero or more (it is {0}). It is a dimensionless weight: 1.0 trades one kWh of wanted solar for one kWh of unwanted solar blocked. A negative value would reward destroying the solar you asked to keep; to design for maximum gain, swap _unwantedPeriod_ and _wantedPeriod_ instead.",
+                    wantedSolarPenalty));
                 return;
+            }
+
+            if (ShadingObjective.Validity(materialPenalty) == PenaltyValidity.Invalid)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, string.Format(
+                    "_materialPenalty_ must be a finite number of zero or more (it is {0}). It is a dimensionless weight: 0 sizes on energy alone, 0.1 mildly prefers the leaner design. A negative value would reward buying material and would return the largest device the bounds allow.",
+                    materialPenalty));
+                return;
+            }
+
+            // Valid but far outside normal use. The answer is still sound, so this is a remark and
+            // not an error — but at these weights the recommendation usually stops responding to the
+            // value at all, and that is worth knowing before it is read as a design finding.
+            if (ShadingObjective.Validity(wantedSolarPenalty) == PenaltyValidity.Extreme)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, string.Format(
+                    "_wantedSolarPenalty_ {0} is far above the normal 0.5–2.0 range. The result is valid, but at this weight almost any loss of wanted solar is refused and the answer is usually 'build nothing' regardless of the exact value.",
+                    wantedSolarPenalty));
+            }
+
+            if (ShadingObjective.Validity(materialPenalty) == PenaltyValidity.Extreme)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, string.Format(
+                    "_materialPenalty_ {0} is far above the normal 0–1 range. The result is valid, but at this weight material outweighs any plausible energy gain and the answer is usually 'build nothing' regardless of the exact value.",
+                    materialPenalty));
             }
 
             bool optimise = true;
@@ -561,8 +621,9 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             }
 
             SetList(dataAccess, "objectiveScore", optimise, optimisedResults, performances, x => x.ObjectiveScore, x => objective.Score(x));
-            SetList(dataAccess, "benefit", optimise, optimisedResults, performances, x => x.Benefit, x => objective.Benefit(x));
-            SetList(dataAccess, "harm", optimise, optimisedResults, performances, x => x.Harm, x => objective.Harm(x));
+            SetList(dataAccess, "unwantedSolarIntercepted", optimise, optimisedResults, performances, x => x.UnwantedSolarIntercepted, x => x.UnwantedSolarIntercepted);
+            SetList(dataAccess, "wantedSolarBlocked", optimise, optimisedResults, performances, x => x.WantedSolarBlocked, x => x.WantedSolarBlocked);
+            SetList(dataAccess, "neutralSolarIntercepted", optimise, optimisedResults, performances, x => x.NeutralSolarIntercepted, x => x.NeutralSolarIntercepted);
             SetList(dataAccess, "cost", optimise, optimisedResults, performances, x => x.Cost, x => objective.Cost(x));
             SetList(dataAccess, "materialFraction", optimise, optimisedResults, performances, x => x.MaterialFraction, x => x.MaterialFraction);
             SetList(dataAccess, "unwantedSolarBlocked", optimise, optimisedResults, performances, x => Query.Percentage(x.UnwantedSolarBlocked), x => Query.Percentage(x.UnwantedSolarBlocked));

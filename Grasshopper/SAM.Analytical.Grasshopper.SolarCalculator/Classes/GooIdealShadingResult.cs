@@ -47,7 +47,10 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 return typeof(IdealShadingResult).Name;
             }
 
-            return string.Format("IdealShadingResult [{0} regions, {1} points, captures {2:0.#} % of the benefit]", result.RegionCount, result.SelectedVoxelCount, 100.0 * result.CapturedBenefitFraction);
+            // "captures X % of the benefit" invited the reading "this shape blocks X % of the
+            // unwanted solar". It does not: the fraction is of the FIELD'S positive potential, a sum
+            // over voxels, and this shape is display geometry that was never traced.
+            return string.Format("IdealShadingResult [{0} regions, {1} voxels, holds {2:0.#} % of the positive shading potential — not verified performance]", result.RegionCount, result.SelectedVoxelCount, 100.0 * result.CapturedPotentialFraction);
         }
 
         private Mesh RhinoMesh()

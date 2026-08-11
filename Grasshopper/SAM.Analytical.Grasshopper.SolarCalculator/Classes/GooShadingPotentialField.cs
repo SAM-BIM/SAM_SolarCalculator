@@ -105,7 +105,17 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 return typeof(ShadingPotentialField).Name;
             }
 
-            return string.Format("ShadingPotentialField [{0} points, benefit {1:0.#} kWh, jeopardy {2:0.#} kWh]", field.Volume?.VoxelCount ?? 0, field.PositiveTotal(), field.NegativeTotal());
+            // NO UNIT ON THE TOTALS, and that is a deliberate decision rather than an omission. The
+            // per-voxel values are genuinely kWh — the beam energy a piece of material at that spot
+            // would intercept — but a ray passes through many voxels and contributes to every one,
+            // so the SUM counts the same kWh repeatedly and is not an amount of energy anything
+            // could save. Writing "benefit 5504 kWh" next to it, which is what this said until
+            // Stage 10.2, reads as a saving roughly ten times larger than the window even admits.
+            // The totals are a cumulative spatial potential and are shown as bare numbers for
+            // ranking and comparison; kWh belongs on VerifyShading, where a real device was traced.
+            return string.Format(
+                "ShadingPotentialField [{0} voxels | positive potential {1:0.#} | negative potential {2:0.#}]",
+                field.Volume?.VoxelCount ?? 0, field.PositiveTotal(), Math.Abs(field.NegativeTotal()));
         }
 
         /// <summary>
@@ -212,16 +222,25 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         public static string Legend(ShadingPotentialField field, double wantedSolarPenalty = 1.0)
         {
             System.Text.StringBuilder stringBuilder = new System.Text.StringBuilder();
-            stringBuilder.AppendLine("RED   Shade here — material here blocks unwanted solar (positive shading benefit)");
-            stringBuilder.AppendLine("BLUE  Keep open — material here would destroy wanted solar (negative benefit)");
+            stringBuilder.AppendLine("RED   SHADE HERE — material here would block solar you asked to block");
+            stringBuilder.AppendLine("BLUE  KEEP OPEN  — material here would block solar you asked to keep");
             stringBuilder.AppendLine("grey  Neither — almost no beam passes through, so material here does nothing");
 
             if (field != null)
             {
                 stringBuilder.AppendLine();
                 stringBuilder.AppendFormat(System.Globalization.CultureInfo.InvariantCulture,
-                    "Positive potential total {0:0.#} kWh   Negative / jeopardy total {1:0.#} kWh",
-                    field.PositiveTotal(wantedSolarPenalty), field.NegativeTotal(wantedSolarPenalty));
+                    "Positive shading potential {0:0.#}   Negative shading potential {1:0.#}   ({2} voxels)",
+                    field.PositiveTotal(wantedSolarPenalty), Math.Abs(field.NegativeTotal(wantedSolarPenalty)),
+                    field.Volume?.VoxelCount ?? 0);
+
+                stringBuilder.AppendLine();
+                stringBuilder.AppendLine();
+                stringBuilder.AppendLine("THESE TOTALS ARE NOT ENERGY SAVINGS. Each voxel independently records the beam that");
+                stringBuilder.AppendLine("would pass through it, and one ray passes through many voxels, so the totals count the");
+                stringBuilder.AppendLine("same solar over and over. They rank locations and compare thresholds; they do not say");
+                stringBuilder.AppendLine("what a device would save. For that, build one and read VerifyShading, whose kWh are");
+                stringBuilder.AppendLine("measured on real geometry.");
             }
 
             return stringBuilder.ToString();
