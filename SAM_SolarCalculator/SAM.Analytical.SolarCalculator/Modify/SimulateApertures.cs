@@ -21,7 +21,7 @@ namespace SAM.Analytical.SolarCalculator
         /// gate on the analysis -- they should be free to diverge later without either silently
         /// retuning the other. Zero numerical change from the previous default.
         /// </summary>
-        private const double DefaultMinHorizonAngle = 0.0349066;
+        private const double DefaultMinHorizonAngle = Create.DefaultMinHorizonAngle;
 
         /// <summary>
         /// Per-aperture irradiance over any AnalysisPeriod, from the reusable visibility caches.
@@ -101,130 +101,33 @@ namespace SAM.Analytical.SolarCalculator
                 return null;
             }
 
-            // Precedence: supplied weather first, then the model's own.
-            if (weatherData == null)
-            {
-                weatherData = analyticalModel.GetValue<WeatherData>(AnalyticalModelParameter.WeatherData);
-            }
-
-            if (weatherData == null)
+            // The targets, the occluders, the weather precedence and both visibility calculations —
+            // including the rule that decides when a previous one still applies — are resolved in
+            // ONE place, shared with the Stage 6-9 shading workflows so a calculation paid for by
+            // either is available to the other.
+            ApertureSolarContext context = Create.ApertureSolarContext(analyticalModel, analysisPeriod.Year, weatherData, apertureGuids, gridSize, sunAngleStep, recalculate, timeShiftInMinutes, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance);
+            if (context == null)
             {
                 return null;
             }
 
-            // Re-root the period to the weather year when they differ (HOY structure preserved).
-            int year = analysisPeriod.Year;
-            WeatherYear weatherYear = weatherData[year];
-            if (weatherYear == null)
-            {
-                weatherYear = weatherData.WeatherYears?.Find(x => x != null);
-                if (weatherYear == null)
-                {
-                    return null;
-                }
+            weatherData = context.WeatherData;
+            reusedPreviousCalculation = context.ReusedPreviousCalculation;
 
-                year = weatherYear.Year;
-                analysisPeriod = ReRoot(analysisPeriod, year);
+            // Re-root the period to the resolved weather year when they differ (HOY structure preserved).
+            if (analysisPeriod.Year != context.Year)
+            {
+                analysisPeriod = ReRoot(analysisPeriod, context.Year);
                 if (analysisPeriod == null)
                 {
                     return null;
                 }
             }
 
-            List<ApertureSolarTarget> targets = analyticalModel.ApertureSolarTargets(apertureGuids, gridSize, tolerance_Area, tolerance_Distance);
-            if (targets == null || targets.Count == 0)
-            {
-                return null;
-            }
+            List<ApertureSolarTarget> targets = context.Targets;
+            List<AnalysisCell> cells = context.Cells;
 
-            List<LinkedFace3D> occluders = Convert.ToSAM_OccluderLinkedFace3Ds(analyticalModel);
-            if (occluders == null)
-            {
-                occluders = new List<LinkedFace3D>();
-            }
-
-            // Flatten the targets into the cache cell space.
-            List<AnalysisCell> cells = new List<AnalysisCell>();
-            List<Vector3D> cellNormals = new List<Vector3D>();
-            foreach (ApertureSolarTarget target in targets)
-            {
-                List<AnalysisCell> targetCells = target.AnalysisCells;
-                Vector3D outward = target.OutwardNormal;
-                foreach (AnalysisCell cell in targetCells)
-                {
-                    cells.Add(cell);
-                    cellNormals.Add(outward);
-                }
-            }
-
-            if (cells.Count == 0)
-            {
-                return null;
-            }
-
-            Core.Location location = weatherData.Location ?? analyticalModel.Location;
-            if (location == null)
-            {
-                return null;
-            }
-
-            double timeZoneOffset = Geometry.SolarCalculator.Query.TimeZoneOffset(location);
-            if (double.IsNaN(timeZoneOffset))
-            {
-                // Unresolved/unsupported timezone (e.g. a mapping missing from SAM.Core.UTC) must not
-                // silently become Greenwich: the sun position would be wrong by up to the full offset
-                // while every timeline-conservation diagnostic still passes, since the cache stays
-                // internally consistent with the (wrong) sun path it was built from.
-                return null;
-            }
-
-            string contextGeometryHash = Geometry.SolarCalculator.Query.GeometryHash(occluders, tolerance_Distance);
-            string targetGeometryHash = Geometry.SolarCalculator.Query.TargetHash(cells, tolerance_Distance);
-
-            // Reuse the caches on the attached SolarModel only when every identity input matches.
-            SolarModel solarModel = analyticalModel.GetValue<SolarModel>(AnalyticalModelParameter.SolarModel);
-            SolarVisibilityCache solarVisibilityCache = recalculate ? null : solarModel?.GetValue<SolarVisibilityCache>(SolarModelParameter.SolarVisibilityCache);
-            SkyVisibilityCache skyVisibilityCache = recalculate ? null : solarModel?.GetValue<SkyVisibilityCache>(SolarModelParameter.SkyVisibilityCache);
-
-            if (solarVisibilityCache != null && !solarVisibilityCache.Matches(contextGeometryHash, targetGeometryHash, gridSize, sunAngleStep, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, location.Latitude, location.Longitude, timeZoneOffset, timeShiftInMinutes, year, cells.Count))
-            {
-                solarVisibilityCache = null;
-            }
-
-            if (skyVisibilityCache != null && !skyVisibilityCache.Matches(contextGeometryHash, targetGeometryHash, gridSize, SkyPatchSubdivision.Tregenza145, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, cells.Count))
-            {
-                skyVisibilityCache = null;
-            }
-
-            if (solarVisibilityCache == null || skyVisibilityCache == null)
-            {
-                solarVisibilityCache = Weather.SolarCalculator.Create.SolarVisibilityCache(location, year, sunAngleStep, occluders, cells, gridSize, minHorizonAngle, timeShiftInMinutes, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance);
-                skyVisibilityCache = Weather.SolarCalculator.Create.SkyVisibilityCache(occluders, cells, gridSize, SkyPatchSubdivision.Tregenza145, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance);
-                if (solarVisibilityCache == null || skyVisibilityCache == null)
-                {
-                    return null;
-                }
-
-                if (solarModel == null)
-                {
-                    solarModel = new SolarModel(location);
-                    foreach (LinkedFace3D occluder in occluders)
-                    {
-                        solarModel.Add(occluder);
-                    }
-
-                    analyticalModel.SetValue(AnalyticalModelParameter.SolarModel, solarModel);
-                }
-
-                solarModel.SetValue(SolarModelParameter.SolarVisibilityCache, solarVisibilityCache);
-                solarModel.SetValue(SolarModelParameter.SkyVisibilityCache, skyVisibilityCache);
-            }
-            else
-            {
-                reusedPreviousCalculation = true;
-            }
-
-            CachedIrradianceResult cachedIrradianceResult = Query.CachedIrradiance(solarVisibilityCache, skyVisibilityCache, weatherData, analysisPeriod, cellNormals, skyModel, albedo);
+            CachedIrradianceResult cachedIrradianceResult = Query.CachedIrradiance(context.SolarVisibilityCache, context.SkyVisibilityCache, weatherData, analysisPeriod, context.CellNormals, skyModel, albedo);
             if (cachedIrradianceResult == null)
             {
                 return null;
