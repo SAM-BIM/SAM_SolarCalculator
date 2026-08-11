@@ -397,8 +397,14 @@ namespace SAM.SolarCalculator.Tests
             Assert.StartsWith("180°", summary);
             Assert.Contains("unwanted blocked", summary);
             Assert.Contains("wanted retained", summary);
-            Assert.Contains("kWh benefit", summary);
             Assert.DoesNotContain("NaN", summary);
+
+            // The energies are named for the physical quantity, not for their role in the objective.
+            // "46 kWh benefit" was read during manual testing as a saving; it is the unwanted beam
+            // this device intercepts, which is a narrower claim and the only one measured.
+            Assert.Contains("kWh unwanted solar intercepted", summary);
+            Assert.Contains("kWh wanted solar blocked", summary);
+            Assert.DoesNotContain("benefit", summary);
 
             // Depths read in metres, not as bare numbers.
             if (!result.RecommendsNoShading)

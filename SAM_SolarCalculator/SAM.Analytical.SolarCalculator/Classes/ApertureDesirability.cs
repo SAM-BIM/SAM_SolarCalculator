@@ -30,7 +30,7 @@ namespace SAM.Analytical.SolarCalculator
     /// </summary>
     public class ApertureDesirability : IJSAMObject, ISolarObject
     {
-        public const int CurrentSchemaVersion = 1;
+        public const int CurrentSchemaVersion = 2;
 
         private int schemaVersion = CurrentSchemaVersion;
         private Guid apertureGuid;
@@ -42,9 +42,11 @@ namespace SAM.Analytical.SolarCalculator
         private double[] wantedEnergy;
         private int evaluatedHours;
         private int missingWeatherHours;
+        private double maximumWeightMagnitude = double.NaN;
 
-        public ApertureDesirability(Guid apertureGuid, string desirabilityStrategyName, int year, double timeShiftInMinutes, double[] directEnergy, double[] unwantedEnergy, double[] wantedEnergy, int evaluatedHours, int missingWeatherHours)
+        public ApertureDesirability(Guid apertureGuid, string desirabilityStrategyName, int year, double timeShiftInMinutes, double[] directEnergy, double[] unwantedEnergy, double[] wantedEnergy, int evaluatedHours, int missingWeatherHours, double maximumWeightMagnitude = double.NaN)
         {
+            this.maximumWeightMagnitude = maximumWeightMagnitude;
             this.apertureGuid = apertureGuid;
             this.desirabilityStrategyName = desirabilityStrategyName;
             this.year = year;
@@ -70,6 +72,7 @@ namespace SAM.Analytical.SolarCalculator
                 wantedEnergy = apertureDesirability.wantedEnergy == null ? null : (double[])apertureDesirability.wantedEnergy.Clone();
                 evaluatedHours = apertureDesirability.evaluatedHours;
                 missingWeatherHours = apertureDesirability.missingWeatherHours;
+                maximumWeightMagnitude = apertureDesirability.maximumWeightMagnitude;
             }
         }
 
@@ -211,6 +214,63 @@ namespace SAM.Analytical.SolarCalculator
             }
         }
 
+        /// <summary>
+        /// Year total direct energy the brief claimed NEITHER way, kWh/m2: Direct - Unwanted -
+        /// Wanted. The residual an engineer needs to reconcile a baseline against its two named
+        /// parts.
+        ///
+        /// Under the default seasonal brief this is real, physical energy: the spring and autumn
+        /// beam that is in neither the unwanted nor the wanted period. A north window admitting
+        /// 61.3 kWh of which 46.0 kWh is unwanted and none is wanted has 15.3 kWh here, and that is
+        /// the whole of the apparent discrepancy.
+        ///
+        /// GENERAL CASE. Unwanted and Wanted are WEIGHTED energies (sum of |w| x energy over the
+        /// hours of each sign), not slices of a partition. The residual is therefore a physical
+        /// energy, and non-negative, exactly when every weight the strategy applied lay within
+        /// [-1, 1] — see <see cref="WeightsWithinUnitMagnitude"/>, which is MEASURED from the
+        /// weights actually applied rather than declared by the strategy. A strategy that returns
+        /// weights beyond unit magnitude is over-claiming the beam relative to its physical size,
+        /// and this residual then turns negative: that is a true statement about the brief, not an
+        /// error, and it is reported rather than clamped.
+        /// </summary>
+        public double TotalNeutralEnergy
+        {
+            get
+            {
+                return TotalDirectEnergy - TotalUnwantedEnergy - TotalWantedEnergy;
+            }
+        }
+
+        /// <summary>
+        /// The largest |weight| the strategy actually applied to an energy-carrying hour, or NaN
+        /// when it was not recorded (a pre-schema-2 object) or nothing was evaluated.
+        /// </summary>
+        public double MaximumWeightMagnitude
+        {
+            get
+            {
+                return maximumWeightMagnitude;
+            }
+        }
+
+        /// <summary>
+        /// True when every applied weight lay within [-1, 1], so unwanted + wanted + neutral is a
+        /// genuine partition of the admitted direct beam. False when a weight exceeded unit
+        /// magnitude. NULL when it was not recorded and therefore cannot be claimed either way.
+        /// </summary>
+        public bool? WeightsWithinUnitMagnitude
+        {
+            get
+            {
+                if (double.IsNaN(maximumWeightMagnitude))
+                {
+                    return null;
+                }
+
+                return maximumWeightMagnitude <= 1.0 + 1e-9;
+            }
+        }
+
         /// <summary>Hours that contributed (valid weather, sun above the horizon gate).</summary>
         public int EvaluatedHours
         {
@@ -275,6 +335,12 @@ namespace SAM.Analytical.SolarCalculator
                 missingWeatherHours = jObject["MissingWeatherHours"]?.GetValue<int>() ?? default;
             }
 
+            // Absent in schema 1. NaN is the honest reading — "not recorded" — and is what makes
+            // WeightsWithinUnitMagnitude return null instead of asserting a partition it cannot know.
+            maximumWeightMagnitude = jObject.ContainsKey("MaximumWeightMagnitude")
+                ? (jObject["MaximumWeightMagnitude"]?.GetValue<double>() ?? double.NaN)
+                : double.NaN;
+
             return true;
         }
 
@@ -300,6 +366,7 @@ namespace SAM.Analytical.SolarCalculator
 
             jObject.Add("EvaluatedHours", evaluatedHours);
             jObject.Add("MissingWeatherHours", missingWeatherHours);
+            jObject.Add("MaximumWeightMagnitude", maximumWeightMagnitude);
 
             return jObject;
         }

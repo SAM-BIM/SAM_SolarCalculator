@@ -70,6 +70,12 @@ namespace SAM.Analytical.SolarCalculator
             int evaluatedHours = 0;
             int missingWeatherHours = 0;
 
+            // The largest |weight| actually applied to an energy-carrying hour. Recorded rather than
+            // asked of the strategy: whether unwanted + wanted + neutral partitions the admitted
+            // beam is a property of the weights that were USED, and a strategy that declared itself
+            // bounded and was not would produce an accounting identity that silently does not hold.
+            double maximumWeightMagnitude = double.NaN;
+
             int year = solarVisibilityCache.Year;
             double timeShiftInMinutes = solarVisibilityCache.SunPositionShiftInMinutes;
             DateTime yearStart = new DateTime(year, 1, 1);
@@ -149,11 +155,17 @@ namespace SAM.Analytical.SolarCalculator
                         wanted[g] += -weight * energy;
                     }
 
+                    double magnitude = Math.Abs(weight);
+                    if (double.IsNaN(maximumWeightMagnitude) || magnitude > maximumWeightMagnitude)
+                    {
+                        maximumWeightMagnitude = magnitude;
+                    }
+
                     evaluatedHours++;
                 }
             }
 
-            return new ApertureDesirability(target.ApertureGuid, Core.Query.FullTypeName(desirabilityStrategy), year, timeShiftInMinutes, direct, unwanted, wanted, evaluatedHours, missingWeatherHours);
+            return new ApertureDesirability(target.ApertureGuid, Core.Query.FullTypeName(desirabilityStrategy), year, timeShiftInMinutes, direct, unwanted, wanted, evaluatedHours, missingWeatherHours, maximumWeightMagnitude);
         }
     }
 }

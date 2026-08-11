@@ -106,6 +106,44 @@ namespace SAM.Analytical.SolarCalculator
         /// </summary>
         public double UnattributedInterceptedEnergy { get { return unattributedInterceptedEnergy; } }
 
+        /// <summary>
+        /// Admitted direct beam the brief claimed NEITHER way, kWh: AdmittedDirect - AdmittedUnwanted
+        /// - AdmittedWanted.
+        ///
+        /// This is the number that makes the headline figures reconcile, and its absence is the
+        /// single most confusing thing on the canvas. A north window admitting 61.3 kWh of which
+        /// 46.0 kWh is unwanted and 0.0 kWh wanted looks like 15.3 kWh has gone missing; it has not.
+        /// Under the default seasonal brief — summer unwanted, winter wanted — the spring and autumn
+        /// beam belongs to neither period, and this is it.
+        ///
+        ///   AdmittedDirectEnergy = AdmittedUnwantedEnergy + AdmittedWantedEnergy + AdmittedNeutralEnergy
+        ///
+        /// GENERAL CASE, and why this is a subtraction rather than a fourth accumulator. The unwanted
+        /// and wanted energies are DESIRABILITY-WEIGHTED sums (|w| x energy over the hours of each
+        /// sign), not slices of a partition. Written as a residual, the identity above holds by
+        /// construction for every strategy, including continuous and custom ones; what varies is
+        /// whether the residual is a physical energy. It is — and is non-negative — exactly when
+        /// every applied weight lay within [-1, 1], which
+        /// <see cref="ApertureDesirability.WeightsWithinUnitMagnitude"/> reports from the weights
+        /// actually used. Beyond unit magnitude the brief claims more beam than physically arrives
+        /// and this residual goes negative; that is a true statement about the weighting and is
+        /// surfaced rather than clamped to zero.
+        /// </summary>
+        public double AdmittedNeutralEnergy { get { return admittedDirectEnergy - admittedUnwantedEnergy - admittedWantedEnergy; } }
+
+        /// <summary>
+        /// The neutral part of what the device stopped, kWh: DirectSolarIntercepted -
+        /// UnwantedSolarIntercepted - WantedSolarBlocked. The interception-side counterpart of
+        /// <see cref="AdmittedNeutralEnergy"/>, with the same general treatment:
+        ///
+        ///   DirectSolarIntercepted = UnwantedSolarIntercepted + WantedSolarBlocked + NeutralSolarIntercepted
+        ///
+        /// It is neither a benefit nor a harm under the brief as stated, which is precisely why it
+        /// does not appear in the objective — and precisely why it has to appear in the reporting,
+        /// or the two energies the engineer can see do not add up to the one they started from.
+        /// </summary>
+        public double NeutralSolarIntercepted { get { return directSolarIntercepted - unwantedSolarIntercepted - wantedSolarBlocked; } }
+
         /// <summary>Device area as a fraction of the aperture's gross area.</summary>
         public double MaterialFraction { get { return materialFraction; } }
 

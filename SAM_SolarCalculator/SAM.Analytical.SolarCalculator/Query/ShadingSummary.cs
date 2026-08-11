@@ -123,8 +123,12 @@ namespace SAM.Analytical.SolarCalculator
 
             AppendPercentage(stringBuilder, optimisedShadingResult.UnwantedSolarBlocked, "unwanted blocked");
             AppendPercentage(stringBuilder, optimisedShadingResult.WantedSolarRetained, "wanted retained");
-            AppendEnergy(stringBuilder, optimisedShadingResult.Benefit, "benefit");
-            AppendEnergy(stringBuilder, optimisedShadingResult.Harm, "wanted solar lost");
+
+            // Named for the physical quantity, not for its role in the objective. "46 kWh benefit"
+            // reads as a saving; it is the unwanted beam this device intercepts, which is a
+            // different claim and the only one the measurement supports.
+            AppendEnergy(stringBuilder, optimisedShadingResult.UnwantedSolarIntercepted, "unwanted solar intercepted");
+            AppendEnergy(stringBuilder, optimisedShadingResult.WantedSolarBlocked, "wanted solar blocked");
 
             return stringBuilder.ToString();
         }
@@ -158,6 +162,40 @@ namespace SAM.Analytical.SolarCalculator
             {
                 stringBuilder.AppendFormat(CultureInfo.InvariantCulture, " | {0:0.#} kWh UNATTRIBUTED", shadingPerformance.UnattributedInterceptedEnergy);
             }
+
+            return stringBuilder.ToString();
+        }
+
+        /// <summary>
+        /// The interception split, so the headline energies add up on the canvas instead of looking
+        /// as though some has gone missing:
+        ///
+        ///   61.3 kWh intercepted = 46 unwanted + 0 wanted + 15.3 neither
+        ///
+        /// The third term is the beam the brief claimed neither way — under the default seasonal
+        /// brief, spring and autumn. It is reported unconditionally, including when it is zero,
+        /// because a residual that only appears when it is awkward teaches the reader nothing.
+        /// See <see cref="ShadingPerformance.AdmittedNeutralEnergy"/> for the general treatment.
+        /// </summary>
+        /// <param name="shadingPerformance">The verified performance.</param>
+        public static string AccountingSummary(this ShadingPerformance shadingPerformance)
+        {
+            if (shadingPerformance == null)
+            {
+                return "Not verified.";
+            }
+
+            StringBuilder stringBuilder = new StringBuilder();
+            stringBuilder.AppendFormat(CultureInfo.InvariantCulture,
+                "Admitted without the device: {0:0.#} kWh = {1:0.#} unwanted + {2:0.#} wanted + {3:0.#} neither",
+                shadingPerformance.AdmittedDirectEnergy, shadingPerformance.AdmittedUnwantedEnergy,
+                shadingPerformance.AdmittedWantedEnergy, shadingPerformance.AdmittedNeutralEnergy);
+
+            stringBuilder.AppendLine();
+            stringBuilder.AppendFormat(CultureInfo.InvariantCulture,
+                "Intercepted by the device:   {0:0.#} kWh = {1:0.#} unwanted + {2:0.#} wanted + {3:0.#} neither",
+                shadingPerformance.DirectSolarIntercepted, shadingPerformance.UnwantedSolarIntercepted,
+                shadingPerformance.WantedSolarBlocked, shadingPerformance.NeutralSolarIntercepted);
 
             return stringBuilder.ToString();
         }

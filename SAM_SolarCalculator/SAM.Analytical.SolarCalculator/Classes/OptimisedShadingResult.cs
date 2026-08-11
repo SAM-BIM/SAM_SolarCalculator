@@ -212,6 +212,19 @@ namespace SAM.Analytical.SolarCalculator
 
         public double WantedSolarBlocked { get { return wantedSolarBlocked; } }
 
+        /// <summary>
+        /// Admitted direct beam the brief claimed neither way, kWh. See
+        /// <see cref="ShadingPerformance.AdmittedNeutralEnergy"/> for the accounting identity and
+        /// its general treatment.
+        /// </summary>
+        public double AdmittedNeutralEnergy { get { return admittedDirectEnergy - admittedUnwantedEnergy - admittedWantedEnergy; } }
+
+        /// <summary>
+        /// Neutral part of what the winning device stopped, kWh. See
+        /// <see cref="ShadingPerformance.NeutralSolarIntercepted"/>.
+        /// </summary>
+        public double NeutralSolarIntercepted { get { return directSolarIntercepted - unwantedSolarIntercepted - wantedSolarBlocked; } }
+
         /// <summary>First-hit residual. Non-zero means attribution and the baseline disagree.</summary>
         public double UnattributedInterceptedEnergy { get { return unattributedInterceptedEnergy; } }
 
