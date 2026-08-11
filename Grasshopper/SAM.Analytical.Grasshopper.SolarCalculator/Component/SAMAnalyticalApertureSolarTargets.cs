@@ -5,6 +5,7 @@ using Grasshopper.Kernel;
 using Grasshopper.Kernel.Types;
 using SAM.Analytical.Grasshopper.SolarCalculator.Properties;
 using SAM.Analytical.SolarCalculator;
+using SolarQuery = SAM.Analytical.SolarCalculator.Query;
 using SAM.Core.Grasshopper;
 using System;
 using System.Collections.Generic;
@@ -53,7 +54,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 global::Grasshopper.Kernel.Parameters.Param_GenericObject apertures = new global::Grasshopper.Kernel.Parameters.Param_GenericObject() { Name = "_apertures_", NickName = "_apertures_", Description = "Apertures to analyse, as SAM Apertures or Guids.\nEmpty = every external sun-exposed aperture in the model", Access = GH_ParamAccess.list, Optional = true };
                 result.Add(new GH_SAMParam(apertures, ParamVisibility.Binding));
 
-                global::Grasshopper.Kernel.Parameters.Param_Number gridSize = new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "_gridSize_", NickName = "_gridSize_", Description = "Spacing of the analysis sample points across each opening [m].\nDefault 0.5 m", Access = GH_ParamAccess.item };
+                global::Grasshopper.Kernel.Parameters.Param_Number gridSize = new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "_gridSize_", NickName = "_gridSize_", Description = "SPACING between the analysis sample points across each opening [m].\n\nALLOWED: greater than zero, and not finer than about 0.032 m - below that a sample cell is smaller than the geometry area tolerance and NO samples can be produced at all.\nHalving it roughly quadruples the sample count and the runtime.\nDefault 0.5 m", Access = GH_ParamAccess.item };
                 gridSize.SetPersistentData(0.5);
                 result.Add(new GH_SAMParam(gridSize, ParamVisibility.Binding));
 
@@ -142,9 +143,11 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 }
             }
 
-            if (double.IsNaN(gridSize) || gridSize <= 0)
+            // Zero, negative, NaN — and the case that used to fail silently: a grid so fine that
+            // every sample cell falls below the geometry area tolerance and NOTHING can be built.
+            if (SolarQuery.GridSizeValidity(gridSize, out string gridSizeMessage) != GridSizeValidity.Valid)
             {
-                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "_gridSize_ must be greater than zero. It is the spacing of the analysis sample points, in metres.");
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, gridSizeMessage);
                 return;
             }
 
@@ -163,12 +166,16 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 }
             }
 
-            List<ApertureSolarTarget> targets = analyticalModel.ApertureSolarTargets(apertureGuids.Count == 0 ? null : apertureGuids, gridSize);
+            List<ApertureSolarTarget> targets = analyticalModel.ApertureSolarTargets(
+                apertureGuids.Count == 0 ? null : apertureGuids, gridSize, out string targetsMessage);
+
             if (targets == null || targets.Count == 0)
             {
-                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, apertureGuids.Count == 0
+                // The builder knows WHICH of the several ways to get nothing actually happened, so
+                // its own sentence is used rather than a guess assembled from the inputs here.
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, targetsMessage ?? (apertureGuids.Count == 0
                     ? "No valid external sun-exposed apertures were found in this model."
-                    : "None of the requested apertures could be analysed. Apertures in internal walls are excluded, and an opening smaller than one grid cell produces no target.");
+                    : "None of the requested apertures could be analysed. Apertures in internal walls are excluded."));
                 return;
             }
 
@@ -187,6 +194,32 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 {
                     AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, string.Format("{0} requested aperture(s) produced no target and were excluded: an aperture in an internal wall, or one too small for a single sample point at this grid size. First: {1}.", missing.Count, missing[0]));
                 }
+            }
+
+            // The sample lattice starts at the opening's bounding-box corner, so a grid that does
+            // not divide the opening leaves an edge strip. Usually that strip is just another cell;
+            // when it is too thin to clear the geometry area tolerance it is discarded, and the
+            // opening is then sampled slightly smaller than it is. Percentages are unaffected —
+            // they are ratios over the same samples — but absolute kWh scale with the sampled area,
+            // so an invisible few per cent would be a quiet bias on every energy this node feeds.
+            double worstCoverage = 1.0;
+            ApertureSolarTarget worstTarget = null;
+            foreach (ApertureSolarTarget target in targets)
+            {
+                double coverage = target.SampledAreaFraction;
+                if (!double.IsNaN(coverage) && coverage < worstCoverage)
+                {
+                    worstCoverage = coverage;
+                    worstTarget = target;
+                }
+            }
+
+            if (worstTarget != null && worstCoverage < 0.999)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, string.Format(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    "A grid size of {0:0.####} m does not divide one or more openings, and the leftover edge strip is too thin to be sampled: the worst-covered opening is analysed over {1:0.#}% of its area ({2:0.###} m² of {3:0.###} m²). Percentages are unaffected, but absolute energies for that opening will read about {4:0.#}% low. Choose a grid size that divides the opening — or a slightly coarser one — to remove this.",
+                    gridSize, 100.0 * worstCoverage, worstTarget.SampledArea, worstTarget.GrossArea, 100.0 * (1.0 - worstCoverage)));
             }
 
             index = Params.IndexOfOutputParam("apertureSolarTargets");

@@ -170,6 +170,65 @@ namespace SAM.Analytical.SolarCalculator
             }
         }
 
+        /// <summary>
+        /// The area the analysis samples actually cover, m2 — the sum of the cell areas.
+        ///
+        /// Normally this equals <see cref="GrossArea"/>: the cells are a clipped partition of the
+        /// opening. It can be slightly LESS when the grid does not divide the opening and the
+        /// leftover edge strip is too thin to clear the geometry area tolerance, in which case that
+        /// strip is discarded like any other degenerate sliver. See
+        /// <see cref="SampledAreaFraction"/> for why that is worth being able to see.
+        /// </summary>
+        public double SampledArea
+        {
+            get
+            {
+                if (analysisCells == null)
+                {
+                    return double.NaN;
+                }
+
+                double result = 0;
+                foreach (AnalysisCell analysisCell in analysisCells)
+                {
+                    double area = analysisCell?.Area ?? 0;
+                    if (!double.IsNaN(area))
+                    {
+                        result += area;
+                    }
+                }
+
+                return result;
+            }
+        }
+
+        /// <summary>
+        /// SampledArea / GrossArea — 1.0 when the samples cover the whole opening.
+        ///
+        /// WHY THIS IS EXPOSED. Every ABSOLUTE energy this library reports is a sum of
+        /// (cell area x energy density), so it scales with the sampled area. When an edge strip is
+        /// dropped, absolute energies are under-reported in exactly this proportion — measured at up
+        /// to 4 % on a 1 m opening at grid sizes near the tolerance limit. That is counter-intuitive
+        /// (a FINER grid can under-report more, because the leftover strip gets thinner relative to
+        /// the tolerance) and it was invisible before Stage 11.
+        ///
+        /// PERCENTAGES ARE NOT AFFECTED. Unwanted-solar-blocked, wanted-solar-retained and shading
+        /// efficiency are all ratios over the same cell set, so the sampled area cancels. It is only
+        /// absolute kWh that moves.
+        ///
+        /// The cure is free: choose a grid size that divides the opening, which every recommended
+        /// setting does on ordinary geometry. This value is here so the exception is visible rather
+        /// than discovered on a project.
+        /// </summary>
+        public double SampledAreaFraction
+        {
+            get
+            {
+                double gross = grossArea;
+                return double.IsNaN(gross) || gross <= 0 ? double.NaN : SampledArea / gross;
+            }
+        }
+
         public bool FromJsonObject(JsonObject jObject)
         {
             if (jObject == null)

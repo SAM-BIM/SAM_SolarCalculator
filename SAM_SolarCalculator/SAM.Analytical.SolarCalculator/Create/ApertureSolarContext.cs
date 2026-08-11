@@ -191,5 +191,66 @@ namespace SAM.Analytical.SolarCalculator
 
             return ApertureSolarContext(analyticalModel, year, weatherData, apertureGuids, gridSize, sunAngleStep, recalculate, timeShiftInMinutes, minHorizonAngle, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance);
         }
+
+        /// <summary>
+        /// Why a solar context could not be built, or null when one could.
+        ///
+        /// Stage 11 added this because "the context is null" was the end of the story for every
+        /// cause, and the causes are not alike: a grid size finer than the geometry tolerance can
+        /// represent is a typo in one input, an opening below the area tolerance is a modelling
+        /// problem, and a missing timezone is a site problem. Kept as a separate diagnostic pass
+        /// rather than threaded through the build so the hot path is untouched — it runs only once
+        /// something has already failed, where an extra pass over the apertures costs nothing.
+        /// </summary>
+        /// <param name="analyticalModel">The model that was asked for.</param>
+        /// <param name="apertureGuids">The aperture selection that was asked for. Null = the default set.</param>
+        /// <param name="gridSize">The grid size that was asked for, m.</param>
+        /// <param name="weatherData">Weather, if one was supplied.</param>
+        /// <param name="tolerance_Area">Area tolerance the cells would be built to, m2.</param>
+        public static string ApertureSolarContextFailureReason(this AnalyticalModel analyticalModel, IEnumerable<Guid> apertureGuids, double gridSize, WeatherData weatherData = null, double tolerance_Area = Core.Tolerance.MacroDistance)
+        {
+            if (analyticalModel == null)
+            {
+                return "No model was supplied.";
+            }
+
+            // The grid size first: it is the only cause that is a property of the request alone,
+            // and if it is the cause then nothing about the model is worth reporting.
+            if (Query.GridSizeValidity(gridSize, out string gridSizeMessage, tolerance_Area) != GridSizeValidity.Valid)
+            {
+                return gridSizeMessage;
+            }
+
+            if (weatherData == null)
+            {
+                weatherData = analyticalModel.GetValue<WeatherData>(AnalyticalModelParameter.WeatherData);
+            }
+
+            if (weatherData == null)
+            {
+                return "No weather data. Supply WeatherData, or attach it to the AnalyticalModel.";
+            }
+
+            ApertureSolarTargets(analyticalModel, apertureGuids, gridSize, out string targetsMessage, tolerance_Area);
+            if (targetsMessage != null)
+            {
+                return targetsMessage;
+            }
+
+            Core.Location location = weatherData.Location ?? analyticalModel.Location;
+            if (location == null)
+            {
+                return "The site location is missing, so the sun position cannot be found. Set the location on the model or on the weather data.";
+            }
+
+            if (double.IsNaN(Geometry.SolarCalculator.Query.TimeZoneOffset(location)))
+            {
+                return string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "The site location (latitude {0:0.###}, longitude {1:0.###}) does not resolve to a time zone, so the sun cannot be placed on the weather timeline.",
+                    location.Latitude, location.Longitude);
+            }
+
+            return null;
+        }
     }
 }

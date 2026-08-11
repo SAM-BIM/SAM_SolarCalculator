@@ -340,9 +340,17 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             double gridSize = Number(dataAccess, "_gridSize_", 0.5);
             double sunAngleStep = Number(dataAccess, "_sunAngleStep_", 2.0);
 
-            if (gridSize <= 0 || sunAngleStep <= 0)
+            // Zero, negative, NaN — and the case that used to fail silently: a grid so fine that
+            // every sample cell falls below the geometry area tolerance and NOTHING can be built.
+            if (SolarQuery.GridSizeValidity(gridSize, out string gridSizeMessage) != GridSizeValidity.Valid)
             {
-                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "_gridSize_ [m] and _sunAngleStep_ [°] must both be greater than zero.");
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, gridSizeMessage);
+                return;
+            }
+
+            if (sunAngleStep <= 0 || double.IsNaN(sunAngleStep))
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "_sunAngleStep_ [°] must be greater than zero. It is how finely similar sun positions are grouped; the default is 2°.");
                 return;
             }
 
@@ -413,12 +421,15 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             int year = unwantedPeriod?.Year ?? wantedPeriod?.Year ?? SAMAnalyticalApertureIrradiance.DefaultYear(analyticalModel, weatherData);
 
             ApertureShadingSetup setup = SolarCreate.ApertureShadingSetup(
-                analyticalModel, inputTarget.ApertureGuid, year, weatherData, desirabilityStrategy,
+                analyticalModel, inputTarget.ApertureGuid, year, out string setupMessage, weatherData, desirabilityStrategy,
                 unwantedPeriod, wantedPeriod, null, gridSize, sunAngleStep, recalculate);
 
             if (setup == null)
             {
-                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "This aperture could not be prepared for shading analysis. Check that it is an external sun-exposed aperture of THIS model, that _gridSize_ matches the one used for the targets, and that the site location resolves to a time zone.");
+                // The builder says WHICH cause it was - an unusable grid size, an opening below the
+                // area tolerance, an aperture that is not this model's, a site with no time zone -
+                // because they are fixed in completely different places.
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, setupMessage ?? "This aperture could not be prepared for shading analysis.");
                 return;
             }
 

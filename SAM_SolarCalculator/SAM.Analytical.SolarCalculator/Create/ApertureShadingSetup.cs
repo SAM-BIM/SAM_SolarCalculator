@@ -118,15 +118,36 @@ namespace SAM.Analytical.SolarCalculator
         /// <param name="sunTimeConvention">Timestamp convention of the weather timeline.</param>
         public static ApertureShadingSetup ApertureShadingSetup(this AnalyticalModel analyticalModel, Guid apertureGuid, int year, WeatherData weatherData = null, IDesirabilityStrategy desirabilityStrategy = null, AnalysisPeriod unwantedPeriod = null, AnalysisPeriod wantedPeriod = null, IEnumerable<Guid> apertureGuids = null, double gridSize = 0.5, double sunAngleStep = 2.0, bool recalculate = false, SunTimeConvention sunTimeConvention = SunTimeConvention.IntervalStart)
         {
+            return ApertureShadingSetup(analyticalModel, apertureGuid, year, out string _, weatherData, desirabilityStrategy, unwantedPeriod, wantedPeriod, apertureGuids, gridSize, sunAngleStep, recalculate, sunTimeConvention);
+        }
+
+        /// <summary>
+        /// The same, reporting WHY the setup could not be built.
+        ///
+        /// See <see cref="ApertureSolarContextFailureReason"/> for why a bare null was not good
+        /// enough: the causes range from a mistyped grid size to an unresolvable site, and they are
+        /// fixed in completely different places.
+        /// </summary>
+        /// <param name="message">Null on success; an actionable sentence otherwise.</param>
+        public static ApertureShadingSetup ApertureShadingSetup(this AnalyticalModel analyticalModel, Guid apertureGuid, int year, out string message, WeatherData weatherData = null, IDesirabilityStrategy desirabilityStrategy = null, AnalysisPeriod unwantedPeriod = null, AnalysisPeriod wantedPeriod = null, IEnumerable<Guid> apertureGuids = null, double gridSize = 0.5, double sunAngleStep = 2.0, bool recalculate = false, SunTimeConvention sunTimeConvention = SunTimeConvention.IntervalStart)
+        {
+            message = null;
+
             ApertureSolarContext context = ApertureSolarContext(analyticalModel, year, weatherData, apertureGuids, gridSize, sunAngleStep, recalculate, sunTimeConvention);
             if (context == null)
             {
+                message = ApertureSolarContextFailureReason(analyticalModel, apertureGuids, gridSize, weatherData)
+                    ?? "The solar calculation could not be set up for this model.";
                 return null;
             }
 
             ApertureSolarTarget target = context.Target(apertureGuid);
             if (target == null)
             {
+                message = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "Aperture {0} is not one of the {1} analysable apertures of this model. Only apertures on sun-exposed external panels are analysed; an aperture on a panel shared by two spaces is internal and is never a target. Check that the target came from THIS model and that the grid size ({2:0.####} m) is the one the targets were built with.",
+                    apertureGuid, context.TargetCount, gridSize);
+
                 return null;
             }
 
@@ -141,6 +162,7 @@ namespace SAM.Analytical.SolarCalculator
             ApertureDesirability desirability = ApertureDesirability(target, context.SolarVisibilityCache, strategy, context.WeatherData);
             if (desirability == null)
             {
+                message = "The desirability weighting could not be built for this aperture: the weather, the sun groups and the aperture's outward normal do not describe a usable calculation.";
                 return null;
             }
 

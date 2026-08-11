@@ -52,7 +52,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_GenericObject() { Name = "_analysisPeriod_", NickName = "_analysisPeriod_", Description = "Hours to calculate, from SAMAnalytical.AnalysisPeriod.\nEmpty = full year", Access = GH_ParamAccess.item, Optional = true }, ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_GenericObject() { Name = "_HOYs_", NickName = "_HOYs_", Description = "Explicit hours of the year. These override _analysisPeriod_", Access = GH_ParamAccess.list, Optional = true }, ParamVisibility.Voluntary));
 
-                global::Grasshopper.Kernel.Parameters.Param_Number gridSize = new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "_gridSize_", NickName = "_gridSize_", Description = "Spacing of the analysis sample points across each opening [m].\nDefault 0.5 m", Access = GH_ParamAccess.item };
+                global::Grasshopper.Kernel.Parameters.Param_Number gridSize = new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "_gridSize_", NickName = "_gridSize_", Description = "SPACING between the analysis sample points across each opening [m].\n\nALLOWED: greater than zero, and not finer than about 0.032 m - below that a sample cell is smaller than the geometry area tolerance and NO samples can be produced at all.\nHalving it roughly quadruples the sample count and the runtime.\nDefault 0.5 m", Access = GH_ParamAccess.item };
                 gridSize.SetPersistentData(0.5);
                 result.Add(new GH_SAMParam(gridSize, ParamVisibility.Binding));
 
@@ -203,9 +203,11 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             }
 
             double gridSize = Number(dataAccess, "_gridSize_", 0.5);
-            if (double.IsNaN(gridSize) || gridSize <= 0)
+            // Zero, negative, NaN — and the case that used to fail silently: a grid so fine that
+            // every sample cell falls below the geometry area tolerance and NOTHING can be built.
+            if (SAM.Analytical.SolarCalculator.Query.GridSizeValidity(gridSize, out string gridSizeMessage) != GridSizeValidity.Valid)
             {
-                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "_gridSize_ must be greater than zero. It is the spacing of the analysis sample points, in metres.");
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, gridSizeMessage);
                 return;
             }
 
