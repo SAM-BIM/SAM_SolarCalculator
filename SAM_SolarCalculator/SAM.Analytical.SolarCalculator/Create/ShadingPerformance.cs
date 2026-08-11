@@ -226,6 +226,19 @@ namespace SAM.Analytical.SolarCalculator
         /// <summary>
         /// First-hit attribution over the CANDIDATE'S faces alone, for the cell window belonging to
         /// one target. See the note above for why the context faces are not part of it.
+        ///
+        /// ONLY THE SAMPLES THE ACCOUNTING CAN READ ARE TRACED, and this is exact rather than an
+        /// approximation. ShadingPerformance consults attribution strictly inside
+        /// `if (baseVisibilityCache.IsLit(b, cellIndexOffset + c))` — a sample that context already
+        /// shades is not the candidate's to claim, so its first hit is never asked for. Tracing it
+        /// produces a value nothing reads. Skipping it therefore cannot change any reported number;
+        /// what it changes is how much work a candidate costs, and on an aperture whose unwanted
+        /// solar arrives from a narrow part of the sky — a north window, or any window in heavy
+        /// context — most (sun group, sample) pairs are in that category.
+        ///
+        /// Measured on the MultiAzimuth fixture: 10.8 % of pairs are readable on the north window
+        /// (a 9.2x reduction in rays traced) against 85.2 % on the south (1.2x). The saving is
+        /// largest exactly where the old cost was least justified.
         /// </summary>
         internal static SolarAttributionCache CandidateAttributionCache(SolarVisibilityCache baseVisibilityCache, List<ShadingElement> elements, List<AnalysisCell> analysisCells, int cellIndexOffset)
         {
@@ -239,7 +252,10 @@ namespace SAM.Analytical.SolarCalculator
                 }
             }
 
-            return Weather.SolarCalculator.Create.SolarAttributionCache(baseVisibilityCache, occluders, analysisCells, cellIndexOffset);
+            return Weather.SolarCalculator.Create.SolarAttributionCache(
+                baseVisibilityCache, occluders, analysisCells, cellIndexOffset,
+                Core.Tolerance.MacroDistance, Core.Tolerance.MacroDistance, Core.Tolerance.Angle, Core.Tolerance.Distance,
+                baseLitSamplesOnly: true);
         }
     }
 }

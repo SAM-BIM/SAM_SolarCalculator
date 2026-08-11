@@ -48,7 +48,14 @@ namespace SAM.Weather.SolarCalculator
         /// <param name="tolerance_Snap">Snap tolerance (also the ray-start offset).</param>
         /// <param name="tolerance_Angle">Angle tolerance, RADIANS.</param>
         /// <param name="tolerance_Distance">Distance tolerance.</param>
-        public static SolarAttributionCache SolarAttributionCache(this SolarVisibilityCache solarVisibilityCache, List<LinkedFace3D> occluders, List<AnalysisCell> analysisCells, int cellIndexOffset = 0, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance)
+        /// <param name="baseLitSamplesOnly">
+        /// Trace ONLY the samples the visibility cache reports as lit, leaving the rest at
+        /// <see cref="Query.FirstHitNotEvaluated"/>. Exactly equivalent for Stage 8 accounting, which
+        /// never consults attribution at an unlit sample — see the remarks on this parameter in
+        /// Analytical.SolarCalculator.Create.CandidateAttributionCache. False builds the complete
+        /// table, which is what a caller inspecting attribution in its own right wants.
+        /// </param>
+        public static SolarAttributionCache SolarAttributionCache(this SolarVisibilityCache solarVisibilityCache, List<LinkedFace3D> occluders, List<AnalysisCell> analysisCells, int cellIndexOffset = 0, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, bool baseLitSamplesOnly = false)
         {
             List<SunBin> bins = solarVisibilityCache?.Bins;
             if (bins == null || bins.Count == 0 || analysisCells == null || analysisCells.Count == 0)
@@ -92,6 +99,8 @@ namespace SAM.Weather.SolarCalculator
 
             int[][] firstHit = new int[bins.Count][];
 
+            int cellCount = analysisCells.Count;
+
             Parallel.For(0, bins.Count, b =>
             {
                 Vector3D representativeDirection = bins[b]?.RepresentativeDirection;
@@ -100,19 +109,78 @@ namespace SAM.Weather.SolarCalculator
                     return;
                 }
 
-                int[] hits = Query.CellFirstHit(occluders_Local, points, normals, representativeDirection.GetNegated(), tolerance_Area, tolerance_Angle, tolerance_Distance, tolerance_Snap);
-                if (hits == null)
+                Vector3D towardSun = representativeDirection.GetNegated();
+
+                List<Point3D> points_Bin = points;
+                List<Vector3D> normals_Bin = normals;
+                List<int> litCells = null;
+
+                if (baseLitSamplesOnly)
+                {
+                    litCells = new List<int>(cellCount);
+                    for (int c = 0; c < cellCount; c++)
+                    {
+                        if (solarVisibilityCache.IsLit(b, cellIndexOffset + c))
+                        {
+                            litCells.Add(c);
+                        }
+                    }
+
+                    // No lit sample in this window at this sun group: the accounting cannot read a
+                    // single entry of this row, so the row is left null and nothing is traced.
+                    if (litCells.Count == 0)
+                    {
+                        return;
+                    }
+
+                    if (litCells.Count < cellCount)
+                    {
+                        points_Bin = new List<Point3D>(litCells.Count);
+                        normals_Bin = new List<Vector3D>(litCells.Count);
+                        foreach (int c in litCells)
+                        {
+                            points_Bin.Add(points[c]);
+                            normals_Bin.Add(normals[c]);
+                        }
+                    }
+                    else
+                    {
+                        litCells = null; // every sample is lit: trace the row as it stands
+                    }
+                }
+
+                int[] traced = Query.CellFirstHit(occluders_Local, points_Bin, normals_Bin, towardSun, tolerance_Area, tolerance_Angle, tolerance_Distance, tolerance_Snap);
+                if (traced == null)
                 {
                     return;
                 }
 
                 // Translate occluder-list positions into stable table indices; sentinels pass through.
-                for (int c = 0; c < hits.Length; c++)
+                for (int i = 0; i < traced.Length; i++)
                 {
-                    if (hits[c] >= 0)
+                    if (traced[i] >= 0)
                     {
-                        hits[c] = occluderToTable[hits[c]];
+                        traced[i] = occluderToTable[traced[i]];
                     }
+                }
+
+                if (litCells == null)
+                {
+                    firstHit[b] = traced;
+                    return;
+                }
+
+                // Scatter the traced subset back into a full-width row, so the cache stays addressable
+                // at every local cell index and the untraced samples say so.
+                int[] hits = new int[cellCount];
+                for (int c = 0; c < cellCount; c++)
+                {
+                    hits[c] = Query.FirstHitNotEvaluated;
+                }
+
+                for (int i = 0; i < litCells.Count; i++)
+                {
+                    hits[litCells[i]] = traced[i];
                 }
 
                 firstHit[b] = hits;

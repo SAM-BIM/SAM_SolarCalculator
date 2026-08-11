@@ -18,6 +18,19 @@ namespace SAM.Weather.SolarCalculator
         public const int FirstHitBackFacing = -2;
 
         /// <summary>
+        /// A sample deliberately NOT traced, because the caller established it could not be read.
+        ///
+        /// Stage 8 only ever consults attribution at samples the BASE visibility cache reports as
+        /// lit — a sample already shaded by context is not the candidate's to claim, so the
+        /// accounting skips it before it ever asks who was hit first. Tracing those samples produces
+        /// a number nothing reads. This sentinel records that the ray was skipped rather than
+        /// pretending it was cast and found nothing, so the two cases stay distinguishable in a
+        /// stored cache. Like the other sentinels it is negative, so every existing reader — all of
+        /// which test the sign — treats it as "not intercepted by the candidate".
+        /// </summary>
+        public const int FirstHitNotEvaluated = -3;
+
+        /// <summary>
         /// Per-cell FIRST occluder along the ray toward the source: the index into <paramref name="occluders"/>
         /// of the nearest face hit, or FirstHitVisible / FirstHitBackFacing.
         ///
