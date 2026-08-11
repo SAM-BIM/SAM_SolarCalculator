@@ -118,20 +118,61 @@ The single most misread thing in the workflow. The colour is **not** "how much s
 
 | | meaning |
 |---|---|
-| **RED** | **SHADE HERE.** Material here intercepts solar you asked to block. Stronger red, bigger gain. Positive shading benefit. |
-| **BLUE** | **KEEP OPEN.** Material here would intercept solar you asked to KEEP. Stronger blue, worse the loss. Negative benefit — jeopardy. |
+| | meaning |
+|---|---|
+| **RED** | **SHADE HERE.** Material here would block solar you asked to block. Stronger red, bigger the positive shading potential. |
+| **BLUE** | **KEEP OPEN.** Material here would block solar you asked to KEEP. Stronger blue, bigger the negative shading potential. |
 | grey | Neither. Almost no beam passes through, so material here does nothing either way. Near-zero locations are omitted entirely rather than drawn grey. |
 
 So the map is a set of **instructions**, not a heat map: *fill the red, stay out of the blue.*
 
-The `legend` output says exactly this next to the geometry, with the two totals:
+### The totals are NOT an energy saving *(corrected in Stage 10.2)*
+
+The object string used to read
 
 ```
-RED   Shade here — material here blocks unwanted solar (positive shading benefit)
-BLUE  Keep open — material here would destroy wanted solar (negative benefit)
+ShadingPotentialField [5400 points, benefit 5504 kWh, jeopardy -22.2 kWh]
+```
+
+and it was read during manual testing as "a shade here would save 5504 kWh". **It would not, and nothing
+could.** Each voxel independently records the beam that would pass *through* it, and one solar ray passes
+through many voxels along its path and is counted at every one. The sum therefore counts the same kWh
+over and over. A real device is a thin surface, not a filled volume, and intercepts each ray exactly
+once — so what it saves is bounded by the unwanted solar the window admits at all. Measured on the
+Stage 9 south fixture: summed positive potential **4586** against an absolute ceiling of **450.9 kWh**
+of admitted unwanted solar, a factor of **10.2**.
+
+The word "jeopardy" is gone, and so is the `kWh` label on the totals — the sum is a path-length-weighted
+cumulative potential, not an amount of energy anything could save, and labelling it kWh was the specific
+thing that made it read as one. A **per-voxel** value genuinely is kWh (the beam a piece of material at
+that spot would intercept over the year), so `maxScore` and `minScore` keep their unit. It is only the
+sums that lost theirs.
+
+```
+ShadingPotentialField [5400 voxels | positive potential 5504 | negative potential 22.2]
+```
+
+The raw arrays are unchanged and still available numerically: `UnwantedEnergyPerVoxel`,
+`WantedEnergyPerVoxel`, `Score(v, λ)`, `PositiveTotal`, `NegativeTotal`, `MaxScore`, `MinScore`.
+Nothing was rounded, rescaled or hidden — only renamed.
+
+Outputs `positiveTotal` / `negativeTotal` are now **`positiveShadingPotential` /
+`negativeShadingPotential`**, and the negative one is reported as a positive magnitude so it reads as
+a size rather than as something to add to the other. The `legend` output says all of this next to the
+geometry:
+
+```
+RED   SHADE HERE — material here would block solar you asked to block
+BLUE  KEEP OPEN  — material here would block solar you asked to keep
 grey  Neither — almost no beam passes through, so material here does nothing
 
-Positive potential total 412.6 kWh   Negative / jeopardy total -38.1 kWh
+Positive shading potential 412.6   Negative shading potential 38.1   (5400 voxels)
+
+THESE TOTALS ARE NOT ENERGY SAVINGS. Each voxel independently records the beam that
+would pass through it, and one ray passes through many voxels, so the totals count the
+same solar over and over. They rank locations and compare thresholds; they do not say
+what a device would save. For that, build one and read VerifyShading, whose kWh are
+measured on real geometry.
 ```
 
 `_previewMode_` chooses how it is drawn — **Points** (default, cheap), **Voxels** (shaded cells,
@@ -151,8 +192,13 @@ answer; everything else is supporting evidence.
 |---|---|
 | **Unwanted Solar Blocked [%]** | Of the summer (or whatever you called unwanted) beam this window would have let in, how much the device stops. Higher is better. |
 | **Wanted Solar Retained [%]** | Of the winter (or whatever you called wanted) beam, how much still gets through. Higher is better. These two pull against each other; the design is the trade between them. |
-| **Benefit [kWh]** | The unwanted solar blocked, as energy. What the device earns. |
-| **Harm [kWh]** | The wanted solar destroyed, as energy — a positive loss. What the device costs in daylight and free winter heat. |
+| **unwantedSolarIntercepted [kWh]** | The unwanted solar the device stops, as energy. What the device earns. *(called `benefit` before Stage 10.2)* |
+| **wantedSolarBlocked [kWh]** | The wanted solar the device destroys, as energy — a positive loss. What the device costs in daylight and free winter heat. *(called `harm` before Stage 10.2)* |
+
+The two energies are now named for the **physical quantity**, not for the role they play in the
+objective. "46 kWh benefit" was read during manual testing as "this saves 46 kWh"; it is the unwanted
+beam this device intercepts, which is a narrower and checkable claim. `Benefit` and `Harm` remain the
+internal names of the objective's terms, where they are correct.
 
 `objectiveScore` is **not** the headline. It folds benefit, harm and material together through
 weightings the reader may not have chosen, and two designs a fraction of a percent apart in score can
@@ -163,7 +209,8 @@ the material between them). It remains available as a comparison aid.
 
 ```
 180° | Overhang | Depth 1.16 m, RiseAboveHead 0.12 m, ExtensionBeyondJambs 0.25 m
-    | 55% unwanted blocked | 90.5% wanted retained | 267.6 kWh benefit | 32.4 kWh wanted solar lost
+    | 55% unwanted blocked | 90.5% wanted retained
+    | 267.6 kWh unwanted solar intercepted | 32.4 kWh wanted solar blocked
 ```
 
 `verificationSummary` does the same for the measured result:
@@ -177,6 +224,48 @@ the material between them). It remains available as a comparison aid.
 no wanted solar, nothing admitted at all — it is `NaN` in the outputs and reads `n/a` in the
 summaries. A London north facade genuinely has no wanted winter beam, and reporting "100 % wanted
 solar retained" for it would be a fabrication.
+
+### Where the rest of the energy went — the neutral share *(new in Stage 10.2)*
+
+Manual testing on a north window produced
+
+```
+61.3 kWh baseline direct solar    61.3 kWh intercepted
+46 kWh benefit                     0 kWh harm
+```
+
+and 15.3 kWh looked as though it had gone missing. It had not. **Under the default brief — summer
+unwanted, winter wanted — the spring and autumn beam is in neither period.** It was always being
+measured; nothing reported it. `VerifyShading` now closes both balances explicitly:
+
+```
+Admitted without the device: 61.3 kWh = 46 unwanted + 0 wanted + 15.3 neither
+Intercepted by the device:   61.3 kWh = 46 unwanted + 0 wanted + 15.3 neither
+```
+
+on the `accountingSummary` output, with `admittedNeutralSolar` and `neutralSolarIntercepted` on their
+own wires. `RationaliseShading` gains `neutralSolarIntercepted` for the same reason.
+
+**The general rule, which is not the obvious one.** `AdmittedUnwantedEnergy` and
+`AdmittedWantedEnergy` are *desirability-weighted* sums — `|w| × energy` over the hours of each sign —
+not slices of a partition. So the neutral share is defined as the **residual**:
+
+```
+AdmittedNeutralEnergy    = AdmittedDirectEnergy     − AdmittedUnwantedEnergy   − AdmittedWantedEnergy
+NeutralSolarIntercepted  = DirectSolarIntercepted   − UnwantedSolarIntercepted − WantedSolarBlocked
+```
+
+Written that way the identity closes for **every** strategy, including continuous and custom ones.
+What varies is whether the residual is a physical energy: it is, and is non-negative, exactly when
+every applied weight lay within `[-1, +1]`. `ApertureDesirability.MaximumWeightMagnitude` records the
+largest `|w|` actually applied — **measured, not declared by the strategy** — and
+`WeightsWithinUnitMagnitude` reports `true` / `false` / `null` (unknown, for a file saved before this
+was recorded). A strategy weighting beyond unit magnitude claims more beam than physically arrives and
+the residual goes negative; that is a true statement about the brief and is surfaced rather than
+clamped to zero.
+
+For the simple period-based briefs almost everyone uses, weights are `+1`, `−1` and `0`, so the three
+parts partition the beam exactly and the numbers reconcile by eye.
 
 ---
 
@@ -210,6 +299,63 @@ On the potential field it moves where the map turns from red to blue.
 | **0** | Size on energy alone. Tends to return the largest device that still helps at all. |
 | **0.1** *(default)* | A mild preference for the leaner of two near-equal designs. |
 | higher | Favours smaller devices. Use where buildability or cost matters more than the last few kWh. |
+
+### What am I allowed to use? *(settled in Stage 10.2)*
+
+Both penalties are **dimensionless weights**, so there is no measurement that hands down a maximum
+and inventing one would be a UI convenience dressed up as physics. What *can* be stated exactly is
+the floor, which follows from the objective's algebra, and the far field, which was measured.
+
+| | `_wantedSolarPenalty_` (λ) | `_materialPenalty_` (μ) |
+|---|---|---|
+| **valid domain** | finite, **≥ 0** | finite, **≥ 0** |
+| **invalid** | negative, `NaN`, `±∞` — **refused with an error** | negative, `NaN`, `±∞` — **refused with an error** |
+| **recommended range** | 0.5 – 2.0 | 0 – 1.0 |
+| **default** | **1.0** — an even trade, the only value that assumes nothing about the brief | **0.1** — a mild tie-break toward the leaner design, small enough not to override the energy answer |
+| **extreme (valid, remarked on)** | above **10** | above **10** |
+| **raise it and…** | wanted solar is protected harder → **shallower** devices, less unwanted solar blocked | the device **shrinks**, and past a point the answer becomes **NO SHADE** |
+
+**Why negative is refused rather than clamped.** Both weights multiply a *positive* quantity that the
+score *subtracts*:
+
+```
+Score = UnwantedSolarIntercepted − λ × WantedSolarBlocked − μ × Cost
+```
+
+A negative λ turns the middle term into an *addition*, so the search is paid to destroy the winter sun
+the brief asked it to preserve, and deeper is always better. A negative μ pays for material, and since
+cost grows without limit while benefit saturates, the search runs to the largest device its bounds
+allow. Neither is a strange-but-defensible weighting; each **inverts the meaning of its own term**.
+Silently reading `−2` as `0` would answer a question nobody asked, so the components error instead.
+
+If a project genuinely wants to **maximise** solar gain, that is a different brief and the model
+already expresses it: swap `_unwantedPeriod_` and `_wantedPeriod_`, or supply a desirability strategy
+whose weights carry the sign. The penalties stay weights.
+
+`NaN` and infinity are refused for the ordinary reason: every candidate would score `NaN` or `−∞`,
+nothing could beat the null device, and the run would report "no shading is worth building here" — a
+confident engineering answer it never earned.
+
+**Why 10 is where "extreme" starts.** Both are exchange rates against the same unit, so μ = 10 means
+"a device covering the whole window must repay ten times the window's entire admitted beam". Measured
+on the controlled north window, material penalties of 5 and above already return NO SHADE with the
+best candidate at −4.8 kWh: the answer has stopped depending on the value and only its magnitude
+changes. A weighting that can no longer change the recommendation has stopped being a design
+parameter. It is still **valid** — it is remarked on, not refused.
+
+### Louvre and fin tilt — what the sign means
+
+`TiltDegrees` runs **−60° to +60°** and both signs are real, buildable devices.
+
+| | horizontal louvres | vertical fins |
+|---|---|---|
+| **positive** | outer edge drops **below** the fixing line — the ordinary brise-soleil, angled down and out to cut high sun | outer edge swings toward **+X** across the facade |
+| **zero** | blade square to the glass | fin square to the glass |
+| **negative** | outer edge rises **above** the fixing line — the light-shelf direction, letting low winter sun in under the blade while still cutting high summer sun | outer edge swings toward **−X** |
+
+A negative tilt is not an error state. The manual south test returned **−15°** at λ = 2, which is the
+objective doing exactly what it was told: protect wanted solar harder, so tip the blades to let the
+low winter beam through. Values outside ±60° clamp to the bound rather than building nonsense.
 
 ---
 
@@ -327,18 +473,78 @@ Stage 9 found that a device finer than the analysis grid produces numbers that l
 eleven blades over a 1 m opening sampled at 0.5 m can sit so every sample is shaded and none of the
 gaps are, reporting *100 % of unwanted solar blocked and 100 % of wanted solar retained* at once.
 
-Stage 9's parameter cap keeps an **optimised** device at or above one grid spacing. Stage 10 adds the
-reporting side, which also covers devices a user typed in by hand:
+### The defect manual testing found, and the fix *(Stage 10.2)*
+
+Refining `GridSize` on a north window made the **energy** converge tightly — 61.3 kWh intercepted at
+0.20 m, 0.10 m and 0.05 m — while the recommended **geometry** did not, and the run carried a
+resolution WARNING at *every* grid size tried. Reducing `GridSize` never cleared it.
+
+**Root cause: two numbers that should have been one.** The optimiser's parameter cap admitted element
+pitch down to **1 × `GridSize`**, while the reporting rule warned below **2 × `GridSize`**. On any
+aperture where more elements keep helping — which is most of them — the search runs to its own cap and
+lands squarely inside the warning band. And because the cap is defined *in grid sizes*, halving the
+grid halves the permitted pitch and reproduces exactly the same situation one scale finer. The tool was
+warning, correctly, about geometry it had itself just proposed.
+
+At `GridSize` 0.10 m on the 1.0 m-wide north window the cap was `1.0 / 0.1 + 1 = 11` fins — precisely
+the `Count 11` the manual test returned, at a pitch of exactly 0.100 m.
+
+**The rule now: element pitch ≥ 2 × `GridSize`** — `Create.MinimumElementPitchInGridSizes`, used by the
+cap *and* by the warning, so they cannot disagree again.
+
+**Why two, and not a rounder-looking number.** Performance is measured by asking, per analysis cell,
+whether that cell's single interior sample is lit. A blade array of pitch *p* casts lit/shaded stripes
+of period *p*; the sample lattice has period *g*; so *p / g* is the number of samples per stripe and
+hence the resolution of the estimate. At *p = g* there is exactly **one** sample per period and, the
+lattices being commensurate, it sits at the same place in every period — the estimator can return only
+0 or 1, and which one is decided by lattice phase rather than by the device. Two is simply the first
+ratio at which the estimator has any interior resolution at all. It is not an accuracy target; it is
+the point at which the measurement stops being a coin toss.
+
+**Measured** (`ResolutionConvergenceTests`, one fixed device of 0.25 m pitch measured on a series of
+grids against a 0.04 m reference, at phases 0 and half a pitch):
+
+| pitch / `GridSize` | worst error in unwanted-solar-blocked |
+|---|---|
+| **1.0** | **26.5 pp** — and 100.000 % reported where the truth is 97.7 % |
+| 1.25 | 6.4 pp |
+| 1.5 | 5.0 pp |
+| **2.0** | **1.7 pp** |
+| 3.0 | 9.0 pp |
+
+Note that the error **does not fall monotonically** with the ratio — 3.0 is worse than 2.0 on this
+fixture. There is no convergence plateau to pick a number off, which is exactly why the rule rests on
+the degeneracy at ratio 1 rather than on "bigger is safer". Do not raise it to 3 expecting an
+improvement; there isn't one. The test asserts this so a later reader cannot quietly do so.
+
+### The rule as it now reads
 
 | element pitch | state | Grasshopper | `status` |
 |---|---|---|---|
-| ≤ `GridSize` | `BelowResolutionLimit` | **Warning**: *…below the reliable analysis resolution… Reduce GridSize and recalculate…* | WARNING |
-| < 2 × `GridSize` | `NearResolutionLimit` | **Remark**: *…close to the solar-analysis grid resolution…* | WARNING |
-| otherwise | `Resolved` | nothing | OK |
+| ≤ `GridSize` | `BelowResolutionLimit` | **Warning**: *…at or below the analysis grid… at most one sample point per gap… space the elements at least X m apart, or reduce GridSize to at most Y m…* | WARNING |
+| < 2 × `GridSize` | `NearResolutionLimit` | **Remark**: *…below the minimum feature size for this analysis…* | WARNING |
+| ≥ 2 × `GridSize` | `Resolved` | nothing | OK |
 
 Pitch is `span / (count − 1)`, the spacing the typologies actually build to, measured **up** the
-opening for louvres and **across** it for fins. A single element has no pitch. The rule itself is
-Stage 9's and was not redesigned here.
+opening for louvres and **across** it for fins. A single element has no pitch.
+
+**Nothing was suppressed.** The bound moved to where the evidence says it belongs; the warning is
+unchanged and still fires — for a device typed in by hand, which nothing caps, or one measured on a
+coarser grid than it was designed against. What changed is that a result produced inside Stage 9's own
+declared reliable bounds now comes back **OK**, and a warning again means something.
+
+**Refining the grid still buys a finer device**, which is what makes "reduce `GridSize` to justify a
+finer device" a true instruction — it just no longer comes with a warning attached:
+
+| `GridSize` | most fins permitted (1.0 m opening) | tightest pitch | status |
+|---|---|---|---|
+| 0.4 m | 2 | 1.00 m | OK |
+| 0.2 m | 3 | 0.50 m | OK |
+| 0.1 m | 6 | 0.20 m | OK |
+| 0.05 m | 11 | 0.10 m | OK |
+
+The 0.05 m row is the manual test's `Count 11` — the same device, now correctly reported as resolved,
+because at that grid the analysis really can see it.
 
 ---
 
@@ -352,26 +558,47 @@ The component therefore:
 
 * names the output `mesh` and describes it as DISPLAY geometry in both the component description and
   the output description;
-* keeps every number — captured fraction, projected area, volume, depth, region sizes — from the
-  **field**, not the mesh;
+* keeps every number — captured **potential** fraction, projected area, volume, depth, region sizes —
+  from the **field**, not the mesh;
 * reports `meshNote` and warns when no mesh could be produced, while still returning the numbers;
 * points the user at `VerifyShading` on a real device for any performance judgement.
 
 This is a known open research question, not a Stage 10 defect, and Stage 10 does not attempt to solve
 it.
 
-**Suggested preview convention** for showing the story — potential field → ideal intent → buildable
-device → verified performance — in one viewport:
+### `capturedFraction` is a share of the FIELD, not of the solar *(renamed in Stage 10.2)*
 
-| geometry | suggested display |
-|---|---|
-| aperture / target | neutral outline plus the outward-normal arrow (the Goo draws this) |
-| potential field | the red/blue map, Points or Voxels |
-| ideal shape | translucent warm / orange — **intent**, never performance truth |
-| selected buildable device | a distinct solid colour |
+`CapturedBenefitFraction` is now **`CapturedPotentialFraction`**, and the Goo string changed with it:
 
-Keeping the ideal translucent and the device solid is the point: it stops the ideal mesh being read
-as a result.
+```
+IdealShadingResult [3 regions, 790 voxels, holds 90.0 % of the positive shading potential — not verified performance]
+```
+
+The quantity is unchanged. The old name asserted something it never measured: both numerator and
+denominator are **sums over voxels**, and a single ray contributes to every voxel along its path, so
+this is a ratio of spatial potentials. "Captures 90 %" means the region holds 90 % of the field's
+positive potential — **not** that a device built there would block 90 % of the unwanted solar. It will
+not: the region is a volume, a device is a surface, and this mesh was never traced.
+
+What it *is* good for is the job Stage 7 gives it — choosing a threshold, and comparing two thresholds
+on the same field. Files written before the rename still load: `FromJsonObject` reads the old key when
+the new one is absent, so a saved schema-1 result keeps its number instead of coming back `NaN`.
+
+### The visual story, end to end
+
+The four steps say different kinds of thing and should not look alike:
+
+| step | geometry | display | what it is |
+|---|---|---|---|
+| **1. Potential** | `ShadingPotentialField` | red / blue points or voxels + `legend` | **RED = SHADE HERE, BLUE = KEEP OPEN.** A map of instructions. Totals are potentials, not savings. |
+| **2. Ideal** | `IdealShadingShape` → `mesh` | **translucent** warm / orange | shading **intent**. Explicitly *not* verified performance geometry. |
+| **3. Buildable** | `RationaliseShading` → `shadingGeometry` | a **solid**, distinct colour | the real, rationalised device. |
+| **4. Verified** | `VerifyShading` | text: `verificationSummary`, `accountingSummary` | **measured kWh and percentages** on real traced geometry. The only performance truth in the chain. |
+
+Keeping the ideal translucent and the device solid is the point: it stops the ideal mesh being read as
+a result. The legends are plain **string outputs** panelled next to the geometry rather than custom
+Rhino viewport drawing — a hand-drawn legend has to survive every camera, display mode and DPI in
+Rhino, and a broken one is worse than none. A string can also be copied into a report.
 
 ---
 
@@ -532,6 +759,81 @@ evaluation count either way.
 Storage, same project: the visibility result is ~1 MB (683 × 12 540 bits); a candidate's attribution
 is ~42 KB (683 × 16 samples × 4 bytes). Whole-model attribution per candidate would have been ~32 MB.
 
+### Fine grids — the profile, the scaling law, and what is left *(Stage 10.2)*
+
+At the **default** `GridSize` 0.5 m the workflow is interactive and always was. The complaint was
+about **0.1 m**, where manual testing measured 4–5 minutes for a single south window. Instrumented on
+`MultiAzimuth.sam`, south aperture, all four families, 16 cores:
+
+| | `GridSize` 0.5 | 0.2 | 0.1 |
+|---|---|---|---|
+| analysis samples on this window | 20 | 117 | 425 |
+| sun groups | 683 | 683 | 683 |
+| context preparation | 2.7 s | 0.6 s | 3.3 s |
+| `ShadingPotentialField` | 0.02 s | 0.02 s | 0.01 s |
+| candidate **geometry construction** | 0.002 s | 0.005 s | 0.011 s |
+| candidate **ray / attribution / accounting** | 2.1 s | 12.4 s | 56.9 s |
+| candidates evaluated (4 families) | 199 | 217 | 237 |
+| time per candidate | 11 ms | 60 ms | 240 ms |
+| peak working set | ~15 MB | ~24 MB | ~3 MB |
+
+**The dominant cost is the per-sample first-hit ray evaluation: >99.9 % of optimisation time.**
+Geometry construction is under 0.05 %. Context preparation is roughly flat in `GridSize` and is
+*shared* across every window. The field build is negligible. **Stage 10.1's whole-building
+reprojection bottleneck has not returned** — that is what the flat setup and the tiny geometry term
+confirm.
+
+**Scaling law.** Time ≈ *candidates* × *sun groups* × *samples* × *elements per candidate*. Samples go
+as `GridSize⁻²`, and the measured optimisation time (2.1 → 12.4 → 56.9 s against 20 → 117 → 425
+samples) is **linear in the sample count**, i.e. **∝ `GridSize⁻²`**. Per candidate at 0.1 m the cost
+is about **85 ms fixed + 19 ms per element**.
+
+**What Stage 10.2 changed, both provably equivalent:**
+
+1. **The minimum feature-size rule** (§10) is also the largest performance change here. It roughly
+   halves the permitted element count at fine grids — 24 → 13 louvres at 0.1 m — and since cost is
+   linear in element count, it roughly halves the cost of the expensive candidates. The correctness
+   fix and the speed-up are the same change.
+2. **Only the readable samples are traced.** Stage 8 consults attribution strictly inside
+   `if (IsLit(b, offset + c))`, so a sample already shaded by context is never asked about. Tracing it
+   produced a value nothing read. Measured readable fractions: **10.8 %** on the north window
+   (a 9.2× reduction in rays) against **85.2 %** on the fully exposed south (1.2×). The saving is
+   largest exactly where the old cost was least justified.
+
+| south window, one aperture, all families | before | after | |
+|---|---|---|---|
+| `GridSize` 0.5 m | 4.9 s | **4.9 s** | setup-bound |
+| `GridSize` 0.2 m | 20.0 s | **14.6 s** | 1.37× |
+| `GridSize` 0.1 m | 85.5 s | **60.1 s** | 1.42× |
+
+**The target, and whether it is met.** For one normal aperture with all eligible families:
+
+| | target | measured | met? |
+|---|---|---|---|
+| `GridSize` 0.5 m (the default) | ≤ 5 s — interactive | 4.9 s | **yes** |
+| `GridSize` 0.2 m | ≤ 20 s — a considered run | 14.6 s | **yes** |
+| `GridSize` 0.1 m | ≤ 60 s — a deliberate, one-off refinement | 60.1 s | **yes, but only just** |
+
+**0.1 m is not interactive and this work has not made it so.** It is now a minute rather than four or
+five, which makes it usable as a final check on a window that matters; it is not something to leave on
+a slider.
+
+**Where the remaining headroom is, measured rather than guessed.** Effective parallelism during a
+candidate evaluation is **6.9 of 16 cores** (CPU time / wall time, `Parallel.For` over 683 sun groups).
+The work partitions cleanly, so the ceiling is allocation pressure and memory bandwidth in the generic
+geometry kernel — each point test allocates several short-lived `Point3D` / `Point2D` / `Envelope` /
+`Segment3D` objects. An allocation-free first-hit kernel is worth roughly **2.3×** on this evidence.
+That is a change to accepted Stage 0–4 physics code, it cannot be justified as "obviously equivalent",
+and it is **out of scope for Stage 10.2** — recorded here as the next lever, with the measurement that
+sizes it.
+
+**What was considered and rejected.** A staged coarse-to-fine search (evaluate the coarse lattice on a
+coarser grid, refine the survivors at full resolution) would cut candidate cost substantially, but it
+changes which candidate wins and **no equivalence proof is available for it**. The brief requires
+physical verification of final candidates and permits pruning only where it is *proven* deterministic.
+Skipping sun groups that carry no desirability energy was measured at 1.04× on the south case and is
+not worth the plumbing.
+
 ---
 
 ## 17. Automated tests
@@ -556,6 +858,22 @@ behaviour is testable outside Rhino, which cannot host a Grasshopper component i
 | optimisation metrics | a device rebuilt from the optimiser's parameters reproduces its numbers exactly |
 | zero denominators | no wanted solar leaves `wantedSolarRetained` unavailable, through the reporting conversion |
 | durability | target, field, ideal result, device and shading device all survive a save/reload |
+
+Added by Stage 10.2 — `ResolutionConvergenceTests` (6), `PenaltyDomainTests` (11),
+`SolarAccountingTests` (10), `AttributionPruningTests` (5):
+
+| area | covered |
+|---|---|
+| **resolution convergence** | one fixed device on a series of grids: worst error 26.5 pp at pitch = `GridSize` against 1.7 pp at 2 × `GridSize`; energy converges within 2 pp on a resolvable device; the non-monotonicity in the ratio is asserted so the rule cannot be "improved" to 3 × |
+| **the feature-size rule** | the optimiser can never return a device its own warning would reject, on four orientations at two grids; a finer grid buys more elements and still reports OK; the cap and the warning are provably one number, with no gap either way; a hand-typed fine device is still warned about |
+| **penalty domain** | valid / extreme / invalid classification across the range; negative λ demonstrably rewards destroying wanted solar and negative μ rewards buying material; defaults are the documented ones |
+| **penalty extremes** | the material sweep 0.1 → 100 reaches NO SHADE through the existing null device with no kWh threshold; score never rises as μ rises; μ = 100 still verifies as a real answer |
+| **λ semantics** | λ changes the score by exactly Δλ × harm and no measured energy; λ reorders a fixed candidate set with an exactly computable crossover; a stronger λ never destroys more wanted solar; negative louvre tilt is a real bounded direction |
+| **determinism** | two identical searches agree on family, parameters, score, evaluation count and attribution hash |
+| **neutral accounting** | both balances close exactly; the north window's "missing" 15.3 kWh is the neutral share; the residual is a physical energy iff weights are within unit magnitude, measured not declared; an over-weighted brief reports a negative residual rather than a false partition; a pre-schema-2 file says "unknown" instead of assuming |
+| **field terminology** | the summed potential is 10.2× the physical ceiling on any saving, so it cannot be one; a real optimised device stays under the ceiling; the raw arrays are unchanged |
+| **`CapturedPotentialFraction`** | it is a share of the field's positive potential; a schema-1 file keeps its number through the rename |
+| **pruning equivalence** | pruned and complete attribution agree to 12 decimal places on 6 scenarios × 5 families, including every per-element credit; entry-by-entry agreement wherever the baseline says lit and an explicit "not evaluated" everywhere else; the same design end-to-end at `GridSize` 0.1 m; the pruned build is measurably quicker; candidate cost stays near-linear in element count |
 
 **Not covered automatically** — parameter visibility, the viewport preview, Grasshopper's own casting
 and the canvas experience. Those are the manual checklist.
@@ -617,7 +935,14 @@ one with a neighbouring building or a deep soffit, and at least one with **many 
 - [ ] swapping `_unwantedPeriod_` and `_wantedPeriod_` inverts the colours
 - [ ] `_previewMode_` Points / Voxels / None: the map looks different, the numbers do not change
 - [ ] `_wantedSolarPenalty_` 0.5 vs 1.0 vs 2.0 moves the red/blue boundary
-- [ ] `_threshold_` 0.5 vs 0.9 vs 0.99 → the shape grows; `capturedFraction` tracks the request
+- [ ] `_threshold_` 0.5 vs 0.9 vs 0.99 → the shape grows; `capturedPotentialFraction` tracks the
+      request *(renamed from `capturedFraction` in Stage 10.2 — rewire it)*
+- [ ] **`positiveShadingPotential` carries NO kWh label**, and the `legend` states plainly that the
+      totals are not energy savings *(Stage 10.2)*
+- [ ] the field's object string reads `[N voxels | positive potential … | negative potential …]` —
+      no "benefit", no "jeopardy" *(Stage 10.2)*
+- [ ] the ideal result's string says **"holds X % of the positive shading potential — not verified
+      performance"** *(Stage 10.2)*
 - [ ] a window with no summer sun problem reports "nothing here is worth shading" rather than failing
 - [ ] `ShadingPotentialField` reuses the calculation `ApertureIrradiance` already paid for
 
@@ -628,15 +953,60 @@ one with a neighbouring building or a deep soffit, and at least one with **many 
 - [ ] all four families run: Overhang, HorizontalLouvres, VerticalFins, EggCrate
 - [ ] `designSummary` reads as a sentence an engineer would write; `status` is OK
 - [ ] the winning geometry looks buildable and its dimensions match `parameterValues`
-- [ ] `VerifyShading` on the winner reproduces `RationaliseShading`'s benefit, harm and
-      `directSolarIntercepted`
+- [ ] `VerifyShading` on the winner reproduces `RationaliseShading`'s `unwantedSolarIntercepted`,
+      `wantedSolarBlocked` and `directSolarIntercepted`
 - [ ] `unwantedSolarBlocked` and `wantedSolarRetained` move in opposite directions as depth grows
 - [ ] `_wantedSolarPenalty_` 2.0 gives a shallower device than 0.5 on the same window
-- [ ] force a fine device → the resolution warning appears, names both numbers, and `status` is WARNING
+- [ ] force a fine device **by hand** → the resolution warning appears, names both numbers, and
+      `status` is WARNING
 - [ ] a window with no unwanted solar → `status` NO SHADE, `shadingGeometry` empty, and
       `VerifyShading` on `shadingDevice` still SUCCEEDS, reporting 0 % blocked / 100 % retained
 - [ ] `bestCandidateDevice` shows what the search would have built in that case
 - [ ] `_optimise_ = false` returns a comparable, quicker answer
+
+### Test G — Stage 10.2 re-runs *(the ones that found the defects)*
+
+Run on `SolarShading_MultiAzimuth_Test.sam`, the same controlled model as before.
+
+**G1 — the resolution warning must now clear.** North aperture, `_wantedSolarPenalty_` 1,
+`_materialPenalty_` 0.1, at `_gridSize_` **0.20 / 0.10 / 0.05 m**:
+
+- [ ] `status` is **OK** at every grid size — not WARNING. This is the whole of Gate A.
+- [ ] element counts are lower than before at the same grid (the 0.10 m run should no longer return
+      11 fins over a 1 m opening; expect about 6)
+- [ ] the pitch reported in any warning message, if one appears at all, is a **hand-typed** device
+- [ ] the energy answer is close to the previous runs — it converged before and still does
+
+**G2 — the numbers must reconcile.** Any window, `VerifyShading`:
+
+- [ ] `accountingSummary` reads `Admitted without the device: 61.3 kWh = 46 unwanted + 0 wanted +
+      15.3 neither` and the three add to the baseline
+- [ ] `admittedNeutralSolar` explains the residual that looked like missing energy
+- [ ] `directSolarIntercepted` = `unwantedSolarIntercepted` + `wantedSolarBlocked` +
+      `neutralSolarIntercepted`
+
+**G3 — penalties.** North aperture at `_gridSize_` 0.10 m:
+
+- [ ] `_materialPenalty_` **−1** → a clear **error** naming the domain, not a silent result
+- [ ] `_wantedSolarPenalty_` **−1** → a clear **error** that also says to swap the periods instead
+- [ ] `_materialPenalty_` **50** → a **remark** that it is far above normal, and a valid NO SHADE
+- [ ] the sweep 0.1 / 0.5 / 1 / 2 / 5 / 10 / 100 still ends at NO SHADE with `successful = true`
+
+**G4 — fine-grid runtime.** South aperture, all families, `_gridSize_` 0.10 m:
+
+- [ ] time it. Expect **roughly 40 % faster** than the 4–5 minutes previously measured. It should now
+      be **1–3 minutes** on your machine, not 4–5.
+- [ ] the recommended device differs from before — it will, because the element cap changed — but
+      `VerifyShading` must reproduce its numbers exactly
+- [ ] `_gridSize_` 0.5 m still returns in a few seconds
+
+**G5 — rewired components.** `RationaliseShading` and `VerifyShading` are at **1.0.2**,
+`ShadingPotentialField` at 1.0.2:
+
+- [ ] opening an existing Stage 10.1 definition reports the version change as expected
+- [ ] `benefit` / `harm` are now `unwantedSolarIntercepted` / `wantedSolarBlocked` — **rewire these**
+- [ ] `positiveTotal` / `negativeTotal` are now `positiveShadingPotential` /
+      `negativeShadingPotential`, and the negative one is a **positive** number
 
 ### Test D — many windows *(new in Stage 10.1)*
 
