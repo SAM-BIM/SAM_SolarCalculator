@@ -292,3 +292,65 @@ Added by Stage 10 and worth knowing:
   the calculation shareable with `ApertureIrradiance`;
 * `_gridSize_` must be kept the same across the chain or the work is redone;
 * one component call studies **one** aperture for the shading stages; use a graft to sweep several.
+
+---
+
+## 14. Manual test checklist
+
+The automated tests cover the logic. These cover the canvas, and need 2–3 real projects — at least
+one with a neighbouring building or a deep soffit.
+
+### Test A — solar analysis only
+
+`AnalyticalModel` → `ApertureSolarTargets` → `ApertureIrradiance`
+
+- [ ] every expected window appears; `count` matches the model
+- [ ] `azimuths` agree with the model's orientation; the preview arrow points OUT of the room on
+      every target (an inward arrow means the model's aperture is wrong, not the analysis)
+- [ ] internal-wall apertures are absent; asking for one by Guid produces a clear warning, not silence
+- [ ] `_run = false` does nothing at all
+- [ ] full year vs Summer vs Winter: totals change, and the second run reports
+      `reusedPreviousCalculation = true`
+- [ ] `_HOYs_` connected alongside `_analysisPeriod_` → the Remark about the override appears and the
+      hour count matches the HOY list
+- [ ] `_weatherData_` connected → those results differ from the model-weather run
+- [ ] `_recalculate_ = true` → `reusedPreviousCalculation = false` and it takes as long as the first run
+- [ ] south exceeds north (northern hemisphere); a UK vertical facade lands in the low hundreds of
+      kWh/m² annually
+
+### Test B — potential and ideal shape
+
+`ApertureSolarTargets` → `ShadingPotentialField` → `IdealShadingShape`
+
+- [ ] the map sits in FRONT of the glass, not behind it
+- [ ] red concentrates where high summer sun arrives; blue appears where the winter sun would be lost
+- [ ] swapping `_unwantedPeriod_` and `_wantedPeriod_` inverts the colours
+- [ ] `_threshold_` 0.5 vs 0.9 vs 0.99 → the shape grows; `capturedFraction` tracks the request
+- [ ] `_maxDepth_` and `_voxelSize_` behave (finer = slower, same story)
+- [ ] a window with no summer sun problem reports "nothing here is worth shading" rather than failing
+- [ ] `ShadingPotentialField` reuses the calculation `ApertureIrradiance` already paid for, when
+      `_gridSize_` and `_sunAngleStep_` match
+
+### Test C — buildable shading
+
+`ShadingPotentialField` → `RationaliseShading` → `VerifyShading`
+
+- [ ] all four families run: Overhang, HorizontalLouvres, VerticalFins, EggCrate
+- [ ] leaving `_typologies_` empty gives a sensible ranked list
+- [ ] the winning geometry looks buildable and its dimensions match `parameterValues`
+- [ ] `VerifyShading` on the winner reproduces `RationaliseShading`'s benefit, harm and
+      `directSolarIntercepted`
+- [ ] `unwantedSolarBlocked` and `wantedSolarRetained` move in opposite directions as depth grows
+- [ ] force a fine device (many louvres on a short window, or a coarse `_gridSize_`) → the resolution
+      warning appears and names both numbers
+- [ ] a window with no unwanted solar → `recommendsNoShading` and a score at or below zero
+- [ ] `_optimise_ = false` returns a comparable, quicker answer
+
+### Test D — context
+
+An aperture partly shaded by another building or a deep soffit.
+
+- [ ] `baselineDirectSolar` is visibly lower than an equivalent unobstructed window
+- [ ] the optimiser does NOT buy material for solar the context already blocks — expect a minimal
+      device and a small benefit
+- [ ] `unattributedEnergy` is zero (a non-zero value is a real finding: report it)

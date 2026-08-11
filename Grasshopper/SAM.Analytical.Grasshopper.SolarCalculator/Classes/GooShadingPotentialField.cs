@@ -133,13 +133,23 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                     return BoundingBox.Empty;
                 }
 
+                // The eight corners of the studied space, not every point in it: this is asked for
+                // on every viewport redraw and a large map has tens of thousands of points.
+                double sizeX = volume.CountX * volume.VoxelSize;
+                double sizeY = volume.CountY * volume.VoxelSize;
+                double sizeZ = volume.CountZ * volume.VoxelSize;
+
                 BoundingBox result = BoundingBox.Empty;
-                for (int i = 0; i < volume.VoxelCount; i++)
+                for (int i = 0; i < 8; i++)
                 {
-                    Point3D centre = volume.GetCentre(i);
-                    if (centre != null)
+                    Point3D corner = volume.ToWorld(
+                        (i & 1) == 0 ? 0 : sizeX,
+                        (i & 2) == 0 ? 0 : sizeY,
+                        (i & 4) == 0 ? 0 : sizeZ);
+
+                    if (corner != null)
                     {
-                        result.Union(Geometry.Rhino.Convert.ToRhino(centre));
+                        result.Union(Geometry.Rhino.Convert.ToRhino(corner));
                     }
                 }
 
