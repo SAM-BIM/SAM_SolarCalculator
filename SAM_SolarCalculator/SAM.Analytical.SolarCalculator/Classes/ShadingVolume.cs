@@ -98,6 +98,27 @@ namespace SAM.Analytical.SolarCalculator
             }
         }
 
+        /// <summary>
+        /// Largest absolute world coordinate of the volume origin — the magnitude that bounds the
+        /// cancellation error in TryToLocal, and therefore the achievable precision of every local
+        /// coordinate derived from this volume. Exposed without cloning the origin because the
+        /// voxel traversal reads it per ray.
+        /// </summary>
+        public double OriginMagnitude
+        {
+            get
+            {
+                if (origin == null)
+                {
+                    return 0.0;
+                }
+
+                double result = System.Math.Abs(origin.X);
+                result = System.Math.Max(result, System.Math.Abs(origin.Y));
+                return System.Math.Max(result, System.Math.Abs(origin.Z));
+            }
+        }
+
         public double VoxelSize
         {
             get
