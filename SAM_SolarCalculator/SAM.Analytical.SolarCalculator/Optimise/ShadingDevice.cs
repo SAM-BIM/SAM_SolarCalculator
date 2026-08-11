@@ -11,27 +11,27 @@ namespace SAM.Analytical.SolarCalculator
     public static partial class Optimise
     {
         /// <summary>Optimises a single overhang: depth, rise above the head, extension past the jambs.</summary>
-        public static OptimisedShadingResult Overhang(this ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, ShadingObjective objective = null, ShadingPotentialField field = null, int maximumEvaluations = 400)
+        public static OptimisedShadingResult Overhang(this ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, ShadingObjective objective = null, ShadingPotentialField field = null, int maximumEvaluations = 400, int cellIndexOffset = 0)
         {
-            return ShadingTypology(target, baseVisibilityCache, desirability, contextOccluders, "Overhang", objective, null, Seed(field, target, "Overhang", objective), maximumEvaluations);
+            return ShadingTypology(target, baseVisibilityCache, desirability, contextOccluders, "Overhang", objective, null, Seed(field, target, "Overhang", objective), maximumEvaluations, 3, cellIndexOffset);
         }
 
         /// <summary>Optimises a horizontal louvre array: depth, blade count, blade tilt.</summary>
-        public static OptimisedShadingResult HorizontalLouvres(this ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, ShadingObjective objective = null, ShadingPotentialField field = null, int maximumEvaluations = 400)
+        public static OptimisedShadingResult HorizontalLouvres(this ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, ShadingObjective objective = null, ShadingPotentialField field = null, int maximumEvaluations = 400, int cellIndexOffset = 0)
         {
-            return ShadingTypology(target, baseVisibilityCache, desirability, contextOccluders, "HorizontalLouvres", objective, null, Seed(field, target, "HorizontalLouvres", objective), maximumEvaluations);
+            return ShadingTypology(target, baseVisibilityCache, desirability, contextOccluders, "HorizontalLouvres", objective, null, Seed(field, target, "HorizontalLouvres", objective), maximumEvaluations, 3, cellIndexOffset);
         }
 
         /// <summary>Optimises a vertical fin array: depth, fin count, fin tilt.</summary>
-        public static OptimisedShadingResult VerticalFins(this ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, ShadingObjective objective = null, ShadingPotentialField field = null, int maximumEvaluations = 400)
+        public static OptimisedShadingResult VerticalFins(this ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, ShadingObjective objective = null, ShadingPotentialField field = null, int maximumEvaluations = 400, int cellIndexOffset = 0)
         {
-            return ShadingTypology(target, baseVisibilityCache, desirability, contextOccluders, "VerticalFins", objective, null, Seed(field, target, "VerticalFins", objective), maximumEvaluations);
+            return ShadingTypology(target, baseVisibilityCache, desirability, contextOccluders, "VerticalFins", objective, null, Seed(field, target, "VerticalFins", objective), maximumEvaluations, 3, cellIndexOffset);
         }
 
         /// <summary>Optimises an egg crate: depth, louvre count, fin count.</summary>
-        public static OptimisedShadingResult EggCrate(this ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, ShadingObjective objective = null, ShadingPotentialField field = null, int maximumEvaluations = 400)
+        public static OptimisedShadingResult EggCrate(this ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, ShadingObjective objective = null, ShadingPotentialField field = null, int maximumEvaluations = 400, int cellIndexOffset = 0)
         {
-            return ShadingTypology(target, baseVisibilityCache, desirability, contextOccluders, "EggCrate", objective, null, Seed(field, target, "EggCrate", objective), maximumEvaluations);
+            return ShadingTypology(target, baseVisibilityCache, desirability, contextOccluders, "EggCrate", objective, null, Seed(field, target, "EggCrate", objective), maximumEvaluations, 3, cellIndexOffset);
         }
 
         /// <summary>
@@ -48,7 +48,8 @@ namespace SAM.Analytical.SolarCalculator
         /// </summary>
         /// <param name="typologyNames">Families to consider. Null means the eligible ones.</param>
         /// <returns>Results best first. EMPTY when nothing is eligible, which is itself an answer.</returns>
-        public static List<OptimisedShadingResult> ShadingDevice(this ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, ShadingObjective objective = null, ShadingPotentialField field = null, IEnumerable<string> typologyNames = null, int maximumEvaluations = 400)
+        /// <param name="cellIndexOffset">This target's first cell index within baseVisibilityCache when the cache spans the whole model.</param>
+        public static List<OptimisedShadingResult> ShadingDevice(this ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, ShadingObjective objective = null, ShadingPotentialField field = null, IEnumerable<string> typologyNames = null, int maximumEvaluations = 400, int cellIndexOffset = 0)
         {
             if (target == null || baseVisibilityCache == null || desirability == null)
             {
@@ -74,7 +75,7 @@ namespace SAM.Analytical.SolarCalculator
             {
                 OptimisedShadingResult optimised = ShadingTypology(
                     target, baseVisibilityCache, desirability, contextOccluders, name,
-                    objective, null, Seed(field, target, name, objective), maximumEvaluations);
+                    objective, null, Seed(field, target, name, objective), maximumEvaluations, 3, cellIndexOffset);
 
                 if (optimised != null)
                 {

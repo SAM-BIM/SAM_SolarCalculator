@@ -130,7 +130,8 @@ namespace SAM.Analytical.SolarCalculator
         /// rationalised comparison, not a general optimiser.
         /// </summary>
         /// <param name="performance">Performance of the winning candidate.</param>
-        public static IShadingTypology RationalisedShading(this ShadingPotentialField field, ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, string typologyName, out ShadingPerformance performance, double wantedSolarPenalty = 1.0, double materialPenalty = 0.1)
+        /// <param name="cellIndexOffset">This target's first cell index within baseVisibilityCache when the cache spans the whole model.</param>
+        public static IShadingTypology RationalisedShading(this ShadingPotentialField field, ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, string typologyName, out ShadingPerformance performance, double wantedSolarPenalty = 1.0, double materialPenalty = 0.1, int cellIndexOffset = 0)
         {
             performance = null;
             if (field == null || target == null || baseVisibilityCache == null || desirability == null)
@@ -160,7 +161,7 @@ namespace SAM.Analytical.SolarCalculator
             {
                 foreach (IShadingTypology candidate in Candidates(typologyName, depth))
                 {
-                    ShadingPerformance candidatePerformance = ShadingPerformance(target, baseVisibilityCache, desirability, contextOccluders, candidate);
+                    ShadingPerformance candidatePerformance = ShadingPerformance(target, baseVisibilityCache, desirability, contextOccluders, candidate, cellIndexOffset);
                     if (candidatePerformance == null)
                     {
                         continue;

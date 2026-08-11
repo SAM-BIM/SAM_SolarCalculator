@@ -25,6 +25,14 @@ namespace SAM.Analytical.SolarCalculator
 
         /// <summary>No candidate beat the null device. The recommendation is to build nothing.</summary>
         NoBeneficialCandidate,
+
+        /// <summary>
+        /// No candidate could be MEASURED — the aperture, the caches and the candidate geometry did
+        /// not describe the same samples, so every score came back NaN. Distinct from
+        /// <see cref="NoBeneficialCandidate"/> on purpose: "nothing is worth building here" is an
+        /// answer, "nothing could be evaluated" is a fault, and the two must never read alike.
+        /// </summary>
+        EvaluationFailed,
     }
 
     /// <summary>

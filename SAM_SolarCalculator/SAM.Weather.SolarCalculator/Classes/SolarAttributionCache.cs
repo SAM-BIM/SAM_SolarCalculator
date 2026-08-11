@@ -47,11 +47,13 @@ namespace SAM.Weather.SolarCalculator
         private double sunPositionShiftInMinutes;
         private int year;
         private int cellCount;
+        private int cellIndexOffset;
         private List<Guid> occluderGuids;
         private int[][] firstHit;
 
-        public SolarAttributionCache(string contextGeometryHash, string targetGeometryHash, double cellSize, double binSizeDegrees, double sunPositionShiftInMinutes, int year, int cellCount, IEnumerable<Guid> occluderGuids, int[][] firstHit)
+        public SolarAttributionCache(string contextGeometryHash, string targetGeometryHash, double cellSize, double binSizeDegrees, double sunPositionShiftInMinutes, int year, int cellCount, IEnumerable<Guid> occluderGuids, int[][] firstHit, int cellIndexOffset = 0)
         {
+            this.cellIndexOffset = cellIndexOffset;
             this.contextGeometryHash = contextGeometryHash;
             this.targetGeometryHash = targetGeometryHash;
             this.cellSize = cellSize;
@@ -77,6 +79,7 @@ namespace SAM.Weather.SolarCalculator
                 sunPositionShiftInMinutes = solarAttributionCache.sunPositionShiftInMinutes;
                 year = solarAttributionCache.year;
                 cellCount = solarAttributionCache.cellCount;
+                cellIndexOffset = solarAttributionCache.cellIndexOffset;
                 occluderGuids = new List<Guid>(solarAttributionCache.occluderGuids ?? new List<Guid>());
                 firstHit = Clone(solarAttributionCache.firstHit);
             }
@@ -104,7 +107,14 @@ namespace SAM.Weather.SolarCalculator
 
         public int Year { get { return year; } }
 
+        /// <summary>Cells attributed here. This cache is indexed 0..CellCount-1, LOCALLY.</summary>
         public int CellCount { get { return cellCount; } }
+
+        /// <summary>
+        /// Where this cache's local cell 0 sits in the visibility cache's shared cell space. Read
+        /// the visibility cache at CellIndexOffset + c where you read this one at c.
+        /// </summary>
+        public int CellIndexOffset { get { return cellIndexOffset; } }
 
         public int BinCount { get { return firstHit == null ? 0 : firstHit.Length; } }
 
@@ -218,6 +228,7 @@ namespace SAM.Weather.SolarCalculator
             if (jObject.ContainsKey("SunPositionShiftInMinutes")) { sunPositionShiftInMinutes = jObject["SunPositionShiftInMinutes"]?.GetValue<double>() ?? default; }
             if (jObject.ContainsKey("Year")) { year = jObject["Year"]?.GetValue<int>() ?? default; }
             if (jObject.ContainsKey("CellCount")) { cellCount = jObject["CellCount"]?.GetValue<int>() ?? default; }
+            cellIndexOffset = jObject.ContainsKey("CellIndexOffset") ? (jObject["CellIndexOffset"]?.GetValue<int>() ?? 0) : 0;
 
             occluderGuids = new List<Guid>();
             if (jObject.ContainsKey("OccluderGuids") && jObject["OccluderGuids"] is JsonArray guidArray)
@@ -267,6 +278,7 @@ namespace SAM.Weather.SolarCalculator
             jObject.Add("SunPositionShiftInMinutes", sunPositionShiftInMinutes);
             jObject.Add("Year", year);
             jObject.Add("CellCount", cellCount);
+            jObject.Add("CellIndexOffset", cellIndexOffset);
 
             JsonArray guidArray = new JsonArray();
             foreach (Guid guid in occluderGuids ?? new List<Guid>())

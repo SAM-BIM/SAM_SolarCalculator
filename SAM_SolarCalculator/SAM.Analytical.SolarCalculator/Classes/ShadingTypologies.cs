@@ -205,6 +205,30 @@ namespace SAM.Analytical.SolarCalculator
         }
     }
 
+    /// <summary>
+    /// The NULL DEVICE: leaving the window alone, expressed as a device so it can be measured
+    /// rather than merely asserted.
+    ///
+    /// "No shading is worth building here" is a successful engineering answer, not a failure, and an
+    /// engineer is entitled to see it verified on the same footing as any other proposal. Because
+    /// this builds an EMPTY element list (empty, never null — null means "this family cannot act on
+    /// this aperture"), the ordinary Stage 8 accounting runs over it unchanged: the admitted
+    /// baseline is measured, nothing is intercepted, and the percentages come out as the true 0 %
+    /// blocked / 100 % retained rather than being fabricated by a special case. Where a denominator
+    /// is genuinely zero the result stays NaN, exactly as for a real device.
+    ///
+    /// It is deliberately NOT one of Create.ShadingTypologyNames: there is nothing to optimise.
+    /// </summary>
+    public class NoShading : ShadingTypology
+    {
+        public override string Name { get { return "NoShading"; } }
+
+        public override List<ShadingElement> ShadingElements(ApertureSolarTarget target)
+        {
+            return target == null ? null : new List<ShadingElement>();
+        }
+    }
+
     /// <summary>A single horizontal plate above the head: the canonical south-facade device.</summary>
     public class Overhang : ShadingTypology
     {

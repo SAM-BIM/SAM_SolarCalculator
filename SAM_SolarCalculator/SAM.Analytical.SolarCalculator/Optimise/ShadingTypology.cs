@@ -72,6 +72,7 @@ namespace SAM.Analytical.SolarCalculator
         /// <param name="seed">Starting device. Null for the family default.</param>
         /// <param name="maximumEvaluations">Hard budget on distinct candidate evaluations.</param>
         /// <param name="coarseLevels">Samples per free parameter in the coarse phase.</param>
+        /// <param name="cellIndexOffset">This target's first cell index within baseVisibilityCache when the cache spans the whole model.</param>
         public static OptimisedShadingResult ShadingTypology(
             this ApertureSolarTarget target,
             SolarVisibilityCache baseVisibilityCache,
@@ -82,7 +83,8 @@ namespace SAM.Analytical.SolarCalculator
             List<ShadingParameter> parameters = null,
             IShadingTypology seed = null,
             int maximumEvaluations = 400,
-            int coarseLevels = 3)
+            int coarseLevels = 3,
+            int cellIndexOffset = 0)
         {
             if (target == null || baseVisibilityCache == null || desirability == null)
             {
@@ -109,7 +111,7 @@ namespace SAM.Analytical.SolarCalculator
             }
 
             Stopwatch stopwatch = Stopwatch.StartNew();
-            Evaluator evaluator = new Evaluator(target, baseVisibilityCache, desirability, contextOccluders, typologyName, objective_Local, parameters_Local);
+            Evaluator evaluator = new Evaluator(target, baseVisibilityCache, desirability, contextOccluders, typologyName, objective_Local, parameters_Local, cellIndexOffset);
 
             // --- the starting vector: the caller's seed where given, the family default otherwise.
             double[] seedVector = new double[parameters_Local.Count];
@@ -226,8 +228,19 @@ namespace SAM.Analytical.SolarCalculator
             }
 
             // --- the null device scores exactly zero: no benefit, no harm, no material.
-            bool recommendsNoShading = !(best.Score > 0);
-            if (recommendsNoShading)
+            //
+            // A candidate that could NOT BE MEASURED at all has a NaN score, and NaN > 0 is false —
+            // so testing the score alone reports an unmeasurable aperture as "no shading is worth
+            // building here", which is a confident engineering answer the run never earned. The two
+            // are separated: a measured candidate that fails to beat zero recommends no shading; an
+            // unmeasured one terminates as a failure and recommends nothing at all.
+            bool measured = best.Performance != null;
+            bool recommendsNoShading = measured && !(best.Score > 0);
+            if (!measured)
+            {
+                termination = ShadingOptimisationTermination.EvaluationFailed;
+            }
+            else if (recommendsNoShading)
             {
                 termination = ShadingOptimisationTermination.NoBeneficialCandidate;
             }
@@ -356,13 +369,15 @@ namespace SAM.Analytical.SolarCalculator
             private readonly string typologyName;
             private readonly ShadingObjective objective;
             private readonly List<ShadingParameter> parameters;
+            private readonly int cellIndexOffset;
             private readonly Dictionary<string, Candidate> cache = new Dictionary<string, Candidate>();
 
             private double geometryMilliseconds;
             private double evaluationMilliseconds;
 
-            public Evaluator(ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, string typologyName, ShadingObjective objective, List<ShadingParameter> parameters)
+            public Evaluator(ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, string typologyName, ShadingObjective objective, List<ShadingParameter> parameters, int cellIndexOffset)
             {
+                this.cellIndexOffset = cellIndexOffset;
                 this.target = target;
                 this.baseVisibilityCache = baseVisibilityCache;
                 this.desirability = desirability;
@@ -396,16 +411,13 @@ namespace SAM.Analytical.SolarCalculator
                 }
 
                 List<ShadingElement> elements = typology.ShadingElements(target);
-                List<LinkedFace3D> occluders = new List<LinkedFace3D>(contextOccluders);
                 List<Guid> guids = new List<Guid>();
                 if (elements != null)
                 {
                     foreach (ShadingElement element in elements)
                     {
-                        LinkedFace3D linkedFace3D = element?.LinkedFace3D;
-                        if (linkedFace3D != null)
+                        if (element?.LinkedFace3D != null)
                         {
-                            occluders.Add(linkedFace3D);
                             guids.Add(element.Guid);
                         }
                     }
@@ -424,12 +436,14 @@ namespace SAM.Analytical.SolarCalculator
 
                 stopwatch = Stopwatch.StartNew();
 
-                SolarAttributionCache attributionCache = Weather.SolarCalculator.Create.SolarAttributionCache(baseVisibilityCache, occluders, target.AnalysisCells);
+                // Context is already in baseVisibilityCache and is not traced again per candidate —
+                // see Create.ShadingPerformance for why that is exact, and what it costs not to.
+                SolarAttributionCache attributionCache = Create.CandidateAttributionCache(baseVisibilityCache, elements, target.AnalysisCells, cellIndexOffset);
                 if (attributionCache != null)
                 {
                     ShadingPerformance performance = Create.ShadingPerformance(
                         target, baseVisibilityCache, attributionCache, desirability, elements,
-                        typologyName, typology.MaterialFraction(target));
+                        typologyName, typology.MaterialFraction(target), cellIndexOffset);
 
                     if (performance != null)
                     {
