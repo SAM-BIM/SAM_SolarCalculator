@@ -1318,8 +1318,9 @@ judgement calls: reuse must be visible enough that a stale result is never silen
 4. **Sun-grouping bias study** — MAE vs sun-angle step at 1°/2°/5°, published in the docs so users
    can choose.
 5. **Grid convergence** — grid size and voxel size sensitivity, documented.
-6. **`documentation/`** — method description, the assumptions register (isotropic vs Perez, no
-   inter-reflection, no load model, binning approximation), and a worked example.
+6. **`documentation/Stage11-Validation.md`** — **written**: consolidated validation status
+   and the assumptions register (§3), fitness-for-purpose guidance (§4), the open validation gaps
+   (§2.5, §5) and the deferred capabilities (§6).
 
 **Difficulty.** Medium.
 
