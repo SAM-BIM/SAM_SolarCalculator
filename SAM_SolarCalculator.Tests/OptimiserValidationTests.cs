@@ -294,7 +294,7 @@ namespace SAM.SolarCalculator.Tests
             // search five times coarser than its own.
             OptimisationFixture.Scenario scenario = OptimisationFixture.SouthSeasonal();
 
-            output.WriteLine("family              lambda   mu     optimiser      best enumerated   gap        gap %    evaluated / enumerated");
+            output.WriteLine("family              lambda   mu     optimiser      best enumerated   gap        gap %    evaluated / enumerated   starts        stopped because");
 
             List<double> gaps = new List<double>();
 
@@ -326,8 +326,16 @@ namespace SAM.SolarCalculator.Tests
                     double relative = best.Item1 > 0 ? 100.0 * gap / best.Item1 : 0.0;
                     gaps.Add(relative);
 
+                    // With a budget-bounded start count, "how far down the coarse ranking did it get"
+                    // is part of the result, not an inference: refined == available means it ran out
+                    // of basins, refined < available means it ran out of budget.
+                    string stopped = optimised.CoarseStartsRefined >= optimised.CoarseStartsAvailable
+                        ? "all starts refined"
+                        : "400-evaluation budget";
+
                     output.WriteLine($"{typologyName,-18}  {objectiveWeights.Item1,-6:0.#}  {objectiveWeights.Item2,-4:0.##}  " +
-                        $"{optimised.ObjectiveScore,11:0.###}   {best.Item1,15:0.###}   {gap,8:0.###}   {relative,6:0.##} %   {optimised.Evaluations,5} / {best.Item3}");
+                        $"{optimised.ObjectiveScore,11:0.###}   {best.Item1,15:0.###}   {gap,8:0.###}   {relative,6:0.##} %   {optimised.Evaluations,5} / {best.Item3,-8}   " +
+                        $"{optimised.CoarseStartsRefined,3} / {optimised.CoarseStartsAvailable,-3}   {stopped}");
 
                     parameterComparison.Add(
                         $"{typologyName,-18}  {objectiveWeights.Item1,-4:0.#}  optimiser [{Describe(optimised)}]   enumerated [{best.Item2}]");

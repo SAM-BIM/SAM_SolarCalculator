@@ -81,6 +81,8 @@ namespace SAM.Analytical.SolarCalculator
         private List<Guid> elementGuids = new List<Guid>();
         private int evaluations;
         private int iterations;
+        private int coarseStartsAvailable;
+        private int coarseStartsRefined;
         private double elapsedMilliseconds = double.NaN;
         private double geometryMilliseconds = double.NaN;
         private double evaluationMilliseconds = double.NaN;
@@ -134,6 +136,8 @@ namespace SAM.Analytical.SolarCalculator
             elementGuids = new List<Guid>(optimisedShadingResult.elementGuids);
             evaluations = optimisedShadingResult.evaluations;
             iterations = optimisedShadingResult.iterations;
+            coarseStartsAvailable = optimisedShadingResult.coarseStartsAvailable;
+            coarseStartsRefined = optimisedShadingResult.coarseStartsRefined;
             elapsedMilliseconds = optimisedShadingResult.elapsedMilliseconds;
             geometryMilliseconds = optimisedShadingResult.geometryMilliseconds;
             evaluationMilliseconds = optimisedShadingResult.evaluationMilliseconds;
@@ -255,6 +259,16 @@ namespace SAM.Analytical.SolarCalculator
         /// <summary>Pattern-search iterations completed.</summary>
         public int Iterations { get { return iterations; } }
 
+        /// <summary>
+        /// Distinct coarse points the ranking offered as refinement starts. The default search takes
+        /// as many as the evaluation budget allows rather than a fixed number, so this and
+        /// <see cref="CoarseStartsRefined"/> together say whether it ran out of basins or out of budget.
+        /// </summary>
+        public int CoarseStartsAvailable { get { return coarseStartsAvailable; } }
+
+        /// <summary>Distinct coarse points actually refined, best-first.</summary>
+        public int CoarseStartsRefined { get { return coarseStartsRefined; } }
+
         public double ElapsedMilliseconds { get { return elapsedMilliseconds; } }
 
         /// <summary>Time spent building candidate geometry, ms.</summary>
@@ -326,10 +340,12 @@ namespace SAM.Analytical.SolarCalculator
             objectiveScore = shadingObjective.Score(performance);
         }
 
-        internal void SetRun(int evaluationCount, int iterationCount, double milliseconds, ShadingOptimisationTermination terminationReason, bool noShading, double seedScore)
+        internal void SetRun(int evaluationCount, int iterationCount, double milliseconds, ShadingOptimisationTermination terminationReason, bool noShading, double seedScore, int startsAvailable, int startsRefined)
         {
             evaluations = evaluationCount;
             iterations = iterationCount;
+            coarseStartsAvailable = startsAvailable;
+            coarseStartsRefined = startsRefined;
             elapsedMilliseconds = milliseconds;
             termination = terminationReason;
             recommendsNoShading = noShading;
@@ -449,6 +465,8 @@ namespace SAM.Analytical.SolarCalculator
 
             if (jObject.ContainsKey("Evaluations")) { evaluations = jObject["Evaluations"]?.GetValue<int>() ?? default; }
             if (jObject.ContainsKey("Iterations")) { iterations = jObject["Iterations"]?.GetValue<int>() ?? default; }
+            if (jObject.ContainsKey("CoarseStartsAvailable")) { coarseStartsAvailable = jObject["CoarseStartsAvailable"]?.GetValue<int>() ?? default; }
+            if (jObject.ContainsKey("CoarseStartsRefined")) { coarseStartsRefined = jObject["CoarseStartsRefined"]?.GetValue<int>() ?? default; }
             elapsedMilliseconds = Read(jObject, "ElapsedMilliseconds");
             geometryMilliseconds = Read(jObject, "GeometryMilliseconds");
             evaluationMilliseconds = Read(jObject, "EvaluationMilliseconds");
@@ -526,6 +544,8 @@ namespace SAM.Analytical.SolarCalculator
 
             jObject.Add("Evaluations", evaluations);
             jObject.Add("Iterations", iterations);
+            jObject.Add("CoarseStartsAvailable", coarseStartsAvailable);
+            jObject.Add("CoarseStartsRefined", coarseStartsRefined);
             jObject.Add("ElapsedMilliseconds", elapsedMilliseconds);
             jObject.Add("GeometryMilliseconds", geometryMilliseconds);
             jObject.Add("EvaluationMilliseconds", evaluationMilliseconds);

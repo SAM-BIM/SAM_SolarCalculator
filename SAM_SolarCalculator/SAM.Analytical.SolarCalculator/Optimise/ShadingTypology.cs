@@ -30,7 +30,8 @@ namespace SAM.Analytical.SolarCalculator
         private const double ScoreTolerance = 1e-12;
 
         /// <summary>
-        /// How many distinct coarse points phase 2 refines from, best-first.
+        /// The default start count: refine from AS MANY distinct coarse points as the evaluation
+        /// budget allows, best-first, rather than from a fixed number of them.
         ///
         /// Gate 7 measured single-start refinement at a mean 16.29 % and worst 41.28 % below an
         /// enumeration on a lattice five times coarser than the search's own, while spending only
@@ -40,8 +41,16 @@ namespace SAM.Analytical.SolarCalculator
         ///
         /// Refining several basins spends the idle budget on the actual weakness. Memoisation makes
         /// later starts much cheaper than the first, since they re-walk points already evaluated.
+        ///
+        /// A FIXED count of five was the first form of that fix, and it left most of the budget
+        /// unspent — 67 to 161 evaluations of 400. Worse, the cut-off is arbitrary in a way the
+        /// measurement exposed: on the Stage 11 fixture the best EggCrate coarse point carrying the
+        /// count the enumeration wanted ranked SIXTH, one place outside the set. Raising five to six
+        /// would fit the constant to that fixture. The honest bound is the one the caller already
+        /// states — the evaluation budget — so the search keeps taking the next ranked start until
+        /// the budget is gone or the ranking is exhausted, and no count needs choosing at all.
         /// </summary>
-        private const int DefaultRefinementStarts = 5;
+        private const int BudgetBoundedRefinementStarts = 0;
 
         /// <summary>
         /// Optimises one family against one aperture.
@@ -106,7 +115,7 @@ namespace SAM.Analytical.SolarCalculator
             int cellIndexOffset = 0)
         {
             return ShadingTypology(target, baseVisibilityCache, desirability, contextOccluders, typologyName,
-                objective, parameters, seed, maximumEvaluations, coarseLevels, cellIndexOffset, DefaultRefinementStarts);
+                objective, parameters, seed, maximumEvaluations, coarseLevels, cellIndexOffset, BudgetBoundedRefinementStarts);
         }
 
         /// <summary>
@@ -115,7 +124,7 @@ namespace SAM.Analytical.SolarCalculator
         /// compiled callers keep resolving — appending an optional parameter in place would be a
         /// binary break.
         /// </summary>
-        /// <param name="refinementStarts">Distinct coarse points to refine from, best-first. 1 restores single-start behaviour.</param>
+        /// <param name="refinementStarts">Distinct coarse points to refine from, best-first. 1 restores single-start behaviour. Zero or less takes as many as <paramref name="maximumEvaluations"/> allows.</param>
         public static OptimisedShadingResult ShadingTypology(
             this ApertureSolarTarget target,
             SolarVisibilityCache baseVisibilityCache,
@@ -183,6 +192,13 @@ namespace SAM.Analytical.SolarCalculator
             }
 
             int iterations = 0;
+
+            // How far down the coarse ranking the budget actually got. Reported rather than inferred,
+            // because with a budget-bounded start count the two numbers are the whole story of
+            // whether the search ran out of basins or ran out of money.
+            int startsAvailable = 0;
+            int startsRefined = 0;
+
             ShadingOptimisationTermination termination = ShadingOptimisationTermination.NothingToSearch;
 
             if (best != null && free.Count > 0)
@@ -228,11 +244,17 @@ namespace SAM.Analytical.SolarCalculator
 
                 // Distinct starting points, best first, using the evaluator's own identity so two
                 // points it would treat as one are never counted as two basins.
+                //
+                // A caller may still ask for a fixed number. The DEFAULT does not: it collects the
+                // whole ranking and lets the evaluation budget decide how far down it gets, because
+                // any fixed cut-off is a number chosen without reference to the problem — and the
+                // ranking is a total order, so "as far as the budget allows" is just as deterministic
+                // as "the best five".
                 List<double[]> starts = new List<double[]>();
                 HashSet<string> seenStarts = new HashSet<string>();
                 foreach (Candidate candidate in coarse)
                 {
-                    if (starts.Count >= Math.Max(1, refinementStarts))
+                    if (refinementStarts > 0 && starts.Count >= refinementStarts)
                     {
                         break;
                     }
@@ -242,6 +264,8 @@ namespace SAM.Analytical.SolarCalculator
                         starts.Add(candidate.Parameters);
                     }
                 }
+
+                startsAvailable = starts.Count;
 
                 // --- phase 2: compass refinement, run independently from each starting point.
                 //     Each start keeps its OWN incumbent so a descent cannot be dragged into the
@@ -257,6 +281,8 @@ namespace SAM.Analytical.SolarCalculator
                         termination = ShadingOptimisationTermination.EvaluationBudgetExhausted;
                         break;
                     }
+
+                    startsRefined++;
 
                     Candidate local = evaluator.Evaluate(startPoint);
                     if (local == null || double.IsNaN(local.Score))
@@ -381,7 +407,7 @@ namespace SAM.Analytical.SolarCalculator
                 termination = ShadingOptimisationTermination.NoBeneficialCandidate;
             }
 
-            return evaluator.Result(best, seedCandidate, iterations, stopwatch.Elapsed.TotalMilliseconds, termination, recommendsNoShading);
+            return evaluator.Result(best, seedCandidate, iterations, stopwatch.Elapsed.TotalMilliseconds, termination, recommendsNoShading, startsAvailable, startsRefined);
         }
 
         /// <summary>
@@ -637,7 +663,7 @@ namespace SAM.Analytical.SolarCalculator
                 return stringBuilder.ToString();
             }
 
-            public OptimisedShadingResult Result(Candidate best, Candidate seed, int iterations, double elapsedMilliseconds, ShadingOptimisationTermination termination, bool recommendsNoShading)
+            public OptimisedShadingResult Result(Candidate best, Candidate seed, int iterations, double elapsedMilliseconds, ShadingOptimisationTermination termination, bool recommendsNoShading, int startsAvailable, int startsRefined)
             {
                 OptimisedShadingResult result = new OptimisedShadingResult();
                 result.TypologyName = typologyName;
@@ -655,7 +681,7 @@ namespace SAM.Analytical.SolarCalculator
 
                 result.SetParameters(names, values, seeds, parameters);
                 result.SetPerformance(best.Performance, objective);
-                result.SetRun(cache.Count, iterations, elapsedMilliseconds, termination, recommendsNoShading, seed == null ? double.NaN : seed.Score);
+                result.SetRun(cache.Count, iterations, elapsedMilliseconds, termination, recommendsNoShading, seed == null ? double.NaN : seed.Score, startsAvailable, startsRefined);
                 result.SetTiming(geometryMilliseconds, evaluationMilliseconds);
                 result.SetProvenance(
                     target.ApertureGuid,

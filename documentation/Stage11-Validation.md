@@ -423,7 +423,95 @@ right region exists for *any* family — Overhang and Louvres survive that only 
 smooth enough for a depth descent to walk there. That is a statement about how the lattice spans a
 bounded range, not about the move set, and it should be measured before anything is changed.
 
-### 2.10 What remains **not** validated
+### 2.10 Budget-aware multi-start — measured. **Best mean yet, gate still fails, and the cause is now certain**
+
+The fixed best-5 start limit was replaced by a budget-bounded one: the coarse ranking is collected
+whole and refined in order until either the ranking is exhausted or `maximumEvaluations` is reached.
+No constant was bumped from 5 to 6 — the count is gone, and the bound is the budget the caller already
+states. Everything else is untouched: coarse lattice at `coarseLevels = 3`, the `MinimumIncrement`
+floor from §2.9, `Snap`, `IsBetter`, NO SHADE, bounds, determinism. `OptimisedShadingResult` gained
+`CoarseStartsAvailable` / `CoarseStartsRefined` so the stop reason is reported rather than inferred.
+
+| family | λ | optimiser | enumerated best | gap % | evals | starts | stopped because | optimiser parameters | enumerated parameters |
+|---|---:|---:|---:|---:|---:|---:|---|---|---|
+| Overhang | 0.5 | 154.960 | 133.974 | **−15.66** | 289 | 28 / 28 | all starts refined | Depth 0.54, Rise 0.11, Ext 0.02 | Depth 0.35, Rise 0, Ext 0 |
+| Overhang | 1 | 140.449 | 122.680 | **−14.48** | 306 | 28 / 28 | all starts refined | Depth 0.57, Rise 0.18, Ext 0.05 | Depth 0.65, Rise 0.25, Ext 0 |
+| Overhang | 2 | 132.689 | 121.617 | **−9.10** | 259 | 28 / 28 | all starts refined | Depth 0.6, Rise 0.22, Ext 0.08 | Depth 0.65, Rise 0.25, Ext 0 |
+| HorizontalLouvres | 0.5 | 154.253 | 148.675 | **−3.75** | 224 | 28 / 28 | all starts refined | Depth 0.2, Count 3, Tilt 5 | Depth 0.6, Count 1, Tilt −15 |
+| HorizontalLouvres | 1 | 153.962 | 146.381 | **−5.18** | 217 | 28 / 28 | all starts refined | Depth 0.09, Count 3, Tilt 45 | Depth 0.1, Count 3, Tilt 45 |
+| HorizontalLouvres | 2 | 153.962 | 146.381 | **−5.18** | 203 | 28 / 28 | all starts refined | Depth 0.09, Count 3, Tilt 45 | Depth 0.1, Count 3, Tilt 45 |
+| VerticalFins | 0.5 | 5.071 | 5.071 | 0 | 154 | 28 / 28 | all starts refined | Depth 0.05, Count 5, Tilt 15 | Depth 0.05, Count 5, Tilt 15 |
+| VerticalFins | 1 | 5.071 | 5.071 | 0 | 154 | 28 / 28 | all starts refined | Depth 0.05, Count 5, Tilt 15 | Depth 0.05, Count 5, Tilt 15 |
+| VerticalFins | 2 | 5.071 | 5.071 | 0 | 154 | 28 / 28 | all starts refined | Depth 0.05, Count 5, Tilt 15 | Depth 0.05, Count 5, Tilt 15 |
+| EggCrate | 0.5 | 84.133 | 115.743 | 27.31 | 112 | 28 / 28 | all starts refined | Depth 0.22, **LouvreCount 1**, FinCount 1 | Depth 0.1, **LouvreCount 3**, FinCount 1 |
+| EggCrate | 1 | 74.013 | 111.762 | 33.78 | 116 | 28 / 28 | all starts refined | Depth 0.11, **LouvreCount 1**, FinCount 1 | Depth 0.1, **LouvreCount 3**, FinCount 1 |
+| EggCrate | 2 | 63.807 | 103.798 | **38.53** | 112 | 28 / 28 | all starts refined | Depth 0.1, **LouvreCount 1**, FinCount 1 | Depth 0.1, **LouvreCount 3**, FinCount 1 |
+
+| | multi-start 5 | step floor (§2.9) | budget-aware | gate |
+|---|---:|---:|---:|---|
+| mean gap | 5.204 % | 4.803 % | **3.854 %** | < 3 % — **still fails** |
+| worst gap | 41.28 % | 38.53 % | **38.53 %** | < 10 % — **still fails** |
+| matched or beat | 9 / 12 | 9 / 12 | 9 / 12 | — |
+| evaluations | 56–158 | 67–161 | 112–306 | ≤ 400 budget |
+
+**Every case refined all 28 available starts and stopped because the ranking was exhausted, not
+because of the budget** — the worst case spent 306 of 400. So the search now refines *every distinct
+coarse point there is*, and the fixed count of five was indeed leaving value on the table: the mean
+fell again, and Overhang λ=2 crossed from −5.46 % to −9.10 %.
+
+**The rank-6 near-miss explanation from §2.9 is now dead.** All nine `LouvreCount = 3` coarse points
+were refined at every λ, including the rank-6 best. EggCrate still returns `LouvreCount = 1`:
+Depth 0.22 / 0.11 / 0.10 at λ = 0.5 / 1 / 2, `FinCount 1` throughout.
+
+**Why the LouvreCount 3 start does not arrive — measured.** Two facts settle it.
+
+First, the depth response at `LouvreCount 3, FinCount 1` is a **narrow spike**:
+
+| depth | λ=0.5 | λ=1 | λ=2 | |
+|---|---:|---:|---:|---|
+| 0.05 | −19.569 | −19.815 | −20.308 | the coarse start |
+| 0.09 | 99.953 | 97.198 | 91.688 | |
+| **0.10** | **115.743** | **111.762** | **103.798** | enumerated reference |
+| 0.11 | 120.935 | 114.404 | 101.341 | |
+| 0.15 | 92.270 | 77.470 | 47.870 | |
+| 0.30 | 38.011 | −41.547 | −200.662 | |
+| **0.54** | **−342.608** | **−593.350** | **−1094.833** | first compass probe from 0.05 (+0.4875) |
+| 2.00 | −1900.209 | −2326.741 | −3179.804 | coarse maximum |
+
+Everything worth building lives between roughly 0.08 and 0.30 m. The coarse lattice samples depth at
+**0.05, 1.02 and 2.00** — one point just below the useful band and two points deep in a region where
+the objective is worse than building nothing by three orders of magnitude. The refinement's first
+depth step from 0.05 is 0.4875, landing on 0.54, which is −1094.833. It is rejected, correctly.
+
+Second, at depth 0.05 the ordering along `LouvreCount` is **inverted**: 1 scores −1.753, 2 scores
+−15.274, 3 scores −20.308. So a descent starting at `(0.05, 3, 1)` finds that *reducing* the count
+improves matters, walks 3 → 2 → 1 on its first pass, and refines depth from there. It abandons the
+basin before depth is ever resolved into the spike where three louvres win. The valley at
+`LouvreCount 2` recorded in §2.9 exists at depth 0.10; at depth 0.05 it is a ridge pointing the wrong
+way.
+
+**Confirmation that the basin itself is fine.** Pinning `LouvreCount` to 3 by its bounds and running
+the unmodified search:
+
+| λ | found depth | score | reference | evaluations |
+|---|---:|---:|---:|---:|
+| 0.5 | 0.21 | 104.134 | 115.743 | 46 |
+| 1 | 0.11 | **114.404** | 111.762 | 56 |
+| 2 | 0.10 | **103.798** | 103.798 | 55 |
+
+Held in that basin the existing depth refinement lands **exactly on the reference at λ=2 and beats it
+at λ=1**, in under 60 evaluations. Nothing is wrong with the move set, the step floor, or the number
+of starts. **The search cannot get into the basin because no coarse point is in it.**
+
+**Status: stopped, per the standing decision rule — the coarse lattice was NOT modified.** No threshold
+relaxed, no budget raised, no coarse level raised, no compound moves, no randomness, no
+EggCrate-specific logic. The measurement now points at one thing and it is the lattice: three levels
+spanning 0.05–2.00 m sample a range whose useful part is the bottom 13 %. Overhang, Louvres and Fins
+survive that only because their response is smooth enough for a depth descent to walk in from outside;
+EggCrate's is not. That is the next thing to measure, and it is a change to how the lattice **spans a
+bounded range**, not to the move set or the start count.
+
+### 2.11 What remains **not** validated
 
 Stated plainly, because it bounds what may be claimed:
 
@@ -476,7 +564,7 @@ result is biased: *under* = the tool reports less than reality, *over* = more.
 | A14 | **Four device families.** No light shelves, external roller blinds, or operable/seasonal devices. | — | — | Applicability. |
 | A15 | **Perforated / translucent screens unsupported** — the ray engine is binary. | — | — | Applicability. |
 | A16 | **Single scalar objective.** No Pareto front; λ and μ chosen up front. | — | — | Optimisation. Trade-offs are fixed before the search, not explored after. |
-| A17 | **Local optimality on the search lattice.** Multi-start mitigates it; compound pairwise moves did **not** help and were removed; the unreachable-axis defect is now **fixed**. **Still open — Gate 7 fails.** | **Measured: mean 4.8 %, worst 38.5 % below the enumerated best** (§2.9; 16.3 % / 41.3 % single-start, 5.2 % / 41.3 % multi-start, 4.5 % / 41.3 % with compound moves) | **Under** — the recommended device can be materially worse than the family's best | Concentrated entirely in **EggCrate**, at 38.5 %. The residual is **not** a search defect: the objective along `LouvreCount` is a valley at 2 (worth 27–50 points less than either 1 or 3 at every weight), so a strict-descent search cannot reach the better 3, and no `LouvreCount = 3` coarse point ranks inside the refinement set. Measured in §2.9. Stopped there deliberately rather than tuning constants until the fixture passes. "Optimal" means **best found within a bounded deterministic search**, never mathematically proven-global. |
+| A17 | **Local optimality on the search lattice.** Multi-start, the `MinimumIncrement` step floor and budget-aware starts each helped; compound pairwise moves did not and were removed. **Still open — Gate 7 fails.** | **Measured: mean 3.9 %, worst 38.5 % below the enumerated best** (§2.10; 16.3 % / 41.3 % single-start, 5.2 % / 41.3 % best-5 multi-start, 4.8 % / 38.5 % with the step floor) | **Under** — the recommended device can be materially worse than the family's best | Concentrated entirely in **EggCrate**, at 38.5 %. The residual is **not** a move-set or start-count defect: with `LouvreCount` pinned to 3 the unmodified search lands exactly on the enumerated reference at λ=2 and beats it at λ=1 in under 60 evaluations (§2.10). It is the **coarse lattice**: three levels spanning depth 0.05–2.00 m sample a range whose useful part is the bottom 13 %, so no start exists inside the basin. Not yet changed — measurement first. "Optimal" means **best found within a bounded deterministic search**, never mathematically proven-global. |
 | A18 | **`MaterialFraction` is area only** — no thickness, weight, fixing or cost. | — | **Under**-states real buildability cost | Any material/cost trade-off. |
 | A19 | **A valid, resolvable TimeZone is required.** | — | — | Fails loudly, by design. |
 | A20 | **The ideal shape's mesh is display geometry**, not performance truth. | — | — | Anyone measuring off the mesh instead of running `VerifyShading`. |
