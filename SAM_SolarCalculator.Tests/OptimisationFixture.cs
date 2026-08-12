@@ -117,7 +117,11 @@ namespace SAM.SolarCalculator.Tests
         /// A memoised scenario. The key must capture everything that changes the result, or two
         /// different scenarios would silently share one cache.
         /// </summary>
-        public static Scenario Get(string key, Func<Face3D> face, Func<List<LinkedFace3D>> context, Func<IDesirabilityStrategy> strategy, double gridSize = 0.25, double peakGlobal = 900.0)
+        /// <param name="sunAngleStep">
+        /// Angular resolution of the sun grouping, degrees. Defaults to the accepted 2°. Stage 11's
+        /// grouping-bias study varies it deliberately; nothing else should.
+        /// </param>
+        public static Scenario Get(string key, Func<Face3D> face, Func<List<LinkedFace3D>> context, Func<IDesirabilityStrategy> strategy, double gridSize = 0.25, double peakGlobal = 900.0, double sunAngleStep = SunAngleStep)
         {
             lock (padlock)
             {
@@ -136,7 +140,7 @@ namespace SAM.SolarCalculator.Tests
                     SAM.Geometry.SolarCalculator.Query.AnalysisCells(face3D, gridSize));
 
                 SolarVisibilityCache baseCache = Weather.SolarCalculator.Create.SolarVisibilityCache(
-                    TestHelpers.London(), Year, SunAngleStep, occluders, target.AnalysisCells,
+                    TestHelpers.London(), Year, sunAngleStep, occluders, target.AnalysisCells,
                     cellSize: gridSize, minHorizonAngle: 0.0349066, sunPositionShiftInMinutes: 30.0);
 
                 WeatherData weatherData = TestHelpers.SolarSymmetricWeatherData(Year, TestHelpers.London(), 30.0, peakGlobal, 0.2);
