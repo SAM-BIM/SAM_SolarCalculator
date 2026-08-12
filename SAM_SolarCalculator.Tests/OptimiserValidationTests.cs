@@ -199,8 +199,8 @@ namespace SAM.SolarCalculator.Tests
                 }
 
                 // The VOXEL SOLID, traced as real occluders — the faithful representation.
-                List<SAM.Geometry.Object.Spatial.LinkedFace3D> voxelFaces = Analytical.SolarCalculator.Query.IdealShadingElements(
-                    field, ideal.VoxelIndices)?.ConvertAll(x => x.LinkedFace3D);
+                List<SAM.Geometry.Object.Spatial.LinkedFace3D> voxelFaces = Analytical.SolarCalculator.Query.VoxelSurfaceShadingElements(
+                    volume, ideal.VoxelIndices)?.ConvertAll(x => x.LinkedFace3D);
 
                 if (voxelFaces == null || voxelFaces.Count == 0)
                 {
