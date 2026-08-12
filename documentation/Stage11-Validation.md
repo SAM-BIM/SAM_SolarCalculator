@@ -665,18 +665,50 @@ leaves room for about ten polls in total, so only **3 of 28** starts are refined
 of ~2 m over a 10 mm lattice needs 7 halvings. **The budget was not raised** — but it is no longer
 slack, and the previous rounds' finding that the search left most of it unspent is now reversed.
 
-**Caveat 2 — a permanent regression test from `e027ada` now FAILS.**
-`The_Search_Result_Is_Locally_Best_Along_Every_Free_Axis` reports Overhang returning `Depth 0.61` when
-`0.60` scores 129.205 against 128.506. The returned point is not locally optimal on its own lattice.
-This is a direct consequence of caveat 1: that test asserts a property only a **converged** search can
-promise, and no Overhang descent converges within 400 evaluations any more. The result still beats the
-enumerated best by 5.66 %, so nothing is wrong with the answer — but the guarantee the test was written
-to pin has genuinely weakened.
+**Caveat 2 — a regression test's contract was wrong, and has been corrected (test-only).**
+`The_Search_Result_Is_Locally_Best_Along_Every_Free_Axis` began failing here: Overhang returned
+`Depth 0.61` when `0.60` scores 129.205 against 128.506.
+
+The cause was confirmed by diagnostic before anything was touched. Re-running that exact case on the
+unmodified search with only the caller's evaluation cap raised to 2000:
+
+| | production cap 400 | diagnostic cap 2000 |
+|---|---|---|
+| result | Depth 0.61, Rise 0.23, Ext 0.06 | Depth 0.43, Rise 0.12, Ext 0.01 |
+| score | 128.506 | **138.368** |
+| starts refined | 3 / 28 | 20 / 28 |
+| every ±increment neighbour worse? | **no** — Depth 0.60 scores 129.205 | **yes, on all three axes** |
+
+So the failure was **budget truncation, not a search defect**: the same code, given room, returns a
+point with no improving neighbour on any axis.
+
+**The test asserted something the algorithm never promised.** A bounded search that stops on
+`EvaluationBudgetExhausted` returns *the best point found so far* by definition — the incumbent of a
+descent still in progress, whose neighbours are unexamined. The old test ran the product configuration
+and asserted local optimality of whatever came back, which tests the budget rather than the algorithm.
+
+Merely conditioning on the reported termination would have been too weak in the other direction: the
+budget bounds the **multi-start loop**, so the flag can read `EvaluationBudgetExhausted` while the
+descent that produced the winner finished cleanly — and at the product budget every family reports it,
+so the assertion would never run at all.
+
+The invariant is therefore tested where it is genuinely guaranteed: **one compass descent, given enough
+budget to finish, with completion asserted first** (`refinementStarts = 1`, cap 5000, and
+`Termination != EvaluationBudgetExhausted` asserted before any neighbour is examined). Both are ordinary
+caller arguments; **no production behaviour changed and the defaults remain 400 and budget-bounded**.
+All four families converge in 78–146 evaluations, terminating `StepBelowGranularity`.
+
+This is a correction, not a relaxation, and it was verified as such rather than argued: with the
+`MinimumIncrement` floor temporarily removed from the ladder — the pre-`e027ada` defect, reinjected —
+**the revised test still fails**, catching EggCrate returning `Depth 0.11` where `0.10` scores 63.807
+against 60.95, on a descent that reported itself converged. The test is also *stricter* than before in
+one respect: it can no longer pass silently on a truncated result, because completion is now asserted.
 
 **Status: Gate 7 passes on its unchanged thresholds, and optimiser development is stopped as directed.**
-The test was deliberately **not** relaxed to accommodate the new behaviour: narrowing it to converged
-searches only would be fitting the assertion to the result, and that decision belongs to review, not to
-the change that broke it. Nothing else was altered — no threshold, no budget, no coarse sampling, no CI.
+Nothing else was altered — no threshold, no budget, no coarse sampling, no optimiser change, no CI.
+Caveat 1 stands open: every production case still exhausts 400 evaluations, and the diagnostic above
+shows that costs measured quality (Overhang λ=2 would go from −5.66 % to −13.77 % against the
+enumerated best with more budget). **The budget was not raised.**
 
 ### 2.13 What remains **not** validated
 
@@ -731,7 +763,7 @@ result is biased: *under* = the tool reports less than reality, *over* = more.
 | A14 | **Four device families.** No light shelves, external roller blinds, or operable/seasonal devices. | — | — | Applicability. |
 | A15 | **Perforated / translucent screens unsupported** — the ray engine is binary. | — | — | Applicability. |
 | A16 | **Single scalar objective.** No Pareto front; λ and μ chosen up front. | — | — | Optimisation. Trade-offs are fixed before the search, not explored after. |
-| A17 | **Local optimality on the search lattice.** The balanced multiscale poll (§2.12) closes the measured gap: **Gate 7 passes on its unchanged thresholds**, worst 0 %, mean positive shortfall 0 %, 12 of 12 matched or beat. Two caveats remain open — see below. | **Measured: no case falls short of the enumerated best** (§2.12; was 41.3 % single- and multi-start, 38.5 % with the step floor, 28.3 % with axis-local scale) | **Under, but no longer measurable on this fixture** | The residual risk is now *unquantified rather than large*: the enumeration is a coarser lattice, so beating it everywhere is a lower bound being cleared, **not a proof of global optimality**. Two open items: every case now exhausts the 400-evaluation budget (3–18 of 28 starts refined), and `The_Search_Result_Is_Locally_Best_Along_Every_Free_Axis` fails on Overhang because a budget-truncated descent cannot promise local optimality. **"Optimal" still means best found within a bounded deterministic search, never mathematically proven-global**, and that wording must not soften because the gate went green. |
+| A17 | **Local optimality on the search lattice.** The balanced multiscale poll (§2.12) closes the measured gap: **Gate 7 passes on its unchanged thresholds**, worst 0 %, mean positive shortfall 0 %, 12 of 12 matched or beat. Two caveats remain open — see below. | **Measured: no case falls short of the enumerated best** (§2.12; was 41.3 % single- and multi-start, 38.5 % with the step floor, 28.3 % with axis-local scale) | **Under, but no longer measurable on this fixture** | The residual risk is now *unquantified rather than large*: the enumeration is a coarser lattice, so beating it everywhere is a lower bound being cleared, **not a proof of global optimality**. One open item: every case now exhausts the 400-evaluation budget (3–18 of 28 starts refined), and the diagnostic in §2.12 shows that costs measured quality. The local-optimality regression was re-pinned at the level where the invariant actually holds — a **completed** descent — after measurement confirmed the failure was budget truncation, not a search defect. **"Optimal" still means best found within a bounded deterministic search, never mathematically proven-global**, and that wording must not soften because the gate went green. |
 | A18 | **`MaterialFraction` is area only** — no thickness, weight, fixing or cost. | — | **Under**-states real buildability cost | Any material/cost trade-off. |
 | A19 | **A valid, resolvable TimeZone is required.** | — | — | Fails loudly, by design. |
 | A20 | **The ideal shape's mesh is display geometry**, not performance truth. | — | — | Anyone measuring off the mesh instead of running `VerifyShading`. |

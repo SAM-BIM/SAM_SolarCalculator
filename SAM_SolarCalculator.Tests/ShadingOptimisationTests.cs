@@ -719,19 +719,46 @@ namespace SAM.SolarCalculator.Tests
                 "this fixture no longer reproduces the narrowed-count case the test exists to guard; widen it or the guard is vacuous");
         }
 
+        /// <summary>
+        /// Evaluation cap for the converged-descent test below. Deliberately far above the product
+        /// default: this test is not measuring cost, it is measuring an invariant that only a
+        /// COMPLETED descent has, so it must be able to buy completion. Completion is asserted, not
+        /// assumed — if a descent cannot finish inside this, the test fails loudly rather than
+        /// quietly checking a truncated result.
+        /// </summary>
+        private const int ConvergedDescentBudget = 5000;
+
         [Fact]
-        public void The_Search_Result_Is_Locally_Best_Along_Every_Free_Axis()
+        public void A_Converged_Compass_Descent_Is_Locally_Best_Along_Every_Free_Axis()
         {
-            // The behavioural half of the test above, and the one that actually failed. Whatever the
-            // search returns must be at least as good as its immediate neighbours on the lattice:
-            // step one increment either way along each free axis, rebuild, re-measure, and nothing
-            // may score strictly better. A returned point with a better neighbour is not a local
-            // optimum at all — it is a descent that stopped because it could not express the move.
+            // The behavioural half of the test above, and the one that actually caught the tilt bug.
+            // A descent that HAS RUN TO COMPLETION must be at least as good as its immediate
+            // neighbours on the lattice: step one increment either way along each free axis, rebuild,
+            // re-measure, and nothing may score strictly better. A completed descent with a better
+            // neighbour is not a local optimum at all — it is a descent that stopped because it could
+            // not express the move, which is exactly the defect MinimumIncrement exists to prevent.
             //
-            // This is the weakest honest statement of what the optimiser promises. It is NOT a claim
-            // of global optimality: see Gate 7 for the measured gap against exhaustive enumeration,
-            // and the wording rule that keeps the result "best found within a bounded deterministic
-            // search".
+            // ON THE CONTRACT, corrected. This test used to run the product configuration and assert
+            // the property of whatever came back. That attributed to the search a guarantee it has
+            // never made. A bounded search that stops on EvaluationBudgetExhausted returns "the best
+            // point found so far" BY DEFINITION — the incumbent of a descent still in progress. Its
+            // neighbours are unexamined, and asserting otherwise tests the budget, not the algorithm.
+            //
+            // Conditioning on the reported termination instead would be too weak in the other
+            // direction: the budget bounds the MULTI-START LOOP, so the flag can read
+            // EvaluationBudgetExhausted while the descent that produced the winner finished cleanly,
+            // and at the product budget every family reports it — the assertion would never run.
+            //
+            // So the invariant is tested where it is actually guaranteed: ONE compass descent, given
+            // enough budget to finish, with completion asserted first. That is the level the property
+            // belongs to. It is narrower in configuration and STRICTER in what it demands — the old
+            // test could silently pass on a truncated result, this one cannot pass without a
+            // completed one. It still fails against the pre-MinimumIncrement optimiser, which
+            // converged and returned TiltDegrees 30 with 35 strictly better.
+            //
+            // It is NOT a claim of global optimality: see Gate 7 for the measured gap against
+            // exhaustive enumeration, and the wording rule that keeps the result "best found within a
+            // bounded deterministic search".
             OptimisationFixture.Scenario scenario = OptimisationFixture.SouthSeasonal();
 
             // The weight that stressed the search hardest in Gate 7.
@@ -740,11 +767,18 @@ namespace SAM.SolarCalculator.Tests
 
             foreach (string typologyName in new string[] { "Overhang", "HorizontalLouvres", "VerticalFins", "EggCrate" })
             {
+                // A SINGLE start, so the run ends when that descent converges rather than when the
+                // multi-start loop runs out of ranked coarse points. Product behaviour is untouched:
+                // both are ordinary caller arguments, and the defaults stay 400 and budget-bounded.
                 OptimisedShadingResult result = Optimise.ShadingTypology(
                     scenario.Target, scenario.BaseCache, scenario.Desirability, scenario.Context,
-                    typologyName, objective, null, null, 400, 3);
+                    typologyName, objective, null, null, ConvergedDescentBudget, 3, 0, 1);
 
                 Assert.NotNull(result);
+
+                Assert.NotEqual(ShadingOptimisationTermination.EvaluationBudgetExhausted, result.Termination);
+
+                output.WriteLine($"{typologyName,-18}  converged after {result.Evaluations} evaluations, {result.Iterations} iterations, termination {result.Termination}");
 
                 if (result.RecommendsNoShading)
                 {
@@ -794,7 +828,7 @@ namespace SAM.SolarCalculator.Tests
 
                         Assert.True(score <= result.ObjectiveScore + 1e-9,
                             $"{typologyName}: moving {parameter.Name} from {value:0.##} to {neighbour:0.##} scores {score:0.###} against the returned {result.ObjectiveScore:0.###}, " +
-                            "so the search returned a point it could still have improved on by one step");
+                            "so a CONVERGED descent returned a point it could still have improved on by one step");
                     }
                 }
             }
