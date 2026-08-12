@@ -30,6 +30,20 @@ namespace SAM.Analytical.SolarCalculator
         private const double ScoreTolerance = 1e-12;
 
         /// <summary>
+        /// How many distinct coarse points phase 2 refines from, best-first.
+        ///
+        /// Gate 7 measured single-start refinement at a mean 16.29 % and worst 41.28 % below an
+        /// enumeration on a lattice five times coarser than the search's own, while spending only
+        /// 38-75 of its 400 permitted evaluations. The failure was basin-lock, not arithmetic:
+        /// families whose response is near-unimodal BEAT the coarse enumeration, while those with
+        /// more interacting parameters, and every family at a high wanted-solar penalty, did not.
+        ///
+        /// Refining several basins spends the idle budget on the actual weakness. Memoisation makes
+        /// later starts much cheaper than the first, since they re-walk points already evaluated.
+        /// </summary>
+        private const int DefaultRefinementStarts = 5;
+
+        /// <summary>
         /// Optimises one family against one aperture.
         ///
         /// SEARCH. A deterministic two-phase derivative-free search, chosen over a population
@@ -85,6 +99,31 @@ namespace SAM.Analytical.SolarCalculator
             int maximumEvaluations = 400,
             int coarseLevels = 3,
             int cellIndexOffset = 0)
+        {
+            return ShadingTypology(target, baseVisibilityCache, desirability, contextOccluders, typologyName,
+                objective, parameters, seed, maximumEvaluations, coarseLevels, cellIndexOffset, DefaultRefinementStarts);
+        }
+
+        /// <summary>
+        /// As the overload above, with explicit control over how many distinct coarse points the
+        /// refinement starts from. The parameterless-tail overload is preserved unchanged so already
+        /// compiled callers keep resolving — appending an optional parameter in place would be a
+        /// binary break.
+        /// </summary>
+        /// <param name="refinementStarts">Distinct coarse points to refine from, best-first. 1 restores single-start behaviour.</param>
+        public static OptimisedShadingResult ShadingTypology(
+            this ApertureSolarTarget target,
+            SolarVisibilityCache baseVisibilityCache,
+            ApertureDesirability desirability,
+            List<LinkedFace3D> contextOccluders,
+            string typologyName,
+            ShadingObjective objective,
+            List<ShadingParameter> parameters,
+            IShadingTypology seed,
+            int maximumEvaluations,
+            int coarseLevels,
+            int cellIndexOffset,
+            int refinementStarts)
         {
             if (target == null || baseVisibilityCache == null || desirability == null)
             {
@@ -143,7 +182,11 @@ namespace SAM.Analytical.SolarCalculator
 
             if (best != null && free.Count > 0)
             {
-                // --- phase 1: coarse lattice.
+                // --- phase 1: coarse lattice. EVERY evaluated point is kept, not just the running
+                //     incumbent, so phase 2 can start from several basins rather than only the one
+                //     that happened to win. The incumbent is still tracked here so that a lattice
+                //     that exhausts the budget outright still yields the best point it reached.
+                List<Candidate> coarse = new List<Candidate>();
                 foreach (double[] point in Lattice(parameters_Local, free, seedVector, Math.Max(2, coarseLevels)))
                 {
                     if (evaluator.Evaluations >= maximumEvaluations)
@@ -152,23 +195,57 @@ namespace SAM.Analytical.SolarCalculator
                     }
 
                     Candidate candidate = evaluator.Evaluate(point);
+                    if (candidate != null && !double.IsNaN(candidate.Score))
+                    {
+                        coarse.Add(candidate);
+                    }
+
                     if (IsBetter(candidate, best))
                     {
                         best = candidate;
                     }
                 }
 
-                // --- phase 2: compass refinement from the coarse winner.
-                double[] step = new double[parameters_Local.Count];
-                for (int i = 0; i < parameters_Local.Count; i++)
+                // The seed is a legitimate basin too — Stage 7 picks it off the field's own zero
+                // crossing — so it competes for a starting slot rather than being discarded once the
+                // lattice has run.
+                if (seedCandidate != null && !double.IsNaN(seedCandidate.Score))
                 {
-                    // Half the coarse spacing: fine enough to resolve between lattice points,
-                    // coarse enough not to start from the granularity floor.
-                    step[i] = 0.5 * parameters_Local[i].Range / Math.Max(1, coarseLevels - 1);
+                    coarse.Add(seedCandidate);
                 }
 
+                // Rank by an EXACT total order, deliberately not by IsBetter. IsBetter compares
+                // scores within a relative tolerance, which is right for picking a winner but is not
+                // guaranteed transitive, and List.Sort throws on an inconsistent comparer. Ranking
+                // only decides which points are worth refining, so exact comparison is both safe and
+                // sufficient; IsBetter still decides the final winner.
+                coarse.Sort(CompareForRanking);
+
+                // Distinct starting points, best first, using the evaluator's own identity so two
+                // points it would treat as one are never counted as two basins.
+                List<double[]> starts = new List<double[]>();
+                HashSet<string> seenStarts = new HashSet<string>();
+                foreach (Candidate candidate in coarse)
+                {
+                    if (starts.Count >= Math.Max(1, refinementStarts))
+                    {
+                        break;
+                    }
+
+                    if (seenStarts.Add(Evaluator.Key(candidate.Parameters)))
+                    {
+                        starts.Add(candidate.Parameters);
+                    }
+                }
+
+                // --- phase 2: compass refinement, run independently from each starting point.
+                //     Each start keeps its OWN incumbent so a descent cannot be dragged into the
+                //     basin of a better start; the global winner is taken at the end under the same
+                //     total order as before. Memoisation means overlapping descents cost nothing
+                //     twice, which is what keeps several starts inside one evaluation budget.
                 termination = ShadingOptimisationTermination.StepBelowGranularity;
-                while (true)
+
+                foreach (double[] startPoint in starts)
                 {
                     if (evaluator.Evaluations >= maximumEvaluations)
                     {
@@ -176,46 +253,74 @@ namespace SAM.Analytical.SolarCalculator
                         break;
                     }
 
-                    if (Converged(parameters_Local, free, step))
+                    Candidate local = evaluator.Evaluate(startPoint);
+                    if (local == null || double.IsNaN(local.Score))
                     {
-                        break;
+                        continue;
                     }
 
-                    iterations++;
-                    bool improved = false;
-
-                    foreach (int i in free)
+                    double[] step = new double[parameters_Local.Count];
+                    for (int i = 0; i < parameters_Local.Count; i++)
                     {
-                        foreach (int sign in new int[] { 1, -1 })
+                        // Half the coarse spacing: fine enough to resolve between lattice points,
+                        // coarse enough not to start from the granularity floor.
+                        step[i] = 0.5 * parameters_Local[i].Range / Math.Max(1, coarseLevels - 1);
+                    }
+
+                    while (true)
+                    {
+                        if (evaluator.Evaluations >= maximumEvaluations)
                         {
-                            if (evaluator.Evaluations >= maximumEvaluations)
-                            {
-                                break;
-                            }
+                            termination = ShadingOptimisationTermination.EvaluationBudgetExhausted;
+                            break;
+                        }
 
-                            double[] probe = (double[])best.Parameters.Clone();
-                            probe[i] = parameters_Local[i].Snap(probe[i] + sign * step[i]);
-                            if (probe[i] == best.Parameters[i])
-                            {
-                                continue; // the step snapped back onto the incumbent
-                            }
+                        if (Converged(parameters_Local, free, step))
+                        {
+                            break;
+                        }
 
-                            Candidate candidate = evaluator.Evaluate(probe);
-                            if (IsBetter(candidate, best))
+                        iterations++;
+                        bool improved = false;
+
+                        foreach (int i in free)
+                        {
+                            foreach (int sign in new int[] { 1, -1 })
                             {
-                                best = candidate;
-                                improved = true;
-                                break; // accept and move to the next parameter: a fixed, reproducible order
+                                if (evaluator.Evaluations >= maximumEvaluations)
+                                {
+                                    break;
+                                }
+
+                                double[] probe = (double[])local.Parameters.Clone();
+                                probe[i] = parameters_Local[i].Snap(probe[i] + sign * step[i]);
+                                if (probe[i] == local.Parameters[i])
+                                {
+                                    continue; // the step snapped back onto the incumbent
+                                }
+
+                                Candidate candidate = evaluator.Evaluate(probe);
+                                if (IsBetter(candidate, local))
+                                {
+                                    local = candidate;
+                                    improved = true;
+                                    break; // accept and move to the next parameter: a fixed, reproducible order
+                                }
+                            }
+                        }
+
+                        if (!improved)
+                        {
+                            for (int i = 0; i < step.Length; i++)
+                            {
+                                step[i] *= 0.5;
                             }
                         }
                     }
 
-                    if (!improved)
+                    if (IsBetter(local, best))
                     {
-                        for (int i = 0; i < step.Length; i++)
-                        {
-                            step[i] *= 0.5;
-                        }
+                        best = local;
                     }
                 }
             }
@@ -246,6 +351,44 @@ namespace SAM.Analytical.SolarCalculator
             }
 
             return evaluator.Result(best, seedCandidate, iterations, stopwatch.Elapsed.TotalMilliseconds, termination, recommendsNoShading);
+        }
+
+        /// <summary>
+        /// An EXACT total order over evaluated candidates, used only to rank coarse points for
+        /// refinement. Highest score first, then least material, then the lexicographically smaller
+        /// parameter vector — the same priorities as <see cref="IsBetter"/> but without its relative
+        /// score tolerance, which is not guaranteed transitive and would make List.Sort throw.
+        /// Unmeasurable candidates (NaN score) sort last.
+        /// </summary>
+        private static int CompareForRanking(Candidate x, Candidate y)
+        {
+            if (ReferenceEquals(x, y)) { return 0; }
+            if (x == null) { return y == null ? 0 : 1; }
+            if (y == null) { return -1; }
+
+            bool xNaN = double.IsNaN(x.Score);
+            bool yNaN = double.IsNaN(y.Score);
+            if (xNaN || yNaN)
+            {
+                return xNaN == yNaN ? 0 : (xNaN ? 1 : -1);
+            }
+
+            if (x.Score > y.Score) { return -1; }
+            if (x.Score < y.Score) { return 1; }
+
+            double xCost = double.IsNaN(x.MaterialFraction) ? double.PositiveInfinity : x.MaterialFraction;
+            double yCost = double.IsNaN(y.MaterialFraction) ? double.PositiveInfinity : y.MaterialFraction;
+            if (xCost < yCost) { return -1; }
+            if (xCost > yCost) { return 1; }
+
+            int length = Math.Min(x.Parameters.Length, y.Parameters.Length);
+            for (int i = 0; i < length; i++)
+            {
+                if (x.Parameters[i] < y.Parameters[i]) { return -1; }
+                if (x.Parameters[i] > y.Parameters[i]) { return 1; }
+            }
+
+            return x.Parameters.Length.CompareTo(y.Parameters.Length);
         }
 
         /// <summary>True when every free parameter's step has fallen below its own granularity.</summary>
@@ -466,7 +609,12 @@ namespace SAM.Analytical.SolarCalculator
             /// doubles produce the same key and one that differs in the last bit does not, so the
             /// memo can never conflate two distinct geometries.
             /// </summary>
-            private string Key(double[] values)
+            /// <summary>
+            /// The memo identity of a parameter vector. Static and shared so that de-duplication of
+            /// refinement starting points uses EXACTLY the identity the cache uses — two starts that
+            /// the evaluator would treat as the same point must not be counted as different basins.
+            /// </summary>
+            public static string Key(double[] values)
             {
                 StringBuilder stringBuilder = new StringBuilder();
                 for (int i = 0; i < values.Length; i++)
