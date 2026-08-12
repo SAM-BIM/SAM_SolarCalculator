@@ -591,7 +591,94 @@ search reach EggCrate's basin" but **"how should a compass search order axis ref
 resolving one axis finely does not strand another"** — and, separately, whether 400 evaluations is
 still the right budget now that a single descent can consume far more of it.
 
-### 2.12 What remains **not** validated
+### 2.12 Balanced multiscale poll — **Gate 7 passes**, with two caveats that must be settled first
+
+§2.11 left the search repairing one family at another's expense, because probing an axis and moving
+immediately makes the answer depend on the typology's declaration order. This removes the ordering
+commitment: **the incumbent is held fixed while every axis is examined.** Each axis is probed both ways
+at every distinct scale on its own ladder — its normal initial compass step halved down to
+`MinimumIncrement` — and reports the best improving candidate it can offer. Only when all axes have
+reported does the incumbent move, once, to the globally best offer under the existing `IsBetter` order.
+Every ladder then restarts from the new incumbent. If no axis can offer anything, the start has
+converged.
+
+Unchanged: `coarseLevels = 3`, `maximumEvaluations = 400`, the deterministic coarse ranking, the
+budget-aware multi-start from §2.10, `MinimumIncrement`, `Snap`, `IsBetter`, NO SHADE, bounds and
+grid constraints. No randomness, no compound moves, no coarse-sampling change, no family-specific
+logic.
+
+**The poll chooses on merit, not order** — checked before running the gate, from a common incumbent:
+
+| family | incumbent (λ=2) | axis 1 | axis 2 | axis 3 | winner |
+|---|---|---|---|---|---|
+| EggCrate | 0.05, 3, 1 → −20.308 | Depth 0.11, **+121.649** | LouvreCount 2, +5.034 | none | **axis 1** on a 24× margin |
+| VerticalFins | 0.05, 1, −60 → −2.060 | none | none | Tilt −30, +2.500 | **axis 3 — not the first declared** |
+| VerticalFins | 1.02, 3, 0 → −1304.693 | Depth 0.53, **+638.665** | Count 2, +548.970 | Tilt 10, +45.056 | **axis 1** on merit |
+
+The second row is the proof that declaration order decides nothing: the last-declared axis wins. The
+first row is the mechanism that fixes EggCrate — the misleading `LouvreCount 3 → 2` move is still
+found, still an improvement, and now simply **loses** to a depth move worth 24 times more.
+
+| family | λ | optimiser | enumerated best | gap % | evals | starts | stopped because | optimiser parameters | enumerated parameters |
+|---|---:|---:|---:|---:|---:|---:|---|---|---|
+| Overhang | 0.5 | 150.767 | 133.974 | −12.53 | 400 | 3 / 28 | budget | Depth 0.51, Rise 0.06, Ext 0.03 | Depth 0.35, Rise 0, Ext 0 |
+| Overhang | 1 | 141.499 | 122.680 | −15.34 | 400 | 3 / 28 | budget | Depth 0.55, Rise 0.14, Ext 0.04 | Depth 0.65, Rise 0.25, Ext 0 |
+| Overhang | 2 | 128.506 | 121.617 | −5.66 | 400 | 3 / 28 | budget | Depth 0.61, Rise 0.23, Ext 0.06 | Depth 0.65, Rise 0.25, Ext 0 |
+| HorizontalLouvres | 0.5 | 156.096 | 148.675 | −4.99 | 400 | 7 / 28 | budget | Depth 0.22, Count 3, Tilt 0 | Depth 0.6, Count 1, Tilt −15 |
+| HorizontalLouvres | 1 | 153.734 | 146.381 | −5.02 | 400 | 7 / 28 | budget | Depth 0.21, Count 3, Tilt 0 | Depth 0.1, Count 3, Tilt 45 |
+| HorizontalLouvres | 2 | 148.444 | 146.381 | −1.41 | 400 | 5 / 28 | budget | Depth 0.24, Count 3, Tilt −5 | Depth 0.1, Count 3, Tilt 45 |
+| VerticalFins | 0.5 | 8.711 | 5.071 | −71.78 | 400 | 11 / 28 | budget | Depth 0.08, **Count 5**, Tilt 5 | Depth 0.05, Count 5, Tilt 15 |
+| VerticalFins | 1 | 5.071 | 5.071 | **0** | 400 | 14 / 28 | budget | Depth 0.05, **Count 5**, Tilt 15 | Depth 0.05, Count 5, Tilt 15 |
+| VerticalFins | 2 | 5.071 | 5.071 | **0** | 400 | 15 / 28 | budget | Depth 0.05, **Count 5**, Tilt 15 | Depth 0.05, Count 5, Tilt 15 |
+| EggCrate | 0.5 | 120.935 | 115.743 | −4.49 | 400 | 15 / 28 | budget | Depth 0.11, **LouvreCount 3**, FinCount 1 | Depth 0.1, LouvreCount 3, FinCount 1 |
+| EggCrate | 1 | 114.404 | 111.762 | −2.36 | 400 | 16 / 28 | budget | Depth 0.11, **LouvreCount 3**, FinCount 1 | Depth 0.1, LouvreCount 3, FinCount 1 |
+| EggCrate | 2 | 103.798 | 103.798 | **0** | 400 | 18 / 28 | budget | Depth 0.1, **LouvreCount 3**, FinCount 1 | Depth 0.1, LouvreCount 3, FinCount 1 |
+
+| | §2.9 | §2.10 | §2.11 | balanced poll | gate |
+|---|---:|---:|---:|---:|---|
+| worst gap | 38.53 % | 38.53 % | 28.34 % | **0 %** | < 10 % — **passes** |
+| signed mean | 4.803 % | 3.854 % | −6.489 % | **−10.30 %** | < 3 % — passes |
+| **mean positive shortfall** | — | — | — | **0.000 %** | diagnostic only |
+| matched or beat | 9 / 12 | 9 / 12 | 9 / 12 | **12 / 12** | — |
+| evaluations | 67–161 | 112–306 | 154–400 | **400 (all)** | ≤ 400 budget |
+
+**Both families are repaired at once, which is what §2.11 could not do.** EggCrate holds
+`LouvreCount = 3` while depth reaches the useful band at every λ (0.11 / 0.11 / 0.10), and
+`VerticalFins` reaches `Count = 5` at every λ rather than being stranded at 1. **No case falls short of
+the enumeration anywhere** — the mean positive shortfall is exactly zero, which is the honest summary
+the signed mean cannot give: −10.30 % is still dominated by `VerticalFins λ=0.5`, where the enumerated
+best is only 5.071.
+
+**Caveat 1 — the budget is now the binding constraint in every single case.** All twelve exhaust 400
+evaluations; none converges. A poll costs one probe per distinct snapped offset on every axis:
+
+| family | Depth | Count(s) | Tilt | probes per poll | polls before 400 is gone |
+|---|---:|---:|---:|---:|---:|
+| Overhang | 14 | — | — (Rise 12, Ext 12) | **38** | 10.5 |
+| HorizontalLouvres | 14 | 2 | 8 | 24 | 16.7 |
+| VerticalFins | 14 | 2 | 8 | 24 | 16.7 |
+| EggCrate | 14 | 2 + 2 | — | 18 | 22.2 |
+
+That is where the budget goes, and it explains the start counts exactly: Overhang's 38-probe poll
+leaves room for about ten polls in total, so only **3 of 28** starts are refined, while EggCrate's
+18-probe poll affords 22 and reaches **18 of 28**. The depth ladder alone is 14 probes because a range
+of ~2 m over a 10 mm lattice needs 7 halvings. **The budget was not raised** — but it is no longer
+slack, and the previous rounds' finding that the search left most of it unspent is now reversed.
+
+**Caveat 2 — a permanent regression test from `e027ada` now FAILS.**
+`The_Search_Result_Is_Locally_Best_Along_Every_Free_Axis` reports Overhang returning `Depth 0.61` when
+`0.60` scores 129.205 against 128.506. The returned point is not locally optimal on its own lattice.
+This is a direct consequence of caveat 1: that test asserts a property only a **converged** search can
+promise, and no Overhang descent converges within 400 evaluations any more. The result still beats the
+enumerated best by 5.66 %, so nothing is wrong with the answer — but the guarantee the test was written
+to pin has genuinely weakened.
+
+**Status: Gate 7 passes on its unchanged thresholds, and optimiser development is stopped as directed.**
+The test was deliberately **not** relaxed to accommodate the new behaviour: narrowing it to converged
+searches only would be fitting the assertion to the result, and that decision belongs to review, not to
+the change that broke it. Nothing else was altered — no threshold, no budget, no coarse sampling, no CI.
+
+### 2.13 What remains **not** validated
 
 Stated plainly, because it bounds what may be claimed:
 
@@ -644,7 +731,7 @@ result is biased: *under* = the tool reports less than reality, *over* = more.
 | A14 | **Four device families.** No light shelves, external roller blinds, or operable/seasonal devices. | — | — | Applicability. |
 | A15 | **Perforated / translucent screens unsupported** — the ray engine is binary. | — | — | Applicability. |
 | A16 | **Single scalar objective.** No Pareto front; λ and μ chosen up front. | — | — | Optimisation. Trade-offs are fixed before the search, not explored after. |
-| A17 | **Local optimality on the search lattice.** Multi-start, the `MinimumIncrement` step floor, budget-aware starts and axis-local scale each helped a different family; compound pairwise moves helped none and were removed. **Still open — Gate 7 fails.** | **Measured: worst 28.3 % below the enumerated best** (§2.11; 41.3 % single- and multi-start, 38.5 % with the step floor and budget-aware starts). Mean is not quoted as a summary — see §2.11 on why the mean of relative gaps is meaningless on this fixture. | **Under** — the recommended device can be materially worse than the family's best | No longer EggCrate, which §2.11 solved (λ=2 lands exactly on the reference, λ=1 beats it). The residual is **VerticalFins at +28.3 %**, returning `Count 1` where the reference wants 5. Cause is understood and is the same one throughout: **a compass search resolves one axis and strands another**, and changing which axis is resolved first only moves the victim. Not the coarse lattice, not the move set, not the start count — all three were measured and excluded. "Optimal" means **best found within a bounded deterministic search**, never mathematically proven-global. |
+| A17 | **Local optimality on the search lattice.** The balanced multiscale poll (§2.12) closes the measured gap: **Gate 7 passes on its unchanged thresholds**, worst 0 %, mean positive shortfall 0 %, 12 of 12 matched or beat. Two caveats remain open — see below. | **Measured: no case falls short of the enumerated best** (§2.12; was 41.3 % single- and multi-start, 38.5 % with the step floor, 28.3 % with axis-local scale) | **Under, but no longer measurable on this fixture** | The residual risk is now *unquantified rather than large*: the enumeration is a coarser lattice, so beating it everywhere is a lower bound being cleared, **not a proof of global optimality**. Two open items: every case now exhausts the 400-evaluation budget (3–18 of 28 starts refined), and `The_Search_Result_Is_Locally_Best_Along_Every_Free_Axis` fails on Overhang because a budget-truncated descent cannot promise local optimality. **"Optimal" still means best found within a bounded deterministic search, never mathematically proven-global**, and that wording must not soften because the gate went green. |
 | A18 | **`MaterialFraction` is area only** — no thickness, weight, fixing or cost. | — | **Under**-states real buildability cost | Any material/cost trade-off. |
 | A19 | **A valid, resolvable TimeZone is required.** | — | — | Fails loudly, by design. |
 | A20 | **The ideal shape's mesh is display geometry**, not performance truth. | — | — | Anyone measuring off the mesh instead of running `VerifyShading`. |

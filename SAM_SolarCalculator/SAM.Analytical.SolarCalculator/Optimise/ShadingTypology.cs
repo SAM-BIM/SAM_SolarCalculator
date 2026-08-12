@@ -267,6 +267,44 @@ namespace SAM.Analytical.SolarCalculator
 
                 startsAvailable = starts.Count;
 
+                // The scale ladder each axis is polled over: its normal initial compass step — half
+                // the coarse spacing, fine enough to resolve between lattice points and coarse
+                // enough not to start at the floor — halved down to the smallest change the
+                // parameter's own lattice can express.
+                //
+                // The floor is a correctness condition, not a stopping preference: a step below
+                // MinimumIncrement snaps straight back onto the incumbent, so the probe rebuilds
+                // identical geometry and reports no improvement. Create.ShadingParameters narrows
+                // element counts to what the analysis grid can resolve, and a count capped to [1, 3]
+                // has a range of 2 — so a fraction of its range is smaller than the single whole
+                // element it is measured in, and without the floor that axis is never probed at all.
+                //
+                // The ladder depends only on the parameter, so it is built once and reused by every
+                // start and every poll.
+                List<double>[] ladders = new List<double>[parameters_Local.Count];
+                foreach (int i in free)
+                {
+                    List<double> ladder = new List<double>();
+                    double scale = Math.Max(
+                        parameters_Local[i].MinimumIncrement,
+                        0.5 * parameters_Local[i].Range / Math.Max(1, coarseLevels - 1));
+
+                    while (true)
+                    {
+                        ladder.Add(scale);
+
+                        double next = Math.Max(parameters_Local[i].MinimumIncrement, 0.5 * scale);
+                        if (!(next < scale))
+                        {
+                            break;
+                        }
+
+                        scale = next;
+                    }
+
+                    ladders[i] = ladder;
+                }
+
                 // --- phase 2: compass refinement, run independently from each starting point.
                 //     Each start keeps its OWN incumbent so a descent cannot be dragged into the
                 //     basin of a better start; the global winner is taken at the end under the same
@@ -290,26 +328,6 @@ namespace SAM.Analytical.SolarCalculator
                         continue;
                     }
 
-                    // Half the coarse spacing: fine enough to resolve between lattice points, coarse
-                    // enough not to start from the granularity floor — but NEVER finer than the
-                    // smallest change the parameter's own lattice can express. A step below that
-                    // snaps straight back onto the incumbent, so the probe rebuilds identical
-                    // geometry, reports no improvement, and the axis is indistinguishable from one
-                    // that has converged. Since steps only ever halve, an axis that starts below its
-                    // own increment is unreachable for the whole descent, from every start.
-                    //
-                    // That is not a corner case: Create.ShadingParameters narrows element counts to
-                    // what the analysis grid can resolve, and a count capped to [1, 3] has a range of
-                    // 2 — so a fraction of its range is smaller than the single whole element it is
-                    // measured in. See ShadingParameter.MinimumIncrement.
-                    double[] step = new double[parameters_Local.Count];
-                    double[] floor = new double[parameters_Local.Count];
-                    foreach (int i in free)
-                    {
-                        floor[i] = parameters_Local[i].MinimumIncrement;
-                        step[i] = Math.Max(floor[i], 0.5 * parameters_Local[i].Range / Math.Max(1, coarseLevels - 1));
-                    }
-
                     while (true)
                     {
                         if (evaluator.Evaluations >= maximumEvaluations)
@@ -319,32 +337,39 @@ namespace SAM.Analytical.SolarCalculator
                         }
 
                         iterations++;
-                        bool improved = false;
+
+                        // --- BALANCED MULTISCALE POLL.
+                        //
+                        //     The incumbent is held FIXED while every axis is examined. Each axis is
+                        //     probed both ways at every distinct scale on its own ladder, from its
+                        //     normal initial compass step down to its MinimumIncrement, and the best
+                        //     improving candidate that axis can offer is recorded. Only when all of
+                        //     them have reported does the incumbent move, once, to the best offer
+                        //     under the same IsBetter total order that decides everything else.
+                        //
+                        //     WHY, measured. Probing an axis at one scale and moving immediately
+                        //     makes the answer depend on where the parameter sits in the typology's
+                        //     declaration order: whichever axis is visited first while it still has a
+                        //     productive coarse move gets to commit the descent, and the axis that
+                        //     needed a finer scale is stranded. Resolving each axis fully before
+                        //     moving on only changes WHICH axis is stranded — it repaired an egg
+                        //     crate and broke a fin array on the same fixture. Polling every axis
+                        //     over its whole ladder from a common incumbent removes the ordering
+                        //     commitment entirely: declaration order then decides nothing except how
+                        //     an exact tie is broken.
+                        Candidate pollBest = null;
+
+                        // Vectors already measured in THIS poll. Different scales on one axis often
+                        // snap to the same lattice point, and the incumbent itself is never a move.
+                        HashSet<string> polled = new HashSet<string>();
+                        polled.Add(Evaluator.Key(local.Parameters));
 
                         foreach (int i in free)
                         {
-                            // AXIS-LOCAL SCALE. Probe this axis at its current step; if neither
-                            // direction improves, reduce THIS axis and probe it again, down to its
-                            // own lattice, before moving on to the next parameter.
-                            //
-                            // The scale a useful move needs is a property of the axis and of where
-                            // the descent currently stands — not of the whole vector. Reducing every
-                            // axis together means an axis whose useful move is an order of magnitude
-                            // finer than its first step never gets tried at that scale while any
-                            // other axis is still accepting moves at a coarse one, and the descent
-                            // leaves on the coarse axis instead. Measured on the Stage 11 fixture:
-                            // from the coarse start the first depth probe fails and the third
-                            // succeeds, but under a shared schedule the count axis moved first and
-                            // the descent left the basin before depth was ever probed that finely.
-                            while (true)
+                            Candidate axisBest = null;
+
+                            foreach (double scale in ladders[i])
                             {
-                                if (evaluator.Evaluations >= maximumEvaluations)
-                                {
-                                    break;
-                                }
-
-                                bool axisImproved = false;
-
                                 foreach (int sign in new int[] { 1, -1 })
                                 {
                                     if (evaluator.Evaluations >= maximumEvaluations)
@@ -353,44 +378,36 @@ namespace SAM.Analytical.SolarCalculator
                                     }
 
                                     double[] probe = (double[])local.Parameters.Clone();
-                                    probe[i] = parameters_Local[i].Snap(probe[i] + sign * step[i]);
+                                    probe[i] = parameters_Local[i].Snap(probe[i] + sign * scale);
                                     if (probe[i] == local.Parameters[i])
                                     {
-                                        continue; // the step snapped back onto the incumbent
+                                        continue; // snapped back onto the incumbent: not a move
+                                    }
+
+                                    if (!polled.Add(Evaluator.Key(probe)))
+                                    {
+                                        continue; // a coarser scale on this axis already landed here
                                     }
 
                                     Candidate candidate = evaluator.Evaluate(probe);
-                                    if (IsBetter(candidate, local))
+                                    if (IsBetter(candidate, local) && IsBetter(candidate, axisBest))
                                     {
-                                        local = candidate;
-                                        axisImproved = true;
-                                        break; // first improvement wins: a fixed, reproducible order
+                                        axisBest = candidate;
                                     }
                                 }
+                            }
 
-                                if (axisImproved)
-                                {
-                                    improved = true;
-                                    break; // accept and move to the next parameter
-                                }
-
-                                // Neither direction helped at this scale. Halve THIS axis only, never
-                                // past its own lattice; when it is already there, the axis is done.
-                                double next = Math.Max(floor[i], 0.5 * step[i]);
-                                if (!(next < step[i]))
-                                {
-                                    break;
-                                }
-
-                                step[i] = next;
+                            if (axisBest != null && IsBetter(axisBest, pollBest))
+                            {
+                                pollBest = axisBest;
                             }
                         }
 
-                        if (!improved)
+                        if (pollBest == null)
                         {
-                            // Every free axis has been driven down to its own lattice and probed
-                            // there without improvement, so this point is the best on that lattice
-                            // along every axis. Reducing further could only re-measure it.
+                            // No axis can improve on this point anywhere on its ladder, so the
+                            // descent has converged. Nothing about the order of the poll can change
+                            // that verdict, which is the point of taking it this way.
                             if (evaluator.Evaluations >= maximumEvaluations)
                             {
                                 termination = ShadingOptimisationTermination.EvaluationBudgetExhausted;
@@ -398,6 +415,10 @@ namespace SAM.Analytical.SolarCalculator
 
                             break;
                         }
+
+                        // One move per poll. Every ladder restarts from the new incumbent, because
+                        // the scale a parameter needs depends on where the descent now stands.
+                        local = pollBest;
                     }
 
                     if (IsBetter(local, best))
