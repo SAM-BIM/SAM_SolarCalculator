@@ -323,55 +323,80 @@ namespace SAM.Analytical.SolarCalculator
 
                         foreach (int i in free)
                         {
-                            foreach (int sign in new int[] { 1, -1 })
+                            // AXIS-LOCAL SCALE. Probe this axis at its current step; if neither
+                            // direction improves, reduce THIS axis and probe it again, down to its
+                            // own lattice, before moving on to the next parameter.
+                            //
+                            // The scale a useful move needs is a property of the axis and of where
+                            // the descent currently stands — not of the whole vector. Reducing every
+                            // axis together means an axis whose useful move is an order of magnitude
+                            // finer than its first step never gets tried at that scale while any
+                            // other axis is still accepting moves at a coarse one, and the descent
+                            // leaves on the coarse axis instead. Measured on the Stage 11 fixture:
+                            // from the coarse start the first depth probe fails and the third
+                            // succeeds, but under a shared schedule the count axis moved first and
+                            // the descent left the basin before depth was ever probed that finely.
+                            while (true)
                             {
                                 if (evaluator.Evaluations >= maximumEvaluations)
                                 {
                                     break;
                                 }
 
-                                double[] probe = (double[])local.Parameters.Clone();
-                                probe[i] = parameters_Local[i].Snap(probe[i] + sign * step[i]);
-                                if (probe[i] == local.Parameters[i])
+                                bool axisImproved = false;
+
+                                foreach (int sign in new int[] { 1, -1 })
                                 {
-                                    continue; // the step snapped back onto the incumbent
+                                    if (evaluator.Evaluations >= maximumEvaluations)
+                                    {
+                                        break;
+                                    }
+
+                                    double[] probe = (double[])local.Parameters.Clone();
+                                    probe[i] = parameters_Local[i].Snap(probe[i] + sign * step[i]);
+                                    if (probe[i] == local.Parameters[i])
+                                    {
+                                        continue; // the step snapped back onto the incumbent
+                                    }
+
+                                    Candidate candidate = evaluator.Evaluate(probe);
+                                    if (IsBetter(candidate, local))
+                                    {
+                                        local = candidate;
+                                        axisImproved = true;
+                                        break; // first improvement wins: a fixed, reproducible order
+                                    }
                                 }
 
-                                Candidate candidate = evaluator.Evaluate(probe);
-                                if (IsBetter(candidate, local))
+                                if (axisImproved)
                                 {
-                                    local = candidate;
                                     improved = true;
-                                    break; // accept and move to the next parameter: a fixed, reproducible order
+                                    break; // accept and move to the next parameter
                                 }
+
+                                // Neither direction helped at this scale. Halve THIS axis only, never
+                                // past its own lattice; when it is already there, the axis is done.
+                                double next = Math.Max(floor[i], 0.5 * step[i]);
+                                if (!(next < step[i]))
+                                {
+                                    break;
+                                }
+
+                                step[i] = next;
                             }
                         }
 
                         if (!improved)
                         {
-                            // Halve every free axis, but never past its own lattice.
-                            bool reduced = false;
-                            foreach (int i in free)
+                            // Every free axis has been driven down to its own lattice and probed
+                            // there without improvement, so this point is the best on that lattice
+                            // along every axis. Reducing further could only re-measure it.
+                            if (evaluator.Evaluations >= maximumEvaluations)
                             {
-                                double next = Math.Max(floor[i], 0.5 * step[i]);
-                                if (next < step[i])
-                                {
-                                    reduced = true;
-                                }
-
-                                step[i] = next;
+                                termination = ShadingOptimisationTermination.EvaluationBudgetExhausted;
                             }
 
-                            if (!reduced)
-                            {
-                                // Every free axis is already probing its nearest reachable
-                                // neighbour and none of them improved: this point is the best on its
-                                // own lattice along every axis. Halving again could only re-measure
-                                // it, which is what the old convergence test was really detecting —
-                                // except that it stopped as soon as the steps fell BELOW the
-                                // granularity, so the increment itself was never tried.
-                                break;
-                            }
+                            break;
                         }
                     }
 

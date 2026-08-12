@@ -511,7 +511,87 @@ survive that only because their response is smooth enough for a depth descent to
 EggCrate's is not. That is the next thing to measure, and it is a change to how the lattice **spans a
 bounded range**, not to the move set or the start count.
 
-### 2.11 What remains **not** validated
+### 2.11 Axis-local scale refinement — **EggCrate solved, VerticalFins broken, gate still fails**
+
+The §2.10 conclusion said the coarse lattice was to blame. One mechanism was tested before touching it:
+the refinement's **shared** step schedule. Diagnostic first, no product change — from the coarse start
+`(Depth 0.05, LouvreCount 3, FinCount 1)`, holding the counts, every depth the halving schedule can
+reach was scored:
+
+| scale | snapped depth | λ=0.5 | λ=1 | λ=2 | beats Depth 0.05? |
+|---:|---:|---:|---:|---:|---|
+| 0.4875 | 0.54 | −342.608 | −593.350 | −1094.833 | no |
+| 0.24375 | 0.29 | 50.403 | −17.016 | −151.856 | **yes / yes** / no |
+| 0.121875 | 0.17 | 88.624 | 69.433 | 31.049 | **yes** |
+| 0.060938 | 0.11 | 120.935 | 114.404 | 101.341 | **yes** |
+| 0.030469 | 0.08 | 86.643 | 85.141 | 82.138 | **yes** |
+| 0.01 | 0.06 | 1.099 | 0.722 | −0.032 | **yes** |
+
+The downward probes all clamp to the bound and snap back. So a beneficial depth move **does** exist
+from that start — at the *second* scale for λ = 0.5 and 1, the *third* for λ = 2. The first probe fails
+and that was enough: under a shared schedule no axis is reduced until *every* axis has failed, so the
+count axis moved first and the descent left the basin before depth was ever probed that finely.
+
+**The change.** When an axis fails at its current ± step, reduce **that axis** and probe it again, down
+to its own `MinimumIncrement`, before moving on to the next parameter. Deterministic parameter order,
+first-improvement within an axis, no compound moves, no randomness, no family-specific logic; bounds,
+`Snap`, `IsBetter`, NO SHADE, `coarseLevels = 3`, `maximumEvaluations = 400` and the thresholds all
+unchanged.
+
+| family | λ | optimiser | enumerated best | gap % | evals | starts | stopped because | optimiser parameters | enumerated parameters |
+|---|---:|---:|---:|---:|---:|---:|---|---|---|
+| Overhang | 0.5 | 154.960 | 133.974 | −15.66 | 400 | 10 / 28 | **budget** | Depth 0.54, Rise 0.11, Ext 0.02 | Depth 0.35, Rise 0, Ext 0 |
+| Overhang | 1 | 135.072 | 122.680 | −10.10 | 400 | 9 / 28 | **budget** | Depth 0.61, Rise 0.18, Ext 0.05 | Depth 0.65, Rise 0.25, Ext 0 |
+| Overhang | 2 | 131.766 | 121.617 | −8.35 | 400 | 9 / 28 | **budget** | Depth 0.58, Rise 0.19, Ext 0.05 | Depth 0.65, Rise 0.25, Ext 0 |
+| HorizontalLouvres | 0.5 | 155.044 | 148.675 | −4.28 | 332 | 28 / 28 | all starts | Depth 0.54, Count 1, Tilt −10 | Depth 0.6, Count 1, Tilt −15 |
+| HorizontalLouvres | 1 | 153.962 | 146.381 | −5.18 | 326 | 28 / 28 | all starts | Depth 0.09, Count 3, Tilt 45 | Depth 0.1, Count 3, Tilt 45 |
+| HorizontalLouvres | 2 | 153.962 | 146.381 | −5.18 | 288 | 28 / 28 | all starts | Depth 0.09, Count 3, Tilt 45 | Depth 0.1, Count 3, Tilt 45 |
+| VerticalFins | 0.5 | 8.711 | 5.071 | −71.78 | 387 | 28 / 28 | all starts | Depth 0.08, Count 5, Tilt 5 | Depth 0.05, Count 5, Tilt 15 |
+| VerticalFins | 1 | 4.733 | 5.071 | **+6.66** | 286 | 28 / 28 | all starts | Depth 0.08, **Count 1**, Tilt 5 | Depth 0.05, **Count 5**, Tilt 15 |
+| VerticalFins | 2 | 3.634 | 5.071 | **+28.34** | 290 | 28 / 28 | all starts | Depth 0.05, **Count 1**, Tilt 15 | Depth 0.05, **Count 5**, Tilt 15 |
+| EggCrate | 0.5 | 104.134 | 115.743 | 10.03 | 154 | 28 / 28 | all starts | Depth 0.21, **LouvreCount 3**, FinCount 1 | Depth 0.1, LouvreCount 3, FinCount 1 |
+| EggCrate | 1 | 114.404 | 111.762 | **−2.36** | 159 | 28 / 28 | all starts | Depth 0.11, **LouvreCount 3**, FinCount 1 | Depth 0.1, LouvreCount 3, FinCount 1 |
+| EggCrate | 2 | 103.798 | 103.798 | **0** | 157 | 28 / 28 | all starts | Depth 0.1, **LouvreCount 3**, FinCount 1 | Depth 0.1, LouvreCount 3, FinCount 1 |
+
+| | step floor (§2.9) | budget-aware (§2.10) | axis-local | gate |
+|---|---:|---:|---:|---|
+| mean gap | 4.803 % | 3.854 % | **−6.489 %** | < 3 % — passes, but see below |
+| worst gap | 38.53 % | 38.53 % | **28.34 %** | < 10 % — **still fails** |
+| matched or beat | 9 / 12 | 9 / 12 | 9 / 12 | — |
+| evaluations | 67–161 | 112–306 | 154–400 | ≤ 400 budget |
+
+**EggCrate is solved, and the hypothesis was exactly right.** The `(0.05, 3, 1)` start now holds
+`LouvreCount = 3` long enough for depth to reach the useful band at every weight: the returned vectors
+are `Depth 0.21 / 0.11 / 0.10` with `LouvreCount 3`, all inside 0.08–0.30. λ=2 lands **exactly** on the
+enumerated reference, λ=1 **beats** it, and the worst EggCrate cell fell from 38.53 % to 10.03 %. The
+41 % failure that has driven this whole sequence was never the coarse lattice and never the move set —
+it was axes sharing one scale.
+
+**But the gate still fails, and now for a new reason.** `VerticalFins` regressed from landing exactly
+on the enumerated best at every λ to **+6.66 % and +28.34 %**, returning `Count 1` where the reference
+wants `Count 5`. The same mechanism causes it: depth is now refined to its finest scale before the
+count axis is visited at all, so the descent commits to a depth that suits a single fin and the count
+never recovers. Axis-local scale trades *which* axis gets abandoned; it does not stop abandonment.
+
+Overhang also regressed slightly (λ=1 from −14.48 % to −10.10 %) and for a second reason: the finer
+per-axis probing **exhausts the 400-evaluation budget** on all three Overhang cells, which now refine
+only **9–10 of 28** starts where §2.10 refined all 28. That is the budget-aware start behaviour working
+as designed — but it means Overhang is now paying for EggCrate's fix.
+
+**The mean of −6.489 % must not be read as a pass.** It is dominated by `VerticalFins λ=0.5` at
+−71.78 %, where the enumerated best is only 5.071, so a 3.6-point absolute difference becomes a
+71.8 % relative one. On a fixture where one family's objective is two orders of magnitude smaller than
+another's, the mean of relative gaps is not a meaningful summary. **The worst-case threshold is the one
+that matters and it fails at 28.34 %.**
+
+**Status: stopped and reported, per the standing decision rule** — EggCrate materially improved, so the
+change was not reverted, but no further optimiser change was made. Nothing was relaxed, no budget or
+coarse level raised, no compound moves, no randomness. The open question is no longer "why can't the
+search reach EggCrate's basin" but **"how should a compass search order axis refinement so that
+resolving one axis finely does not strand another"** — and, separately, whether 400 evaluations is
+still the right budget now that a single descent can consume far more of it.
+
+### 2.12 What remains **not** validated
 
 Stated plainly, because it bounds what may be claimed:
 
@@ -564,7 +644,7 @@ result is biased: *under* = the tool reports less than reality, *over* = more.
 | A14 | **Four device families.** No light shelves, external roller blinds, or operable/seasonal devices. | — | — | Applicability. |
 | A15 | **Perforated / translucent screens unsupported** — the ray engine is binary. | — | — | Applicability. |
 | A16 | **Single scalar objective.** No Pareto front; λ and μ chosen up front. | — | — | Optimisation. Trade-offs are fixed before the search, not explored after. |
-| A17 | **Local optimality on the search lattice.** Multi-start, the `MinimumIncrement` step floor and budget-aware starts each helped; compound pairwise moves did not and were removed. **Still open — Gate 7 fails.** | **Measured: mean 3.9 %, worst 38.5 % below the enumerated best** (§2.10; 16.3 % / 41.3 % single-start, 5.2 % / 41.3 % best-5 multi-start, 4.8 % / 38.5 % with the step floor) | **Under** — the recommended device can be materially worse than the family's best | Concentrated entirely in **EggCrate**, at 38.5 %. The residual is **not** a move-set or start-count defect: with `LouvreCount` pinned to 3 the unmodified search lands exactly on the enumerated reference at λ=2 and beats it at λ=1 in under 60 evaluations (§2.10). It is the **coarse lattice**: three levels spanning depth 0.05–2.00 m sample a range whose useful part is the bottom 13 %, so no start exists inside the basin. Not yet changed — measurement first. "Optimal" means **best found within a bounded deterministic search**, never mathematically proven-global. |
+| A17 | **Local optimality on the search lattice.** Multi-start, the `MinimumIncrement` step floor, budget-aware starts and axis-local scale each helped a different family; compound pairwise moves helped none and were removed. **Still open — Gate 7 fails.** | **Measured: worst 28.3 % below the enumerated best** (§2.11; 41.3 % single- and multi-start, 38.5 % with the step floor and budget-aware starts). Mean is not quoted as a summary — see §2.11 on why the mean of relative gaps is meaningless on this fixture. | **Under** — the recommended device can be materially worse than the family's best | No longer EggCrate, which §2.11 solved (λ=2 lands exactly on the reference, λ=1 beats it). The residual is **VerticalFins at +28.3 %**, returning `Count 1` where the reference wants 5. Cause is understood and is the same one throughout: **a compass search resolves one axis and strands another**, and changing which axis is resolved first only moves the victim. Not the coarse lattice, not the move set, not the start count — all three were measured and excluded. "Optimal" means **best found within a bounded deterministic search**, never mathematically proven-global. |
 | A18 | **`MaterialFraction` is area only** — no thickness, weight, fixing or cost. | — | **Under**-states real buildability cost | Any material/cost trade-off. |
 | A19 | **A valid, resolvable TimeZone is required.** | — | — | Fails loudly, by design. |
 | A20 | **The ideal shape's mesh is display geometry**, not performance truth. | — | — | Anyone measuring off the mesh instead of running `VerifyShading`. |
