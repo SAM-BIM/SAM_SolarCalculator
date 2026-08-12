@@ -206,6 +206,57 @@ preference but a requirement: the search returns *best found within a bounded de
 and on EggCrate and VerticalFins that has been measured up to 41 % below the best point in a lattice
 coarser than its own.
 
+### 2.7 Multi-start refinement — measured. Large improvement, **gate still fails**
+
+Multi-start refinement (`64b1370`): phase 1 keeps every coarse point, the best 5 distinct are ranked
+and each gets its own compass descent, global winner under the existing total order. Coarse lattice,
+budget, `IsBetter`, NO SHADE semantics and the gate thresholds all unchanged.
+
+| family | λ | gap % before | gap % after | evals before | evals after |
+|---|---:|---:|---:|---:|---:|
+| Overhang | 0.5 | −10.09 | −12.36 | 75 | 140 |
+| Overhang | 1 | −13.01 | −13.82 | 69 | 158 |
+| Overhang | 2 | +5.61 | **−5.46** | 66 | 125 |
+| HorizontalLouvres | 0.5 | −3.61 | −3.61 | 53 | 81 |
+| HorizontalLouvres | 1 | −1.41 | −1.41 | 53 | 99 |
+| HorizontalLouvres | 2 | **+38.58** | **−4.27** | 49 | 91 |
+| VerticalFins | 0.5 | +19.35 | **0** | 42 | 67 |
+| VerticalFins | 1 | +28.34 | **0** | 41 | 74 |
+| VerticalFins | 2 | +28.34 | **0** | 41 | 74 |
+| EggCrate | 0.5 | +28.33 | +28.33 | 40 | 63 |
+| EggCrate | 1 | +33.78 | +33.78 | 40 | 60 |
+| EggCrate | 2 | +41.28 | +41.28 | 38 | 56 |
+
+| | before | after | gate |
+|---|---:|---:|---|
+| mean gap | 16.291 % | **5.204 %** | < 3 % — still fails |
+| worst gap | 41.28 % | **41.28 %** | < 10 % — still fails |
+| matched or beat | 4 / 12 | **9 / 12** | — |
+| evaluations | 38–75 | 56–158 | ≤ 400 budget |
+
+**The change engaged everywhere** — evaluations rose on all twelve — and basin-lock was real: mean gap
+fell by 68 %, VerticalFins now lands *exactly* on the enumerated best at every λ, and the two worst
+non-EggCrate cells (HorizontalLouvres λ=2 at +38.58 %, Overhang λ=2 at +5.61 %) both crossed to
+*beating* the coarse lattice. **This is not a claim that the problem is fixed: the gate fails.**
+
+**EggCrate did not move at all** — 82.952 / 74.013 / 60.95, bit-identical to single-start, while its
+evaluation count rose from 38–40 to 56–63. Five distinct starts were refined and none beat the
+original winner. It alone now sets the worst case, and it is the only reason the worst-case threshold
+still fails.
+
+**Leading hypothesis, not yet tested and not acted on.** EggCrate is the only family whose parameters
+are strongly coupled: `Depth` [0.05, 2.0] is shared by *both* the louvre array and the fin array,
+alongside `LouvreCount` and `FinCount` [1, 16]. Compass search probes **one axis at a time** and
+accepts the first improvement; where progress requires changing depth *and* a count together, every
+single-axis probe fails, the step halves, and the descent terminates at a point no individual move can
+leave. Multi-start cannot rescue that — it changes where descents *begin*, not the moves available to
+them. The evidence fits: the two-parameter families (Louvres, Fins) were fully repaired, the
+three-parameter coupled one was untouched.
+
+If that is right, the next experiment is a **move set**, not more starts or a finer lattice: allow
+compound probes (e.g. pattern-search moves over parameter pairs) so a coordinated step is reachable.
+Recorded as a hypothesis; no further change made pending direction.
+
 ### 2.6 What remains **not** validated
 
 Stated plainly, because it bounds what may be claimed:
@@ -259,7 +310,7 @@ result is biased: *under* = the tool reports less than reality, *over* = more.
 | A14 | **Four device families.** No light shelves, external roller blinds, or operable/seasonal devices. | — | — | Applicability. |
 | A15 | **Perforated / translucent screens unsupported** — the ray engine is binary. | — | — | Applicability. |
 | A16 | **Single scalar objective.** No Pareto front; λ and μ chosen up front. | — | — | Optimisation. Trade-offs are fixed before the search, not explored after. |
-| A17 | **Local optimality on the search lattice.** The coarse phase mitigates but does not eliminate multimodality. | **Measured: mean 16.3 %, worst 41.3 % below the enumerated best** (§2.6) | **Under** — the recommended device can be materially worse than the family's best | Every optimiser recommendation, worst on EggCrate and VerticalFins and at high λ. "Optimal" means best-found, not proven-global — see §2.6. |
+| A17 | **Local optimality on the search lattice.** Multi-start refinement mitigates but does not eliminate it. | **Measured: mean 5.2 %, worst 41.3 % below the enumerated best** (§2.7; was 16.3 % / 41.3 % single-start) | **Under** — the recommended device can be materially worse than the family's best | Now concentrated in **EggCrate**, where it reaches 41.3 %. Louvres and Fins are at or better than the coarse enumeration. "Optimal" means best-found, not proven-global — see §2.7. |
 | A18 | **`MaterialFraction` is area only** — no thickness, weight, fixing or cost. | — | **Under**-states real buildability cost | Any material/cost trade-off. |
 | A19 | **A valid, resolvable TimeZone is required.** | — | — | Fails loudly, by design. |
 | A20 | **The ideal shape's mesh is display geometry**, not performance truth. | — | — | Anyone measuring off the mesh instead of running `VerifyShading`. |
