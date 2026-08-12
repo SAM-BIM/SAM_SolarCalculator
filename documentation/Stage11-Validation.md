@@ -185,8 +185,21 @@ That is basin-lock. The method's own documentation says the coarse phase exists 
 depth response of a real device is not unimodal once counts and tilts are in play"* — and three levels
 per parameter is too sparse to locate the right basin once the objective stiffens.
 
-**Not yet attempted:** raising `coarseLevels` (the unused 5–10× budget is already allocated). That is a
-change to product behaviour and must be measured, not assumed — this gate is the instrument for it.
+**The coarse phase is a full Cartesian lattice** (`Lattice` is an odometer over the free parameters),
+so sparseness, not structure, is the problem: `fraction = counter / (levels - 1)` means three levels
+samples each parameter only at its **minimum, midpoint and maximum**. A depth bounded 0–1.5 m is tried
+at 0, 0.75 and 1.5 m and nowhere between; compass refinement then descends from whichever of those
+corners scored best.
+
+**Two candidate fixes, neither yet attempted** — both change product behaviour and must be *measured*
+on this gate rather than assumed:
+
+1. **Multi-start refinement.** Refine from the best *k* coarse points instead of only the best one.
+   This attacks basin-lock directly and fits the unspent budget, without growing the coarse grid.
+2. **Raise `coarseLevels`.** Note this does not scale freely: at 5 levels a three-parameter family
+   costs 125 coarse points and a four-parameter one 625, which exceeds the 400 budget outright. So it
+   helps the narrow families and stalls the wide ones — which are precisely EggCrate and VerticalFins,
+   the worst performers. Option 1 is the better first experiment.
 
 **Consequence for reporting now.** Until this is closed, the wording rule in A17 is not a stylistic
 preference but a requirement: the search returns *best found within a bounded deterministic search*,
