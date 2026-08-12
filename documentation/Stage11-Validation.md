@@ -15,11 +15,25 @@ Two audiences, two sections.
   know whether the tool is fit for **your** job. A number from this workflow does not belong in a
   report unless the assumptions below are acceptable for that report.
 
-**Provenance of the figures.** Every number in §2 is quoted from the stage method documents, measured
-on the build each was committed with. They were **not** re-measured while writing this register — this
-container has no .NET toolchain, so the suite cannot be executed here; CI (`build`) is the execution
-path. If a change moves a number, update it at source in the stage document *and* here. Do not keep a
-stale baseline for comparison.
+**Provenance of the figures.** Every number in §2 is quoted from the stage method documents, as
+recorded on the build each was committed with. They were **not** re-measured while writing this
+register. If a change moves a number, update it at source in the stage document *and* here. Do not
+keep a stale baseline for comparison.
+
+> ### ⚠ The test suite is not executed by CI
+>
+> `.github/workflows/build.yml` runs `msbuild /t:Rebuild` and nothing else. **There is no
+> `dotnet test` step in any workflow**, and the only configuration built is `Release`
+> (`/p:Configuration=Release`).
+>
+> Therefore a green `build` check means **the solution compiles, including the test project**. It
+> does **not** mean any test passed. It is exactly strong enough to catch what it caught on
+> `2bd94c8` — a test calling a method that does not exist — and no stronger.
+>
+> Consequently, as of this document: **no test in this repository has been verified to pass by CI**,
+> and the figures in §2 rest on runs performed by the sessions that recorded them, which cannot be
+> re-verified from here. Adding a test step to CI is the single highest-value validation action
+> available, and it is listed first in §5.
 
 ---
 
@@ -103,18 +117,50 @@ through it.
 - Genuine DNI confirmed in `DirectSolarRadiation` (B6).
 - ModelB annual per-aperture averages recorded for 13 apertures at 0.5 m grid.
 
-### 2.5 What is **not** independently validated
+### 2.5 Gates 1–2 — independent and analytical validation (added, **not executed**)
+
+Gate 1 (`IndependentReferenceTests`) compares SAM against **Ladybug Tools**' `ladybug.sunpath.Sunpath`,
+run **once offline** by `Fixtures/Reference/generate_reference.py` into a committed
+`reference-results.json`. Nothing here runs Python; Ladybug is not a build, test or runtime dependency.
+This is the "borrow the validation without inheriting the dependency" approach the plan called for.
+
+It is careful about what it actually proves, which matters more than the headline:
+
+| | |
+|---|---|
+| **Independent** | Solar position — Ladybug's own declination, equation of time and hour angle. |
+| **Independent** | Transposition geometry and annual accumulation — `cos(incidence)` recomputed from Ladybug's sun vectors and summed separately. |
+| **Shared by design** | The GHI/DHI series, exported from the fixture so both sides read byte-identical radiation. Two different weather files would measure the files. |
+| **Shared by design** | The DNI decomposition rule — SAM's documented modelling choice. Its low-sun clamp is *measured* separately rather than validated against itself. |
+| **Not covered** | Diffuse and ground-reflected transposition. Ladybug's Python API exposes decomposition (DISC/DIRINT), not Perez transposition onto a tilted surface. |
+
+Asserted thresholds (read from source, **not** observed results): sun altitude and azimuth MAE
+< 0.25°, max absolute < 1.0°, over all 8760 hours.
+
+Gate 2 (`AnalyticalValidationTests`) adds closed-form checks: NOAA sun position at solstices and
+equinoxes; solar-noon altitude against the declination identity; fractional time-zone offset; the
+cosine law on an unobstructed surface; an aperture facing away admits nothing; **an overhang shading
+exactly to the profile-angle construction**; an unobstructed vertical surface seeing half the sky;
+first-element-reached attribution; and context obstruction never being credited to a device.
+
+`ConvergenceStudyTests` and `ResolutionConvergenceTests` add the grid- and voxel-convergence work,
+including the minimum-feature-size rule and the field's spatial stability under refinement.
+
+### 2.6 What remains **not** validated
 
 Stated plainly, because it bounds what may be claimed:
 
-- **No cross-validation against an independent irradiance engine.** The plan's Stage 11 called for one
-  offline `LB Incident Radiation` comparison per typology. That has not been done. Agreement with TAS
-  covers *shade coverage*, not *irradiance*, and the two are different quantities.
+- **No test has been verified to pass.** See the warning in §0 — CI compiles and does not run the
+  suite, and this container has no .NET toolchain. Gates 1–2 exist as *code*; their results are
+  unobserved from here.
+- **Diffuse and ground-reflected transposition have no independent reference** (Gate 1, "not
+  covered"). The Perez implementation is checked for internal consistency and against analytic view
+  factors, not against another tool's tilted-surface diffuse.
 - **No full-Radiance annual run** for any typology.
 - **The desirability weighting is unvalidated against thermal outcome** — necessarily, since there is
   no load model (§3, A1). Optimised devices are optimal *against the stated proxy*, not against energy.
-- Grid- and voxel-convergence figures exist per stage but are not consolidated into a single
-  convergence study.
+- **Debug configuration is never built.** CI builds `Release` only, so Debug-only failures
+  (assertions, `#if DEBUG` paths, different overflow behaviour) would not be caught.
 
 ---
 
@@ -189,16 +235,23 @@ overhang may simply expose the fin behind it).
 
 In priority order, with the reasoning:
 
-1. **One independent irradiance cross-check.** A single offline `LB Incident Radiation` run on one
-   test model, compared per aperture. This is the largest open gap in §2.5 and is cheap. Borrowing the
-   validation without inheriting the dependency was always the plan (§8 of the plan document).
-2. **Consolidated convergence study** — aperture total vs `gridSize` (0.25/0.5/1.0 m) and field
-   benefit vs voxel size, in one place, so A7 and A8 carry measured numbers instead of "caller-set".
-3. **Quantify A12** — run two adjacent apertures with deep devices independently and together, and
+1. **Add a test step to CI.** `.github/workflows/build.yml` compiles and stops. Adding
+   `dotnet test SAM_SolarCalculator/SAM_SolarCalculator.Tests` after the Rebuild step converts a
+   large, careful test suite from *written* to *enforced*. Everything below is worth less until this
+   exists — Gates 1–2 currently guarantee only that they compile. **This is the single highest-value
+   action available**, and it is a few lines of YAML.
+2. **Build Debug as well as Release** in CI, so Debug-only failures are caught.
+3. **Record observed results, not just thresholds.** The gates assert bounds (e.g. sun-position MAE
+   < 0.25°). Emitting the achieved values to test output, and pasting them into §2, turns a pass/fail
+   into a trend that can be watched for drift.
+4. **An independent reference for diffuse transposition** — the one gap Gate 1 explicitly does not
+   cover. Ladybug's Python API does not expose Perez tilted-surface transposition, so this needs a
+   different reference (a Radiance `gendaymtx` run, or published Perez validation data).
+5. **Quantify A12** — run two adjacent apertures with deep devices independently and together, and
    record the difference. It is the one scope limitation likely to bite on a real façade.
-4. **Quantify A2** on an urban-canyon fixture, even roughly, so the largest unquantified physics
+6. **Quantify A2** on an urban-canyon fixture, even roughly, so the largest unquantified physics
    assumption has an order of magnitude.
-5. **A3 worked example** — the same aperture reported as incident and as transmitted through a stated
+7. **A3 worked example** — the same aperture reported as incident and as transmitted through a stated
    construction, so the factor is concrete for anyone reading a result.
 
 ---
@@ -226,8 +279,11 @@ Recorded so they are not mistaken for oversights:
 dotnet test SAM_SolarCalculator/SAM_SolarCalculator.Tests
 ```
 
-Green means the validated behaviour still holds. The CI `build` workflow runs it on every PR; the
-`spdx` workflow separately checks that changed `.cs` files carry the licence header.
+Green means the validated behaviour still holds.
+
+**CI does not do this.** The `build` workflow compiles (`msbuild /t:Rebuild`, `Release` only) and has
+no test step — see the warning in §0 and item 1 of §5. Until that changes, the command above must be
+run by hand, and a green PR is not evidence that any test passed.
 
 **A trap when reproducing the SPDX check locally:** it greps for the copyright line with the character
 class `[-–]`, and the repo's headers use an en-dash. Under an unset or `C` locale that class is
