@@ -29,7 +29,7 @@ external binary dependency, and is described in **Stage 2** below.
 | 3 | Shading **potential field** (voxel scalar field) | Shaderade/`LB Shade Benefit` *evaluate* a supplied surface. Nothing *generates* the solid. |
 | 4 | Ideal-shape → buildable-device rationaliser | No open-source tool fits overhang/fin/louvre/egg-crate to a target mask with a scored trade-off. |
 | 5 | Anisotropic (Perez) sky | Current model is isotropic — see §2.3. Material for vertical façades. |
-| 6 | Per-element interception attribution + energy-weighted shading metrics | The engine already computes the first-hit blocker and discards it — see §2.5. |
+| 6 | Per-element interception attribution + energy-weighted shading metrics | Implemented as a separate `SolarAttributionCache` alongside the shared visibility bitset — see §2.5. |
 
 **What is genuinely missing and cannot be fully solved in Phase 1:** a thermal load model. Shaderade's
 definition of "unwanted sun" is *transmitted beam energy during hours when the zone has a net cooling
@@ -356,27 +356,34 @@ Where Stage 9 itself diverged from §Stage 9 below:
 | Tests on a convex synthetic 2-parameter objective and on ZDT1 | Tests on the **real** objective, including an exhaustively enumerated 1-D case | A synthetic convex bowl proves the search descends; it does not prove the search finds the optimum of *this* objective, which is not unimodal — the measured 1-D landscape has a local maximum at 0.35 m against the global one at 0.25 m. The optimiser reaches the enumerated global optimum in 10 evaluations of 30 lattice points. |
 | — (not planned) | **Element counts capped by the analysis resolution** | Found in validation, and it matters because the failure looks like success. Blades pitched finer than the analysis grid shade *between* the sample points: an 11-blade array reported 100 % of unwanted solar blocked with 100 % of wanted solar retained. The accounting was correct; the geometry was finer than the analysis measuring it. |
 
-### 2.5 Decision: keep the blocker's identity, not just "blocked"
+### 2.5 Decision: keep the blocker's identity — in a *separate* structure
 
 Agreed on PR #12. The engine must record **which element intercepted the sun**, not only that
-something did — so shading performance can be reported per element, energy-weighted.
+something did, so shading performance can be reported per element, energy-weighted.
 
-**This costs almost nothing, because the information is already computed and then discarded.** The
-sampled path already ray-casts and sorts the hits:
+> **Superseded in implementation — and the implementation is right.** This section originally
+> specified folding attribution into the shared visibility structure, replacing the `lit[p, g]` bit
+> with a `firstHit[p, g]` blocker index. Stages 8–10 instead split it in two, and that is the design
+> to follow:
+>
+> | Structure | Purpose |
+> |---|---|
+> | `SolarVisibilityCache` | Compact visible/blocked bitset (`ulong[][]`). Shared base and context visibility, reused across every aperture and every candidate device. |
+> | `SolarAttributionCache` | First-hit element attribution, built **only** where needed — `RationaliseShading` and `VerifyShading`. |
+>
+> The original single-structure plan missed that attribution is needed only for *candidate devices*,
+> while base visibility is reused across all apertures and all candidates. Merging them makes the
+> common case pay for the rare one, and the ~450 KB → ~7.2 MB growth would have landed on the
+> structure that is reused most. Stage 10.1's optimisation — tracing attribution only for the samples
+> the base cache already reports lit — depends on the two staying separate.
+>
+> Do not retrofit `SolarVisibilityCache` to carry blocker indices.
 
-```csharp
-List<Tuple<LinkedFace3D, Point3D>> tuples_Intersection =
-    Geometry.Object.Spatial.Query.IntersectionTuples(segment3D, candidates, true, tolerance_Distance);
-…
-if (tuples_Intersection[0].Item1.Guid == sampleCell.MergedGuid && …)
-```
-
-`tuples_Intersection[0].Item1.Guid` **is** the first-hit surface. Today it is compared and thrown
-away. Keeping it turns a boolean engine into an attributing one.
-
-**Storage.** `lit[p, g]` becomes `firstHit[p, g]` — a blocker index into a per-model element table,
-with a reserved sentinel for "visible". 1 bit → 16 bits (`ushort`, 65 535 elements is ample). The
-§2.1 estimate goes from ~450 KB to ~7.2 MB for 20 apertures. Still negligible, so take it.
+**Getting the first hit.** `Query.IntersectionTuples(segment3D, candidates, sort, tolerance)` takes a
+`sort` flag. The base visibility path passes `sort: false` deliberately — it needs only "was there any
+hit", and skipping the ordering is the cheaper answer. Attribution needs the *nearest* hit, which does
+not require sorting the whole list: a linear min-scan by distance along the segment is O(n) against
+the sort's O(n log n), on a list that is typically a handful of candidates.
 
 **Two constraints this imposes, both worth knowing before building:**
 
@@ -1080,7 +1087,16 @@ allowed to become optional.
 
 ---
 
-### Stage 8.1 — Direct solar penetration into the space
+### Stage 8.1 — Direct solar penetration into the space — **DEFERRED**
+
+> **Deferred: not part of Phase 1 / Stage 11 scope.** Recorded here as a planned capability, not as
+> work to schedule now. Phase 1 validates the aperture-level shading and direct-solar workflow only.
+>
+> When it is built, keep **geometric penetration as the fundamental quantity** and add transmitted
+> solar as a **separate, construction-aware** figure — do not silently replace one with the other. The
+> geometric/transmittance decision belongs to the dedicated Stage 8.1 / Phase-2 work, not to the
+> Phase-1 plan. Glazing angular transmittance and SHGC treatment are recorded as a known Phase-1
+> limitation in §7.
 
 **Goal.** Follow the rays that *get through*. For each unblocked sun path, continue through the
 aperture and find the first internal surface it lands on, so shading can be judged by how much direct
@@ -1302,8 +1318,9 @@ judgement calls: reuse must be visible enough that a stale result is never silen
 4. **Sun-grouping bias study** — MAE vs sun-angle step at 1°/2°/5°, published in the docs so users
    can choose.
 5. **Grid convergence** — grid size and voxel size sensitivity, documented.
-6. **`documentation/`** — method description, the assumptions register (isotropic vs Perez, no
-   inter-reflection, no load model, binning approximation), and a worked example.
+6. **`documentation/Stage11-Validation.md`** — **written**: consolidated validation status
+   and the assumptions register (§3), fitness-for-purpose guidance (§4), the open validation gaps
+   (§2.5, §5) and the deferred capabilities (§6).
 
 **Difficulty.** Medium.
 
@@ -1355,7 +1372,7 @@ document, and it is what makes the tool trustworthy in a report.
 | 6 | **Shading potential field** | **Opus** | **High** |
 | 7 | Isosurface extraction | Sonnet | Medium |
 | 8 | **Rationalisation to buildable + performance metrics** | **Opus** | Medium–High |
-| 8.1 | Direct solar penetration into the space | **Opus** | Medium |
+| 8.1 | Direct solar penetration into the space — **deferred, not Phase 1** | **Opus** | Medium |
 | 9 | Optimisation (pattern search, NSGA-II) | Sonnet | Medium |
 | 10 | Grasshopper components | Sonnet | Medium |
 | 11 | Validation + assumptions register | Sonnet (+Opus for the register) | Medium |
@@ -1396,11 +1413,14 @@ entirely reasonable.
 | **Stale reuse.** A silently reused calculation gives a confidently wrong answer. | Automatic invalidation on the geometry hash, a visible `reusedPreviousCalculation` diagnostic output, and `_recalculate_` as a manual override (Stage 10, §2.4). |
 | **No inter-reflection.** Specular and diffuse bounce off context is ignored. | Same limitation as `LB Incident Radiation`; only full Radiance solves it. Documented, not hidden — and the reason intercepted energy is never described as "reflected" (§2.5). |
 | **Attribution resolution.** A shading element narrower than `gridSize` is under-attributed, because first-hit attribution lives on the analysis grid (§2.5). | Warn when any element's minimum dimension is below `gridSize`. Element totals stay correct in aggregate; only the per-element split degrades. |
+| **Glazing transmittance not modelled.** Direct solar is evaluated at the aperture plane; no angular transmittance or SHGC is applied, so figures are incident, not transmitted. | Phase-1 limitation, recorded in the assumptions register. Stage 8.1 (deferred) adds construction-aware transmitted solar as a separate quantity alongside geometric penetration. |
 | **First-hit contribution read as removal-loss.** Overlapping elements make the two differ. | Named **direct contribution** throughout, with the distinction stated wherever it is reported. Marginal contribution left as a documented extension point. |
 | **Voxel memory.** Fine voxels × many apertures. | Voxel size is a parameter; the field is per-aperture and disposable. A 3 m × 3 m × 1.5 m volume at 50 mm is ~1.6 M voxels ≈ 13 MB — fine. Warn above a threshold. |
 
 **Explicitly out of scope for Phase 1:** glare (DGP), daylight autonomy, thermal comfort, energy
-demand, dynamic/movable shading control, and BIPV yield. The architecture does not preclude any of
+demand, dynamic/movable shading control, BIPV yield, **internal solar penetration (Stage 8.1)**, and
+**glazing angular transmittance / SHGC** — direct solar is evaluated at the aperture plane, with no
+construction-aware transmission applied. The architecture does not preclude any of
 them — the sun-group visibility cache is the right substrate for all of them — but none is attempted
 here.
 
