@@ -257,7 +257,83 @@ If that is right, the next experiment is a **move set**, not more starts or a fi
 compound probes (e.g. pattern-search moves over parameter pairs) so a coordinated step is reachable.
 Recorded as a hypothesis; no further change made pending direction.
 
-### 2.6 What remains **not** validated
+### 2.8 Compound pairwise moves — measured, and **the hypothesis in §2.7 is rejected**
+
+The §2.7 move-set hypothesis was implemented and measured, then **removed**. Compass refinement was
+extended with deterministic compound probes: whenever no single-axis probe improved, every pair of
+free parameters was tried at all four sign combinations at the current step scale, before the step was
+halved. Coarse lattice, `maximumEvaluations = 400`, `coarseLevels = 3`, multi-start, `IsBetter`,
+NO SHADE semantics and the gate thresholds were all left unchanged.
+
+| family | λ | optimiser | enumerated best | gap % | evals | optimiser parameters | enumerated parameters |
+|---|---:|---:|---:|---:|---:|---|---|
+| Overhang | 0.5 | 154.960 | 133.974 | **−15.66** | 218 | Depth 0.54, Rise 0.11, Ext 0.02 | Depth 0.35, Rise 0, Ext 0 |
+| Overhang | 1 | 139.636 | 122.680 | **−13.82** | 197 | Depth 0.42, Rise 0.1, Ext 0 | Depth 0.65, Rise 0.25, Ext 0 |
+| Overhang | 2 | 138.368 | 121.617 | **−13.77** | 128 | Depth 0.43, Rise 0.12, Ext 0.01 | Depth 0.65, Rise 0.25, Ext 0 |
+| HorizontalLouvres | 0.5 | 155.044 | 148.675 | **−4.28** | 108 | Depth 0.54, Count 1, Tilt −10 | Depth 0.6, Count 1, Tilt −15 |
+| HorizontalLouvres | 1 | 148.444 | 146.381 | **−1.41** | 102 | Depth 0.24, Count 3, Tilt −5 | Depth 0.1, Count 3, Tilt 45 |
+| HorizontalLouvres | 2 | 146.381 | 146.381 | 0 | 128 | Depth 0.1, Count 3, Tilt 45 | Depth 0.1, Count 3, Tilt 45 |
+| VerticalFins | 0.5 | 5.071 | 5.071 | 0 | 80 | Depth 0.05, Count 5, Tilt 15 | Depth 0.05, Count 5, Tilt 15 |
+| VerticalFins | 1 | 5.071 | 5.071 | 0 | 97 | Depth 0.05, Count 5, Tilt 15 | Depth 0.05, Count 5, Tilt 15 |
+| VerticalFins | 2 | 5.071 | 5.071 | 0 | 97 | Depth 0.05, Count 5, Tilt 15 | Depth 0.05, Count 5, Tilt 15 |
+| EggCrate | 0.5 | 82.952 | 115.743 | 28.33 | 65 | Depth 0.21, **LouvreCount 1**, FinCount 1 | Depth 0.1, **LouvreCount 3**, FinCount 1 |
+| EggCrate | 1 | 74.013 | 111.762 | 33.78 | 62 | Depth 0.11, **LouvreCount 1**, FinCount 1 | Depth 0.1, **LouvreCount 3**, FinCount 1 |
+| EggCrate | 2 | 60.950 | 103.798 | **41.28** | 58 | Depth 0.11, **LouvreCount 1**, FinCount 1 | Depth 0.1, **LouvreCount 3**, FinCount 1 |
+
+| | multi-start (§2.7) | with compound moves | gate |
+|---|---:|---:|---|
+| mean gap | 5.204 % | 4.536 % | < 3 % — **still fails** |
+| worst gap | 41.28 % | **41.28 %** | < 10 % — **still fails** |
+| matched or beat | 9 / 12 | 9 / 12 | — |
+| evaluations | 56–158 | 58–218 | ≤ 400 budget |
+
+**EggCrate did not move — bit-identical scores *and* bit-identical parameter vectors**, at every λ, on
+82.952 / 74.013 / 60.95. Evaluations rose by exactly two per case, so the compound probes did run and
+none was accepted. **No compound move escaped the former incumbent.** The mean improved only because
+of families that already beat the enumeration, and one cell moved the wrong way
+(HorizontalLouvres λ=2, from −4.27 % to 0 %). **The hypothesis that EggCrate is trapped by parameter
+coupling is therefore not supported, and the compound-move code was removed rather than kept for a
+mean it did not exist to improve.**
+
+**Root cause, measured directly — the count axis is never probed at all.** The parameter vectors, not
+the objective values, identify it: at every λ the only dimension EggCrate loses on is `LouvreCount`,
+1 against the reference's 3. `Depth` is already within 10 mm of the reference at λ = 1 and 2, and
+`FinCount` matches exactly. That is not a diagonal the search cannot reach; it is **a single axis the
+search cannot move along**.
+
+The effective bounds are *not* the typology's declared [1, 16] quoted in §2.7. `Create.ShadingParameters`
+narrows every count to what the analysis grid can resolve, giving, on this fixture:
+
+| family | parameter | effective bounds | granularity | range | first compass step | probe from minimum |
+|---|---|---|---:|---:|---:|---|
+| Overhang | Depth | [0.05, 3] | 0.01 | 2.95 | 0.7375 | 0.79 — moves |
+| HorizontalLouvres | Count | **[1, 3]** | 1 | 2 | **0.5** | **1 — snaps back** |
+| VerticalFins | Count | [1, 5] | 1 | 4 | 1 | 2 — moves |
+| EggCrate | Depth | [0.05, 2] | 0.01 | 1.95 | 0.4875 | 0.54 — moves |
+| EggCrate | **LouvreCount** | **[1, 3]** | 1 | 2 | **0.5** | **1 — snaps back** |
+| EggCrate | FinCount | [1, 5] | 1 | 4 | 1 | 2 — moves |
+
+The refinement's first step is `0.5 * Range / (coarseLevels - 1)`, so a count whose effective range is
+2 starts at a step of **0.5** — half its own granularity. `ShadingParameter.Snap` rounds that back onto
+the incumbent, the probe is skipped as a no-op, and because **steps only ever halve, they never
+recover**. `LouvreCount` is therefore unreachable from the moment refinement begins, at every scale,
+from every start. Compound probes inherit the same `step[]` array, which is why the two pairs
+containing `LouvreCount` degenerated and only `Depth`+`FinCount` produced the two extra evaluations.
+
+This also explains §2.7's tidiest result without invoking coupling: `VerticalFins.Count` has range 4,
+step 1, and moves — and VerticalFins was fully repaired by multi-start. `HorizontalLouvres.Count` has
+the same defect as `LouvreCount` and is only masked because its coarse lattice happens to land on the
+right count.
+
+**Status: stopped for review before any further optimiser change.** The indicated fix is to floor the
+refinement step at each parameter's own granularity rather than at a fraction of its range, so a
+discrete axis is always probed at ±1. That is a third change to the optimiser and is **not made here**.
+No threshold was relaxed. The scratch harness that produced the reachability table above was removed
+rather than committed; a focused regression test asserting that every free axis is reachable at the
+first refinement step belongs with that fix, since committing it now would add a second red test for a
+defect whose correction is not yet authorised.
+
+### 2.9 What remains **not** validated
 
 Stated plainly, because it bounds what may be claimed:
 
@@ -310,7 +386,7 @@ result is biased: *under* = the tool reports less than reality, *over* = more.
 | A14 | **Four device families.** No light shelves, external roller blinds, or operable/seasonal devices. | — | — | Applicability. |
 | A15 | **Perforated / translucent screens unsupported** — the ray engine is binary. | — | — | Applicability. |
 | A16 | **Single scalar objective.** No Pareto front; λ and μ chosen up front. | — | — | Optimisation. Trade-offs are fixed before the search, not explored after. |
-| A17 | **Local optimality on the search lattice.** Multi-start refinement mitigates but does not eliminate it. | **Measured: mean 5.2 %, worst 41.3 % below the enumerated best** (§2.7; was 16.3 % / 41.3 % single-start) | **Under** — the recommended device can be materially worse than the family's best | Now concentrated in **EggCrate**, where it reaches 41.3 %. Louvres and Fins are at or better than the coarse enumeration. "Optimal" means best-found, not proven-global — see §2.7. |
+| A17 | **Local optimality on the search lattice.** Multi-start refinement mitigates but does not eliminate it; compound pairwise moves were measured and did **not** help. **Still open — Gate 7 fails.** | **Measured: mean 5.2 %, worst 41.3 % below the enumerated best** (§2.7; 16.3 % / 41.3 % single-start, and 4.5 % / 41.3 % with compound moves, §2.8) | **Under** — the recommended device can be materially worse than the family's best | Concentrated entirely in **EggCrate**, at 41.3 %. Root cause now identified and measured (§2.8): a count parameter whose effective range is 2 gets a first refinement step of 0.5, below its own granularity of 1, so **that axis is never probed at any scale**. Also affects `HorizontalLouvres.Count`. Fix not yet made — stopped for review. "Optimal" means **best found within a bounded deterministic search**, never proven-global. |
 | A18 | **`MaterialFraction` is area only** — no thickness, weight, fixing or cost. | — | **Under**-states real buildability cost | Any material/cost trade-off. |
 | A19 | **A valid, resolvable TimeZone is required.** | — | — | Fails loudly, by design. |
 | A20 | **The ideal shape's mesh is display geometry**, not performance truth. | — | — | Anyone measuring off the mesh instead of running `VerifyShading`. |

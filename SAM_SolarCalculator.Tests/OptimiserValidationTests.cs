@@ -298,6 +298,11 @@ namespace SAM.SolarCalculator.Tests
 
             List<double> gaps = new List<double>();
 
+            // Parameter vectors are recorded alongside the scores. A gap tells you the search lost;
+            // only the vectors tell you WHICH dimension it lost on, which is what separates a
+            // coupled-move failure from a plain basin miss.
+            List<string> parameterComparison = new List<string>();
+
             foreach (string typologyName in new string[] { "Overhang", "HorizontalLouvres", "VerticalFins", "EggCrate" })
             {
                 foreach (Tuple<double, double> objectiveWeights in new List<Tuple<double, double>>
@@ -324,9 +329,19 @@ namespace SAM.SolarCalculator.Tests
                     output.WriteLine($"{typologyName,-18}  {objectiveWeights.Item1,-6:0.#}  {objectiveWeights.Item2,-4:0.##}  " +
                         $"{optimised.ObjectiveScore,11:0.###}   {best.Item1,15:0.###}   {gap,8:0.###}   {relative,6:0.##} %   {optimised.Evaluations,5} / {best.Item3}");
 
+                    parameterComparison.Add(
+                        $"{typologyName,-18}  {objectiveWeights.Item1,-4:0.#}  optimiser [{Describe(optimised)}]   enumerated [{best.Item2}]");
+
                     // No per-combination ceiling assertion: the coarse enumeration is a lower bound,
                     // so scoring above it is expected and is reported as a negative gap below.
                 }
+            }
+
+            output.WriteLine("");
+            output.WriteLine("PARAMETER VECTORS, optimiser against enumerated reference:");
+            foreach (string line in parameterComparison)
+            {
+                output.WriteLine(line);
             }
 
             double worst = gaps.Max();
@@ -348,6 +363,18 @@ namespace SAM.SolarCalculator.Tests
 
             Assert.True(mean < 3.0,
                 $"the bounded search averages {mean:0.##} % off the enumerated best");
+        }
+
+        /// <summary>The optimiser's answer as a parameter list, in the family's own declared order.</summary>
+        private static string Describe(OptimisedShadingResult result)
+        {
+            List<string> parts = new List<string>();
+            foreach (string name in result.ParameterNames)
+            {
+                parts.Add($"{name} {result.GetParameter(name):0.##}");
+            }
+
+            return string.Join(", ", parts);
         }
 
         /// <summary>
