@@ -146,6 +146,53 @@ first-element-reached attribution; and context obstruction never being credited 
 `ConvergenceStudyTests` and `ResolutionConvergenceTests` add the grid- and voxel-convergence work,
 including the minimum-feature-size rule and the field's spatial stability under refinement.
 
+### 2.6 Gate 7 — the optimality gap is **materially larger than the gate allows** ⚠
+
+The first execution of this gate, once an invalid ceiling assertion was removed (it compared the
+search against a five-times-coarser enumeration and required the search never to win), measured the
+bounded search against exhaustive enumeration on 12 family/objective combinations:
+
+| family | λ | optimiser | enumerated best | gap % | evaluated / enumerated |
+|---|---:|---:|---:|---:|---:|
+| Overhang | 0.5 | 147.495 | 133.974 | **−10.09** | 75 / 1500 |
+| Overhang | 1 | 138.639 | 122.680 | **−13.01** | 69 / 1500 |
+| Overhang | 2 | 114.797 | 121.617 | 5.61 | 66 / 1500 |
+| HorizontalLouvres | 0.5 | 154.043 | 148.675 | **−3.61** | 53 / 1080 |
+| HorizontalLouvres | 1 | 148.444 | 146.381 | **−1.41** | 53 / 1080 |
+| HorizontalLouvres | 2 | 89.905 | 146.381 | **38.58** | 49 / 1080 |
+| VerticalFins | 0.5 | 4.090 | 5.071 | 19.35 | 42 / 1800 |
+| VerticalFins | 1 | 3.634 | 5.071 | 28.34 | 41 / 1800 |
+| VerticalFins | 2 | 3.634 | 5.071 | 28.34 | 41 / 1800 |
+| EggCrate | 0.5 | 82.952 | 115.743 | 28.33 | 40 / 600 |
+| EggCrate | 1 | 74.013 | 111.762 | 33.78 | 40 / 600 |
+| EggCrate | 2 | 60.950 | 103.798 | **41.28** | 38 / 600 |
+
+**Mean 16.29 %, worst 41.28 %**, matched or beat the coarse lattice in 4 of 12. Negative = the search
+found a better point than the coarser lattice contains. The gate's own thresholds are worst < 10 %
+and mean < 3 %, so **it fails, and the threshold must not be relaxed to make it pass.**
+
+**Mechanism, from the numbers.** `Optimise.ShadingTypology` runs a coarse lattice at
+`coarseLevels = 3` samples per free parameter, then compass refinement from the single best coarse
+point, under `maximumEvaluations = 400`. Only **38–75 evaluations are actually used** — between 10 %
+and 19 % of the permitted budget. Two patterns identify the failure:
+
+- Where the response is close to unimodal (Overhang and HorizontalLouvres at λ = 0.5 and 1) the
+  search **beats** the coarse enumeration. The refinement works.
+- The gap grows with **λ**, the wanted-solar penalty, and with the number of interacting parameters
+  (EggCrate, VerticalFins). At λ = 2 every family is at its worst.
+
+That is basin-lock. The method's own documentation says the coarse phase exists to prevent it — *"the
+depth response of a real device is not unimodal once counts and tilts are in play"* — and three levels
+per parameter is too sparse to locate the right basin once the objective stiffens.
+
+**Not yet attempted:** raising `coarseLevels` (the unused 5–10× budget is already allocated). That is a
+change to product behaviour and must be measured, not assumed — this gate is the instrument for it.
+
+**Consequence for reporting now.** Until this is closed, the wording rule in A17 is not a stylistic
+preference but a requirement: the search returns *best found within a bounded deterministic search*,
+and on EggCrate and VerticalFins that has been measured up to 41 % below the best point in a lattice
+coarser than its own.
+
 ### 2.6 What remains **not** validated
 
 Stated plainly, because it bounds what may be claimed:
@@ -199,7 +246,7 @@ result is biased: *under* = the tool reports less than reality, *over* = more.
 | A14 | **Four device families.** No light shelves, external roller blinds, or operable/seasonal devices. | — | — | Applicability. |
 | A15 | **Perforated / translucent screens unsupported** — the ray engine is binary. | — | — | Applicability. |
 | A16 | **Single scalar objective.** No Pareto front; λ and μ chosen up front. | — | — | Optimisation. Trade-offs are fixed before the search, not explored after. |
-| A17 | **Local optimality on the search lattice.** The coarse phase mitigates but does not eliminate multimodality. | — | — | "Optimal" means best-found, not proven-global. |
+| A17 | **Local optimality on the search lattice.** The coarse phase mitigates but does not eliminate multimodality. | **Measured: mean 16.3 %, worst 41.3 % below the enumerated best** (§2.6) | **Under** — the recommended device can be materially worse than the family's best | Every optimiser recommendation, worst on EggCrate and VerticalFins and at high λ. "Optimal" means best-found, not proven-global — see §2.6. |
 | A18 | **`MaterialFraction` is area only** — no thickness, weight, fixing or cost. | — | **Under**-states real buildability cost | Any material/cost trade-off. |
 | A19 | **A valid, resolvable TimeZone is required.** | — | — | Fails loudly, by design. |
 | A20 | **The ideal shape's mesh is display geometry**, not performance truth. | — | — | Anyone measuring off the mesh instead of running `VerifyShading`. |
