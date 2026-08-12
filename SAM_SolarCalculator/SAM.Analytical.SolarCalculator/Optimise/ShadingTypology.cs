@@ -57,9 +57,14 @@ namespace SAM.Analytical.SolarCalculator
         ///      device is not unimodal once counts and tilts are in play.
         ///   2. COMPASS REFINEMENT. From the best coarse point, each parameter is probed at plus
         ///      and minus the current step in fixed order; when no probe improves, every step is
-        ///      halved. It terminates when the step falls below the parameter's own granularity,
-        ///      which is a real physical limit (a 10 mm depth change, one whole louvre) rather than
-        ///      an arbitrary epsilon.
+        ///      halved — but never below that parameter's own granularity, which is a real physical
+        ///      limit (a 10 mm depth change, one whole louvre) rather than an arbitrary epsilon. It
+        ///      terminates when every free axis is already probing one granularity either way and
+        ///      none of them improves, so the answer is the best point on its own lattice along
+        ///      every axis. The floor is not a refinement of the stopping rule but a correctness
+        ///      condition: a step finer than the lattice snaps back onto the incumbent, so without
+        ///      it an axis whose bounds are narrow relative to its granularity is never probed at
+        ///      all. See ShadingParameter.MinimumIncrement.
         ///
         /// The seed INFORMS but does not decide: it is one lattice point among many, and it wins
         /// only if it scores best. Stage 7 can supply it (a depth read off the field's own zero
@@ -259,12 +264,24 @@ namespace SAM.Analytical.SolarCalculator
                         continue;
                     }
 
+                    // Half the coarse spacing: fine enough to resolve between lattice points, coarse
+                    // enough not to start from the granularity floor — but NEVER finer than the
+                    // smallest change the parameter's own lattice can express. A step below that
+                    // snaps straight back onto the incumbent, so the probe rebuilds identical
+                    // geometry, reports no improvement, and the axis is indistinguishable from one
+                    // that has converged. Since steps only ever halve, an axis that starts below its
+                    // own increment is unreachable for the whole descent, from every start.
+                    //
+                    // That is not a corner case: Create.ShadingParameters narrows element counts to
+                    // what the analysis grid can resolve, and a count capped to [1, 3] has a range of
+                    // 2 — so a fraction of its range is smaller than the single whole element it is
+                    // measured in. See ShadingParameter.MinimumIncrement.
                     double[] step = new double[parameters_Local.Count];
-                    for (int i = 0; i < parameters_Local.Count; i++)
+                    double[] floor = new double[parameters_Local.Count];
+                    foreach (int i in free)
                     {
-                        // Half the coarse spacing: fine enough to resolve between lattice points,
-                        // coarse enough not to start from the granularity floor.
-                        step[i] = 0.5 * parameters_Local[i].Range / Math.Max(1, coarseLevels - 1);
+                        floor[i] = parameters_Local[i].MinimumIncrement;
+                        step[i] = Math.Max(floor[i], 0.5 * parameters_Local[i].Range / Math.Max(1, coarseLevels - 1));
                     }
 
                     while (true)
@@ -272,11 +289,6 @@ namespace SAM.Analytical.SolarCalculator
                         if (evaluator.Evaluations >= maximumEvaluations)
                         {
                             termination = ShadingOptimisationTermination.EvaluationBudgetExhausted;
-                            break;
-                        }
-
-                        if (Converged(parameters_Local, free, step))
-                        {
                             break;
                         }
 
@@ -311,9 +323,28 @@ namespace SAM.Analytical.SolarCalculator
 
                         if (!improved)
                         {
-                            for (int i = 0; i < step.Length; i++)
+                            // Halve every free axis, but never past its own lattice.
+                            bool reduced = false;
+                            foreach (int i in free)
                             {
-                                step[i] *= 0.5;
+                                double next = Math.Max(floor[i], 0.5 * step[i]);
+                                if (next < step[i])
+                                {
+                                    reduced = true;
+                                }
+
+                                step[i] = next;
+                            }
+
+                            if (!reduced)
+                            {
+                                // Every free axis is already probing its nearest reachable
+                                // neighbour and none of them improved: this point is the best on its
+                                // own lattice along every axis. Halving again could only re-measure
+                                // it, which is what the old convergence test was really detecting —
+                                // except that it stopped as soon as the steps fell BELOW the
+                                // granularity, so the increment itself was never tried.
+                                break;
                             }
                         }
                     }
@@ -389,26 +420,6 @@ namespace SAM.Analytical.SolarCalculator
             }
 
             return x.Parameters.Length.CompareTo(y.Parameters.Length);
-        }
-
-        /// <summary>True when every free parameter's step has fallen below its own granularity.</summary>
-        private static bool Converged(List<ShadingParameter> parameters, List<int> free, double[] step)
-        {
-            foreach (int i in free)
-            {
-                double granularity = parameters[i].Step;
-                if (double.IsNaN(granularity) || granularity <= 0)
-                {
-                    granularity = 1e-4 * parameters[i].Range;
-                }
-
-                if (step[i] >= granularity)
-                {
-                    return false;
-                }
-            }
-
-            return true;
         }
 
         /// <summary>

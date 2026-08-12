@@ -65,6 +65,33 @@ namespace SAM.Analytical.SolarCalculator
 
         public double Range { get { return maximum - minimum; } }
 
+        /// <summary>
+        /// The smallest change to this parameter that <see cref="Snap"/> can actually express: one
+        /// place on its own lattice.
+        ///
+        /// A search that proposes less than this gets the value it started from back, so the probe
+        /// rebuilds identical geometry and reports no improvement — indistinguishable from a genuine
+        /// local optimum. That is not hypothetical: a count narrowed to [1, 3] by the analysis
+        /// resolution has a range of 2, and a step derived as a fraction of that range falls below
+        /// the whole element the lattice is made of. Any step schedule that shrinks must therefore
+        /// stop HERE rather than at an arbitrary epsilon, or the axis is silently unreachable.
+        ///
+        /// Where no granularity is declared the lattice is continuous and has no physical floor, so
+        /// a small fraction of the range stands in.
+        /// </summary>
+        public double MinimumIncrement
+        {
+            get
+            {
+                if (double.IsNaN(step) || step <= 0)
+                {
+                    return 1e-4 * Range;
+                }
+
+                return step;
+            }
+        }
+
         /// <summary>True when the range is a single point — nothing for the search to do.</summary>
         public bool IsFixed { get { return !(Range > 0); } }
 

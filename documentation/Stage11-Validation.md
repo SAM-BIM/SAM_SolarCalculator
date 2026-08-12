@@ -333,7 +333,97 @@ rather than committed; a focused regression test asserting that every free axis 
 first refinement step belongs with that fix, since committing it now would add a second red test for a
 defect whose correction is not yet authorised.
 
-### 2.9 What remains **not** validated
+### 2.9 The unreachable-axis defect — **corrected**, and Gate 7 **still fails** for a different reason
+
+The §2.8 root cause was fixed. It was a real correctness defect, and it is now covered by two
+permanent tests in `ShadingOptimisationTests`. **It was not, however, what was holding EggCrate back**,
+and Gate 7 still fails.
+
+**The correction.** `ShadingParameter` gained `MinimumIncrement` — the smallest change `Snap` can
+express, which is the declared `Step` where there is one and a small fraction of the range where the
+lattice is continuous. The refinement's step schedule is floored at it, both when the step is first
+set and at every halving, and the descent now terminates when *every free axis is already probing one
+increment either way and none improves* rather than when the steps have shrunk below the granularity.
+That last part matters: the old test stopped **below** the increment, so the increment itself was
+never tried. The now-redundant `Converged` helper was deleted; nothing else in the search changed.
+No parameter is named anywhere in the optimiser.
+
+**Two tests, written before the fix.**
+
+- `Narrowing_A_Count_To_The_Analysis_Resolution_Must_Not_Put_It_Out_Of_The_Search_s_Reach` walks every
+  free axis of every family and asserts one refinement step actually moves it. It records that **2 of
+  12 axes** — `EggCrate.LouvreCount` and `HorizontalLouvres.Count`, both narrowed to [1, 3] — have a
+  range-derived step of 0.5 against a granularity of 1, and that the remaining 10 keep *exactly* the
+  schedule they had before, so the floor is inert for continuous parameters.
+- `The_Search_Result_Is_Locally_Best_Along_Every_Free_Axis` rebuilds and re-measures both lattice
+  neighbours of the returned point on every free axis and requires none to score better. **This one
+  failed before the fix** — and on a case that was not predicted: `HorizontalLouvres` returned
+  TiltDegrees 30 when 35 scored 153.331 against 152.637. Tilt is not a degenerate axis; it was missed
+  because the step schedule is global and monotone, so a value first reached late in a descent can
+  never be probed at a coarse scale again. The floor repairs that too.
+
+| family | λ | optimiser | enumerated best | gap % | evals | optimiser parameters | enumerated parameters |
+|---|---:|---:|---:|---:|---:|---|---|
+| Overhang | 0.5 | 150.533 | 133.974 | **−12.36** | 140 | Depth 0.58, Rise 0.13, Ext 0.02 | Depth 0.35, Rise 0, Ext 0 |
+| Overhang | 1 | 139.636 | 122.680 | **−13.82** | 161 | Depth 0.42, Rise 0.1, Ext 0 | Depth 0.65, Rise 0.25, Ext 0 |
+| Overhang | 2 | 128.257 | 121.617 | **−5.46** | 125 | Depth 0.61, Rise 0.24, Ext 0.04 | Depth 0.65, Rise 0.25, Ext 0 |
+| HorizontalLouvres | 0.5 | 154.253 | 148.675 | **−3.75** | 102 | Depth 0.2, Count 3, Tilt 5 | Depth 0.6, Count 1, Tilt −15 |
+| HorizontalLouvres | 1 | 148.444 | 146.381 | **−1.41** | 121 | Depth 0.24, Count 3, Tilt −5 | Depth 0.1, Count 3, Tilt 45 |
+| HorizontalLouvres | 2 | 153.962 | 146.381 | **−5.18** | 124 | Depth 0.09, Count 3, Tilt 45 | Depth 0.1, Count 3, Tilt 45 |
+| VerticalFins | 0.5 | 5.071 | 5.071 | 0 | 77 | Depth 0.05, Count 5, Tilt 15 | Depth 0.05, Count 5, Tilt 15 |
+| VerticalFins | 1 | 5.071 | 5.071 | 0 | 79 | Depth 0.05, Count 5, Tilt 15 | Depth 0.05, Count 5, Tilt 15 |
+| VerticalFins | 2 | 5.071 | 5.071 | 0 | 79 | Depth 0.05, Count 5, Tilt 15 | Depth 0.05, Count 5, Tilt 15 |
+| EggCrate | 0.5 | 84.133 | 115.743 | 27.31 | 69 | Depth 0.22, **LouvreCount 1**, FinCount 1 | Depth 0.1, **LouvreCount 3**, FinCount 1 |
+| EggCrate | 1 | 74.013 | 111.762 | 33.78 | 72 | Depth 0.11, **LouvreCount 1**, FinCount 1 | Depth 0.1, **LouvreCount 3**, FinCount 1 |
+| EggCrate | 2 | 63.807 | 103.798 | **38.53** | 67 | Depth 0.1, **LouvreCount 1**, FinCount 1 | Depth 0.1, **LouvreCount 3**, FinCount 1 |
+
+| | multi-start (§2.7) | compound (§2.8) | step floor | gate |
+|---|---:|---:|---:|---|
+| mean gap | 5.204 % | 4.536 % | **4.803 %** | < 3 % — **still fails** |
+| worst gap | 41.28 % | 41.28 % | **38.53 %** | < 10 % — **still fails** |
+| matched or beat | 9 / 12 | 9 / 12 | 9 / 12 | — |
+| evaluations | 56–158 | 58–218 | 67–161 | ≤ 400 budget |
+
+`HorizontalLouvres` improved at two of three weights (λ=2 from −4.27 % to −5.18 %, λ=0.5 to −3.75 %),
+which is the tilt defect above being repaired. **EggCrate still returns `LouvreCount = 1` at every λ.**
+
+**Why — measured, not inferred.** The axis is now genuinely probed; it simply loses. The objective
+along `LouvreCount`, holding the returned depth and fin count, is a **valley at 2**:
+
+| λ | depth | LouvreCount 1 | LouvreCount 2 | LouvreCount 3 |
+|---|---:|---:|---:|---:|
+| 0.5 | 0.22 (returned) | 84.133 | **24.642** | 103.389 |
+| 0.5 | 0.1 (reference) | 75.752 | **48.710** | 115.743 |
+| 1 | 0.11 (returned) | 74.013 | **44.267** | 114.404 |
+| 1 | 0.1 (reference) | 71.770 | **44.729** | 111.762 |
+| 2 | 0.1 (returned = reference) | 63.807 | **36.766** | 103.798 |
+
+Three louvres are worth 20–40 points more than one, but **two are worth 27–50 points less than either**,
+at every weight and at both depths. A strict-descent compass search probing ±1 must step onto 2 to get
+to 3, and 2 is rejected. This is a genuine non-convexity in the physics — a two-blade array on this
+aperture puts both blades where they block winter beam without covering the summer profile — not a
+search defect. **The fix made the axis reachable; it cannot make a descent cross a valley.**
+
+Multi-start does not supply the basin either. At λ=2 the whole coarse lattice scores *negative* —
+worse than building nothing — because depth is sampled only at 0.05, 1.02 and 2.0 while the useful
+region is near 0.1. Ranked, the nine `LouvreCount = 3` points come 6th, 8th, 9th and below; refinement
+takes the best 5, all of which have `LouvreCount` 1 or 2. The best `LouvreCount = 3` point (−20.308)
+misses the refinement set **by one place**.
+
+**Status: stopped, per the standing decision rule.** The near-miss at rank 6 makes a sixth start look
+tempting and that is exactly why it was not done — tuning `DefaultRefinementStarts` until this fixture
+passes is fitting the constant to the test, not fixing the search. No threshold was relaxed, no budget
+or coarse level raised, no heuristic added, and the rejected compound-move code remains removed. The
+step floor is retained on its own merits: it is a correctness condition with a regression test that
+fails without it, and it removes code rather than adding a heuristic.
+
+**What the evidence now points at**, for direction rather than action: the coarse lattice samples depth
+at three points spanning 0.05–2.0 m when everything of interest happens below 0.3 m, so no start in the
+right region exists for *any* family — Overhang and Louvres survive that only because their response is
+smooth enough for a depth descent to walk there. That is a statement about how the lattice spans a
+bounded range, not about the move set, and it should be measured before anything is changed.
+
+### 2.10 What remains **not** validated
 
 Stated plainly, because it bounds what may be claimed:
 
@@ -386,7 +476,7 @@ result is biased: *under* = the tool reports less than reality, *over* = more.
 | A14 | **Four device families.** No light shelves, external roller blinds, or operable/seasonal devices. | — | — | Applicability. |
 | A15 | **Perforated / translucent screens unsupported** — the ray engine is binary. | — | — | Applicability. |
 | A16 | **Single scalar objective.** No Pareto front; λ and μ chosen up front. | — | — | Optimisation. Trade-offs are fixed before the search, not explored after. |
-| A17 | **Local optimality on the search lattice.** Multi-start refinement mitigates but does not eliminate it; compound pairwise moves were measured and did **not** help. **Still open — Gate 7 fails.** | **Measured: mean 5.2 %, worst 41.3 % below the enumerated best** (§2.7; 16.3 % / 41.3 % single-start, and 4.5 % / 41.3 % with compound moves, §2.8) | **Under** — the recommended device can be materially worse than the family's best | Concentrated entirely in **EggCrate**, at 41.3 %. Root cause now identified and measured (§2.8): a count parameter whose effective range is 2 gets a first refinement step of 0.5, below its own granularity of 1, so **that axis is never probed at any scale**. Also affects `HorizontalLouvres.Count`. Fix not yet made — stopped for review. "Optimal" means **best found within a bounded deterministic search**, never proven-global. |
+| A17 | **Local optimality on the search lattice.** Multi-start mitigates it; compound pairwise moves did **not** help and were removed; the unreachable-axis defect is now **fixed**. **Still open — Gate 7 fails.** | **Measured: mean 4.8 %, worst 38.5 % below the enumerated best** (§2.9; 16.3 % / 41.3 % single-start, 5.2 % / 41.3 % multi-start, 4.5 % / 41.3 % with compound moves) | **Under** — the recommended device can be materially worse than the family's best | Concentrated entirely in **EggCrate**, at 38.5 %. The residual is **not** a search defect: the objective along `LouvreCount` is a valley at 2 (worth 27–50 points less than either 1 or 3 at every weight), so a strict-descent search cannot reach the better 3, and no `LouvreCount = 3` coarse point ranks inside the refinement set. Measured in §2.9. Stopped there deliberately rather than tuning constants until the fixture passes. "Optimal" means **best found within a bounded deterministic search**, never mathematically proven-global. |
 | A18 | **`MaterialFraction` is area only** — no thickness, weight, fixing or cost. | — | **Under**-states real buildability cost | Any material/cost trade-off. |
 | A19 | **A valid, resolvable TimeZone is required.** | — | — | Fails loudly, by design. |
 | A20 | **The ideal shape's mesh is display geometry**, not performance truth. | — | — | Anyone measuring off the mesh instead of running `VerifyShading`. |

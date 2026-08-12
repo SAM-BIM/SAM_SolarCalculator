@@ -637,6 +637,173 @@ namespace SAM.SolarCalculator.Tests
             Assert.True(result.GetParameter("Count") <= louvreCount.Maximum);
         }
 
+        // ------------------------------------------------- lattice reachability ----
+
+        [Fact]
+        public void Narrowing_A_Count_To_The_Analysis_Resolution_Must_Not_Put_It_Out_Of_The_Search_s_Reach()
+        {
+            // STAGE 11, GATE 7. The two caps above interact badly with the refinement's step
+            // schedule, and the result is an optimisation variable that is free in name only.
+            //
+            // The compass refinement starts each axis at a FRACTION OF ITS RANGE
+            // (0.5 * Range / (coarseLevels - 1)) and then only ever halves. The cap in the test
+            // above narrows a count to what the grid can resolve — on this fixture, [1, 3] — so its
+            // range is 2 and its first step is 0.5, HALF the whole element the lattice is made of.
+            // Snap rounds that back onto the incumbent, the probe is discarded as a no-op, and since
+            // steps never grow the axis is unreachable at every scale, from every multi-start.
+            //
+            // Measured consequence before the fix: EggCrate returned LouvreCount 1 at every
+            // objective weight while exhaustive enumeration wanted 3, for a 41.3 % optimality gap
+            // that multi-start and compound pairwise moves both failed to touch.
+            //
+            // This test is deliberately about the GENERAL property — every free axis of every
+            // family must be able to reach its nearest lattice neighbour — not about EggCrate's
+            // number, which is Gate 7's job.
+            OptimisationFixture.Scenario scenario = OptimisationFixture.SouthSeasonal();
+            double gridSize = scenario.BaseCache.CellSize;
+
+            int degenerateAxes = 0;
+            int continuousAxes = 0;
+
+            output.WriteLine("family              parameter        bounds         increment   range step   effective   reaches");
+
+            foreach (string typologyName in new string[] { "Overhang", "HorizontalLouvres", "VerticalFins", "EggCrate" })
+            {
+                List<ShadingParameter> parameters = Analytical.SolarCalculator.Create.ShadingParameters(
+                    Analytical.SolarCalculator.Create.ShadingTypology(typologyName), double.NaN, scenario.Target, gridSize);
+
+                foreach (ShadingParameter parameter in parameters)
+                {
+                    if (parameter.IsFixed)
+                    {
+                        continue;
+                    }
+
+                    // The refinement's own schedule, at the product default of coarseLevels = 3,
+                    // quoted here so this test fails if that rule ever stops respecting the lattice.
+                    double rangeDerived = 0.5 * parameter.Range / 2.0;
+                    double effective = Math.Max(parameter.MinimumIncrement, rangeDerived);
+
+                    // From ANY value on the lattice, one effective step must land somewhere else.
+                    // Taken at the minimum, where only the upward probe is available.
+                    double from = parameter.Snap(parameter.Minimum);
+                    double reached = parameter.Snap(from + effective);
+
+                    output.WriteLine(
+                        $"{typologyName,-18}  {parameter.Name,-15}  [{parameter.Minimum,4:0.##}, {parameter.Maximum,4:0.##}]  " +
+                        $"{parameter.MinimumIncrement,9:0.###}   {rangeDerived,10:0.####}   {effective,9:0.####}   {from:0.##} -> {reached:0.##}");
+
+                    Assert.True(reached != from,
+                        $"{typologyName}.{parameter.Name} cannot be moved off {from:0.##} by one refinement step, so it is a free variable the search can never probe");
+
+                    if (rangeDerived < parameter.MinimumIncrement)
+                    {
+                        // The defect case: the range-derived step is finer than the lattice itself.
+                        degenerateAxes++;
+                        Assert.Equal(parameter.MinimumIncrement, effective, 12);
+                    }
+                    else
+                    {
+                        // Everything else keeps EXACTLY the schedule it had before the floor was
+                        // introduced — the correction is inert for continuous parameters.
+                        continuousAxes++;
+                        Assert.Equal(rangeDerived, effective, 12);
+                    }
+                }
+            }
+
+            output.WriteLine("");
+            output.WriteLine($"{degenerateAxes} axes whose range-derived step is finer than their own lattice, {continuousAxes} unaffected");
+
+            Assert.True(degenerateAxes > 0,
+                "this fixture no longer reproduces the narrowed-count case the test exists to guard; widen it or the guard is vacuous");
+        }
+
+        [Fact]
+        public void The_Search_Result_Is_Locally_Best_Along_Every_Free_Axis()
+        {
+            // The behavioural half of the test above, and the one that actually failed. Whatever the
+            // search returns must be at least as good as its immediate neighbours on the lattice:
+            // step one increment either way along each free axis, rebuild, re-measure, and nothing
+            // may score strictly better. A returned point with a better neighbour is not a local
+            // optimum at all — it is a descent that stopped because it could not express the move.
+            //
+            // This is the weakest honest statement of what the optimiser promises. It is NOT a claim
+            // of global optimality: see Gate 7 for the measured gap against exhaustive enumeration,
+            // and the wording rule that keeps the result "best found within a bounded deterministic
+            // search".
+            OptimisationFixture.Scenario scenario = OptimisationFixture.SouthSeasonal();
+
+            // The weight that stressed the search hardest in Gate 7.
+            ShadingObjective objective = new ShadingObjective(2.0, 0.1);
+            int checkedNeighbours = 0;
+
+            foreach (string typologyName in new string[] { "Overhang", "HorizontalLouvres", "VerticalFins", "EggCrate" })
+            {
+                OptimisedShadingResult result = Optimise.ShadingTypology(
+                    scenario.Target, scenario.BaseCache, scenario.Desirability, scenario.Context,
+                    typologyName, objective, null, null, 400, 3);
+
+                Assert.NotNull(result);
+
+                if (result.RecommendsNoShading)
+                {
+                    // NO SHADE is a verdict about the null device, not a point on the lattice, so
+                    // there is no neighbourhood to examine.
+                    output.WriteLine($"{typologyName,-18}  recommends no shading");
+                    continue;
+                }
+
+                foreach (ShadingParameter parameter in result.Bounds)
+                {
+                    if (parameter.IsFixed)
+                    {
+                        continue;
+                    }
+
+                    double value = result.GetParameter(parameter.Name);
+
+                    foreach (int sign in new int[] { 1, -1 })
+                    {
+                        double neighbour = parameter.Snap(value + sign * parameter.MinimumIncrement);
+                        if (neighbour == value)
+                        {
+                            continue; // at a bound: there is no neighbour that way
+                        }
+
+                        IShadingTypology device = Analytical.SolarCalculator.Create.ShadingTypology(typologyName);
+                        foreach (string name in result.ParameterNames)
+                        {
+                            device.SetParameter(name, name == parameter.Name ? neighbour : result.GetParameter(name));
+                        }
+
+                        ShadingPerformance performance = Analytical.SolarCalculator.Create.ShadingPerformance(
+                            scenario.Target, scenario.BaseCache, scenario.Desirability, scenario.Context, device);
+
+                        double score = performance == null ? double.NaN : objective.Score(performance);
+                        checkedNeighbours++;
+
+                        if (double.IsNaN(score))
+                        {
+                            continue;
+                        }
+
+                        output.WriteLine(
+                            $"{typologyName,-18}  {parameter.Name,-15}  {value,6:0.##} -> {neighbour,6:0.##}   " +
+                            $"{result.ObjectiveScore,9:0.###} vs {score,9:0.###}");
+
+                        Assert.True(score <= result.ObjectiveScore + 1e-9,
+                            $"{typologyName}: moving {parameter.Name} from {value:0.##} to {neighbour:0.##} scores {score:0.###} against the returned {result.ObjectiveScore:0.###}, " +
+                            "so the search returned a point it could still have improved on by one step");
+                    }
+                }
+            }
+
+            Assert.True(checkedNeighbours > 0);
+            output.WriteLine("");
+            output.WriteLine($"{checkedNeighbours} lattice neighbours examined; none beats the returned point");
+        }
+
         // -------------------------------------------------------------- eligibility ----
 
         [Fact]
