@@ -291,13 +291,12 @@ namespace SAM.SolarCalculator.Tests
             // not a benchmark.
             OptimisationFixture.Scenario scenario = OptimisationFixture.SouthSeasonal();
 
-            double Cost(int count)
+            // Wall-clock on a shared CI box is noisy, and a single mean of a handful of iterations is
+            // not a measurement. Each count is sampled REPEATEDLY and reduced by MEDIAN, and the
+            // counts are INTERLEAVED so that CPU frequency drift or a neighbouring process moves all
+            // three together instead of biasing whichever ran first.
+            double Sample(int count)
             {
-                IShadingTypology device = new HorizontalLouvres(0.3, count, 0.0);
-                List<ShadingElement> elements = device.ShadingElements(scenario.Target);
-
-                Attribution(scenario.BaseCache, elements, scenario.Target.AnalysisCells, 0, true); // warm
-
                 Stopwatch stopwatch = Stopwatch.StartNew();
                 for (int i = 0; i < 5; i++)
                 {
@@ -309,9 +308,36 @@ namespace SAM.SolarCalculator.Tests
                 return stopwatch.Elapsed.TotalMilliseconds / 5.0;
             }
 
-            double one = Cost(1);
-            double four = Cost(4);
-            double sixteen = Cost(16);
+            double Median(List<double> values)
+            {
+                List<double> sorted = new List<double>(values);
+                sorted.Sort();
+                return sorted.Count % 2 == 1
+                    ? sorted[sorted.Count / 2]
+                    : 0.5 * (sorted[sorted.Count / 2 - 1] + sorted[sorted.Count / 2]);
+            }
+
+            int[] counts = new int[] { 1, 4, 16 };
+            Dictionary<int, List<double>> samples = new Dictionary<int, List<double>>();
+            foreach (int count in counts)
+            {
+                samples[count] = new List<double>();
+                // Warm each count once so JIT and first-touch allocation are not charged to it.
+                Attribution(scenario.BaseCache, new HorizontalLouvres(0.3, count, 0.0).ShadingElements(scenario.Target),
+                    scenario.Target.AnalysisCells, 0, true);
+            }
+
+            for (int round = 0; round < 7; round++)
+            {
+                foreach (int count in counts)
+                {
+                    samples[count].Add(Sample(count));
+                }
+            }
+
+            double one = Median(samples[1]);
+            double four = Median(samples[4]);
+            double sixteen = Median(samples[16]);
 
             output.WriteLine($"one candidate at GridSize {scenario.BaseCache.CellSize} m: 1 blade {one:0.00} ms, 4 blades {four:0.00} ms, 16 blades {sixteen:0.00} ms");
 
@@ -321,8 +347,15 @@ namespace SAM.SolarCalculator.Tests
                 $"cost grew faster than linearly in the element count: 4 blades {four:0.00} ms, 16 blades {sixteen:0.00} ms");
 
             // And more elements genuinely do cost more, or the measurement above is not measuring
-            // what it claims and the guard is worthless.
-            Assert.True(sixteen > one);
+            // what it claims and the guard is worthless. Reported with the numbers, because the two
+            // ways this can fail need different responses: if the medians are close but ordered
+            // wrongly it is residual noise on a shared machine, and if sixteen blades genuinely cost
+            // no more than one then the per-element term is being dominated by fixed setup at this
+            // grid size and the scaling law above is not being exercised at all.
+            Assert.True(sixteen > one,
+                $"sixteen blades did not measure dearer than one: 1 blade {one:0.000} ms, 4 blades {four:0.000} ms, " +
+                $"16 blades {sixteen:0.000} ms (medians of 7 interleaved rounds). Either the machine is too noisy to " +
+                $"resolve the per-element term, or fixed setup dominates it entirely at GridSize {scenario.BaseCache.CellSize} m.");
         }
     }
 }

@@ -284,8 +284,14 @@ namespace SAM.SolarCalculator.Tests
             // it can be ENUMERATED COMPLETELY. The optimiser's answer is then held against the true
             // best point in its own search space, and the gap is a fact rather than an inference.
             //
-            // Enumeration is over the SAME bounds and the SAME snapping the optimiser uses, so this
-            // measures the SEARCH, not the parameterisation.
+            // Enumeration is over the SAME bounds but a DELIBERATELY COARSER lattice than the
+            // optimiser searches (see Enumerate: 50 mm depths and 15 degree tilts, against the
+            // optimiser's 10 mm and 5 degrees) — a complete enumeration of the fine lattice is not
+            // affordable here. The enumerated best is therefore a LOWER BOUND on the true best, not
+            // the true best itself, and the optimiser searching the finer lattice can legitimately
+            // BEAT it. That is a good outcome, not a broken measurement: it means the finer lattice
+            // is worth having. What must not happen is the optimiser coming in materially BELOW a
+            // search five times coarser than its own.
             OptimisationFixture.Scenario scenario = OptimisationFixture.SouthSeasonal();
 
             output.WriteLine("family              lambda   mu     optimiser      best enumerated   gap        gap %    evaluated / enumerated");
@@ -318,20 +324,19 @@ namespace SAM.SolarCalculator.Tests
                     output.WriteLine($"{typologyName,-18}  {objectiveWeights.Item1,-6:0.#}  {objectiveWeights.Item2,-4:0.##}  " +
                         $"{optimised.ObjectiveScore,11:0.###}   {best.Item1,15:0.###}   {gap,8:0.###}   {relative,6:0.##} %   {optimised.Evaluations,5} / {best.Item3}");
 
-                    // The optimiser can never BEAT an exhaustive search of its own space. If it did,
-                    // the enumeration would be missing points and this whole measurement would be
-                    // worthless.
-                    Assert.True(optimised.ObjectiveScore <= best.Item1 + 1e-6,
-                        $"{typologyName}: the search scored {optimised.ObjectiveScore:0.####}, above the enumerated best {best.Item1:0.####} — the enumeration is incomplete");
+                    // No per-combination ceiling assertion: the coarse enumeration is a lower bound,
+                    // so scoring above it is expected and is reported as a negative gap below.
                 }
             }
 
             double worst = gaps.Max();
             double mean = gaps.Average();
-            int exact = gaps.Count(x => x < 1e-6);
+            int matchedOrBeat = gaps.Count(x => x < 1e-6);
 
             output.WriteLine("");
-            output.WriteLine($"optimality gap over {gaps.Count} family/objective combinations: mean {mean:0.###} %, worst {worst:0.###} %, exact in {exact} of {gaps.Count}");
+            output.WriteLine($"gap against the coarse enumeration over {gaps.Count} family/objective combinations: " +
+                $"mean {mean:0.###} %, worst {worst:0.###} %, matched or beat it in {matchedOrBeat} of {gaps.Count}");
+            output.WriteLine("(negative gap = the optimiser found a better point than the coarser lattice contains)");
 
             // THE VERDICT FOR PHASE 1. The bounded search is not a proof of global optimality and
             // must never be described as one — but the measured gap has to be small enough that the
