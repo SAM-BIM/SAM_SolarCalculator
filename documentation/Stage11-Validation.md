@@ -710,7 +710,74 @@ Caveat 1 stands open: every production case still exhausts 400 evaluations, and 
 shows that costs measured quality (Overhang λ=2 would go from −5.66 % to −13.77 % against the
 enumerated best with more budget). **The budget was not raised.**
 
-### 2.13 What remains **not** validated
+### 2.13 Poll cost — two regressions found by the **full suite**, not by Gate 7
+
+Gate 7 passed at `a305787`, but the first complete-suite run afterwards failed two tests that Gate 7's
+protocol never exercises. Both are real, and both have the same cause.
+
+| test | symptom |
+|---|---|
+| `Case7_On_A_One_Dimensional_Problem_The_Optimiser_Finds_The_Enumerated_Optimum` | `30 evaluations against 30 lattice points` |
+| `PenaltyDomainTests.A_Stronger_Wanted_Penalty_Buys_A_Design_That_Keeps_More_Wanted_Solar` | λ=2 destroyed **more** wanted solar than λ=0.5 |
+
+**Cause: the poll's per-iteration cost.** §2.12 measured it — 18 to 38 distinct evaluations per poll,
+because every axis was probed at *every* scale on its ladder. Gate 7 runs one regime: four families,
+three free axes each, a 400-evaluation budget. The two failures live in regimes it never visits.
+
+- Case 7 pins everything except `Depth` over a 30-point lattice. With whole-ladder polling across
+  several starts the search touched all 30 points — it stopped earning its place against brute force,
+  which is exactly what that test exists to guarantee.
+- The penalty test calls the optimiser with `maximumEvaluations: 60`. The coarse lattice alone is 27
+  points, so barely one poll remained and the result was little more than the coarse winner, which
+  carries no obligation to respect the λ ordering.
+
+**The correction, one line of control flow: the first productive scale decides an axis.** Descending
+*past failing* scales is the part that mattered — it is what let an axis whose useful move is far finer
+than its first step be seen at all, and what stopped a misleading coarse move on another axis from
+committing the descent. Continuing *past a scale that already worked* bought a marginally better move
+for a multiple of the cost. **Ordering independence is untouched**, because it comes from judging every
+axis from the same incumbent and taking the global best, not from exhausting each ladder.
+
+Nothing else changed: no threshold, no budget, no coarse sampling, no `MinimumIncrement`, no `Snap`,
+no `IsBetter`, no NO SHADE, no randomness, no compound moves, no family-specific logic.
+
+| family | λ | optimiser | enumerated best | gap % | evals | starts | stopped because |
+|---|---:|---:|---:|---:|---:|---:|---|
+| Overhang | 0.5 | 154.960 | 133.974 | −15.66 | 400 | 3 / 28 | budget |
+| Overhang | 1 | 141.499 | 122.680 | −15.34 | 400 | 3 / 28 | budget |
+| Overhang | 2 | 132.689 | 121.617 | **−9.10** | 400 | 4 / 28 | budget |
+| HorizontalLouvres | 0.5 | 156.096 | 148.675 | −4.99 | 400 | 20 / 28 | budget |
+| HorizontalLouvres | 1 | 153.962 | 146.381 | −5.18 | 400 | 10 / 28 | budget |
+| HorizontalLouvres | 2 | 153.962 | 146.381 | −5.18 | 400 | 11 / 28 | budget |
+| VerticalFins | 0.5 | 8.711 | 5.071 | −71.78 | **355** | **28 / 28** | **all starts** |
+| VerticalFins | 1 | 5.071 | 5.071 | 0 | **335** | **28 / 28** | **all starts** |
+| VerticalFins | 2 | 5.071 | 5.071 | 0 | **325** | **28 / 28** | **all starts** |
+| EggCrate | 0.5 | 120.935 | 115.743 | −4.49 | **254** | **28 / 28** | **all starts** |
+| EggCrate | 1 | 114.404 | 111.762 | −2.36 | **243** | **28 / 28** | **all starts** |
+| EggCrate | 2 | 103.798 | 103.798 | 0 | **227** | **28 / 28** | **all starts** |
+
+| | whole-ladder poll (§2.12) | first-productive-scale | gate |
+|---|---:|---:|---|
+| worst gap | 0 % | **0 %** | < 10 % — passes |
+| mean positive shortfall | 0.000 % | **0.000 %** | diagnostic |
+| signed mean | −10.30 % | **−11.174 %** | < 3 % — passes |
+| matched or beat | 12 / 12 | **12 / 12** | — |
+| cases exhausting the budget | 12 of 12 | **6 of 12** | ≤ 400 |
+
+**Gate 7 did not merely survive the fix — it improved**, and the parameter vectors that mattered are
+unchanged: EggCrate holds `LouvreCount 3` at every λ, VerticalFins holds `Count 5` at every λ.
+Caveat 1 from §2.12 is now **half closed**: VerticalFins and EggCrate genuinely converge on all 28
+starts instead of being cut off, and Overhang λ=2 improved from −5.66 % to −9.10 %. Overhang and
+HorizontalLouvres still exhaust the budget, so the caveat stands for them and the budget was still
+**not raised**.
+
+**The lesson is about the validation protocol, not the algorithm.** Four optimiser experiments were
+each measured against Gate 7 alone, and Gate 7 alone was not sufficient: it exercises one budget, one
+axis count and one fixture. The two regimes that broke — a one-dimensional problem and a 60-evaluation
+budget — were both already covered by the suite, and only a full run surfaced them. **A gate is not a
+substitute for the suite.**
+
+### 2.14 What remains **not** validated
 
 Stated plainly, because it bounds what may be claimed:
 
@@ -763,7 +830,7 @@ result is biased: *under* = the tool reports less than reality, *over* = more.
 | A14 | **Four device families.** No light shelves, external roller blinds, or operable/seasonal devices. | — | — | Applicability. |
 | A15 | **Perforated / translucent screens unsupported** — the ray engine is binary. | — | — | Applicability. |
 | A16 | **Single scalar objective.** No Pareto front; λ and μ chosen up front. | — | — | Optimisation. Trade-offs are fixed before the search, not explored after. |
-| A17 | **Local optimality on the search lattice.** The balanced multiscale poll (§2.12) closes the measured gap: **Gate 7 passes on its unchanged thresholds**, worst 0 %, mean positive shortfall 0 %, 12 of 12 matched or beat. Two caveats remain open — see below. | **Measured: no case falls short of the enumerated best** (§2.12; was 41.3 % single- and multi-start, 38.5 % with the step floor, 28.3 % with axis-local scale) | **Under, but no longer measurable on this fixture** | The residual risk is now *unquantified rather than large*: the enumeration is a coarser lattice, so beating it everywhere is a lower bound being cleared, **not a proof of global optimality**. One open item: every case now exhausts the 400-evaluation budget (3–18 of 28 starts refined), and the diagnostic in §2.12 shows that costs measured quality. The local-optimality regression was re-pinned at the level where the invariant actually holds — a **completed** descent — after measurement confirmed the failure was budget truncation, not a search defect. **"Optimal" still means best found within a bounded deterministic search, never mathematically proven-global**, and that wording must not soften because the gate went green. |
+| A17 | **Local optimality on the search lattice.** The balanced multiscale poll (§2.12) closes the measured gap: **Gate 7 passes on its unchanged thresholds**, worst 0 %, mean positive shortfall 0 %, 12 of 12 matched or beat. Poll cost was then corrected in §2.13 after the full suite caught two regressions Gate 7 could not see; the gate improved again. | **Measured: no case falls short of the enumerated best** (§2.13; was 41.3 % single- and multi-start, 38.5 % with the step floor, 28.3 % with axis-local scale) | **Under, but no longer measurable on this fixture** | The residual risk is now *unquantified rather than large*: the enumeration is a coarser lattice, so beating it everywhere is a lower bound being cleared, **not a proof of global optimality**. One open item: Overhang and HorizontalLouvres still exhaust the 400-evaluation budget (3–20 of 28 starts refined) and §2.12's diagnostic shows that costs measured quality; VerticalFins and EggCrate now converge on all 28 starts (§2.13). The local-optimality regression was re-pinned at the level where the invariant actually holds — a **completed** descent — after measurement confirmed the failure was budget truncation, not a search defect. **"Optimal" still means best found within a bounded deterministic search, never mathematically proven-global**, and that wording must not soften because the gate went green. |
 | A18 | **`MaterialFraction` is area only** — no thickness, weight, fixing or cost. | — | **Under**-states real buildability cost | Any material/cost trade-off. |
 | A19 | **A valid, resolvable TimeZone is required.** | — | — | Fails loudly, by design. |
 | A20 | **The ideal shape's mesh is display geometry**, not performance truth. | — | — | Anyone measuring off the mesh instead of running `VerifyShading`. |

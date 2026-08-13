@@ -395,6 +395,27 @@ namespace SAM.Analytical.SolarCalculator
                                         axisBest = candidate;
                                     }
                                 }
+
+                                // THE FIRST PRODUCTIVE SCALE DECIDES THIS AXIS. Descending PAST
+                                // failing scales is the part that matters — it is what lets an axis
+                                // whose useful move is far finer than its first step be seen at all,
+                                // and it is what stopped a misleading coarse move on another axis
+                                // from committing the descent. Continuing past a scale that already
+                                // worked buys a marginally better move for a multiple of the cost:
+                                // every extra scale is another pair of distinct evaluations, on
+                                // every axis, on every poll.
+                                //
+                                // That cost is not academic. Polling whole ladders made a 30-point
+                                // one-dimensional problem take 30 evaluations — the search stopped
+                                // earning its place against brute force — and left a 60-evaluation
+                                // budget with almost nothing after the coarse lattice. Stopping here
+                                // keeps the ordering independence, which comes from judging every
+                                // axis from the SAME incumbent and taking the global best, not from
+                                // exhausting each ladder.
+                                if (axisBest != null)
+                                {
+                                    break;
+                                }
                             }
 
                             if (axisBest != null && IsBetter(axisBest, pollBest))
