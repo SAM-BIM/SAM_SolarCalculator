@@ -1,24 +1,37 @@
-name: Build (Windows)
+name: Long-running tests (Windows)
+
+# The expensive half of the suite, split out of "Build (Windows)" so the required PR check stays
+# quick. Everything here is tagged [Trait("Category", "LongRunning")] in the test project; the two
+# workflows use complementary --filter expressions, so between them they still run every test.
+#
+# NOT a required PR check by design. It runs where a slow answer is still a useful answer:
+#   - push to master / sow/**  -> the integration branches, i.e. after a PR has already merged;
+#   - workflow_dispatch        -> on demand, e.g. before promoting a sow branch;
+#   - nightly                  -> see the schedule note below.
 
 on:
   push:
     branches: [ "master", "main", "sow/**" ]
-  pull_request:
-    branches: [ "master", "main", "sow/**" ]
   workflow_dispatch:
+  # Nightly is justified here by a real exposure rather than by habit: the build step below clones
+  # the SAM dependency repo fresh on every run, so SAM core can change underneath this repository
+  # with no commit here to trigger a build. Without a scheduled run, a breaking upstream change is
+  # invisible until somebody happens to push. 03:00 UTC keeps it clear of working hours.
+  schedule:
+    - cron: "0 3 * * *"
 
 jobs:
-  build:
-    # Guard: if this workflow ever gets merged upstream (e.g. HoareLea),
-    # it will show as "skipped" there and won't break their CI.
+  long-running-tests:
+    # Same guard as build.yml: shows as "skipped" rather than failing if merged upstream.
     if: github.repository_owner == 'SAM-BIM'
     runs-on: windows-2022
+    # The convergence sweeps and the exhaustive enumeration dominate this job; the default 360 min
+    # is far more than it needs and would hide a hang.
+    timeout-minutes: 120
 
     env:
       MSBUILDDISABLENODEREUSE: "1"
       ORG_NAME: "SAM-BIM"
-      # >>> CHANGE THIS PER REPO <<<
-      # Examples: SAM, SAM_gbXML, SAM_GEM, SAM_Tas, ...
       REPO_NAME: "SAM_SolarCalculator"
 
     steps:
@@ -41,7 +54,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $ref = if ('${{ github.event_name }}' -eq 'pull_request') { '${{ github.base_ref }}' } else { '${{ github.ref_name }}' }
+          $ref = '${{ github.ref_name }}'
           # .NET AssemblyVersion components are UInt16 (max 65535). Cap to 60000 for headroom.
           $run = ${{ github.run_number }} % 60000
           if ($ref -match 'sow/(\d{4})-Q(\d)') {
@@ -64,30 +77,23 @@ jobs:
           $org  = '${{ env.ORG_NAME }}'
           $repo = '${{ env.REPO_NAME }}'
 
-          # >>> ADJUST BUILD ORDER HERE IF NEEDED <<<
           # Keep the current repo LAST.
           $buildOrder = @(
             'SAM'
             $repo
           )
 
-          # Clone everything except the last one (already checked out by Actions)
           $deps = $buildOrder[0..($buildOrder.Count-2)]
           foreach ($r in $deps) {
             if (Test-Path $r) { continue }
-            $headRef = '${{ github.head_ref }}'
-            $baseRef = '${{ github.base_ref }}'
             $refName = '${{ github.ref_name }}'
             $candidates = @()
-            if ($headRef) { $candidates += $headRef }
-            # Current sow branch: base_ref on PR events, ref_name on push events.
-            $sowRef = if ($baseRef -match '^sow/') { $baseRef } elseif ($refName -match '^sow/') { $refName } else { '' }
-            if ($sowRef -and $sowRef -ne $headRef) { $candidates += $sowRef }
-            # Quarterly integration fallback — but NOT when building the default branch directly (a plain
-            # push to master/main with no PR head). There, dependencies must come from their own default
-            # branch, not from quarterly code, otherwise master CI silently builds against sow/** and masks
-            # integration/branch-skew issues.
-            $isDefaultBranchBuild = (-not $headRef) -and ($refName -eq 'master' -or $refName -eq 'main')
+            # This workflow only ever runs on a branch (push / dispatch / schedule), never on a PR
+            # merge ref, so ref_name is the whole story.
+            if ($refName -match '^sow/') { $candidates += $refName }
+            # Same rule as build.yml: on the default branch, dependencies must come from THEIR
+            # default branch, not from quarterly code, or master CI silently builds against sow/**.
+            $isDefaultBranchBuild = ($refName -eq 'master' -or $refName -eq 'main')
             if (-not $isDefaultBranchBuild) { $candidates += 'sow/2026-Q2' }
             $cloned = $false
             foreach ($cand in $candidates) {
@@ -104,7 +110,6 @@ jobs:
               git clone --depth 1 "https://github.com/$org/$r.git" $r
             }
           }
-
 
           # Ensure ReferencePath exists even before SAM_Windows builds
           New-Item -ItemType Directory -Force -Path "SAM_Windows\build" | Out-Null
@@ -129,16 +134,11 @@ jobs:
             '/p:SAMVersion=${{ steps.ver.outputs.samversion }}'
           )
 
-          # If you really want Platform, use QUOTED Any CPU:
-          # $common += '/p:Platform="Any CPU"'
-
-          # Same build order as above (keep repo LAST)
           $buildOrder = @(
             'SAM'
             $repo
           )
 
-          # Convert build order -> solution paths (robust: first .sln in each folder)
           $solutions = foreach ($r in $buildOrder) {
             $sln = Get-ChildItem -Path $r -Filter *.sln -File | Select-Object -First 1
             if (-not $sln) { throw "No .sln found under: $r" }
@@ -155,34 +155,26 @@ jobs:
             & msbuild $sln /t:Rebuild @common
           }
 
-      # The Rebuild above compiles the test project but never runs it, so a green check used to mean
-      # only "it compiles". Everything the suite asserts - the Stage 11 gates, the SAM-vs-TAS
-      # regression, the convergence studies - was unenforced. This runs it.
-      # --no-build: the Release binaries already exist from the Rebuild step; recompiling here would
-      # risk resolving the prebuilt SAM core DLLs differently from the assemblies under test.
-      #
-      # Category!=LongRunning is the FAST half. It keeps every inexpensive behavioural and
-      # regression test - the Gate-7 optimiser cases including the Case7 1-D enumerated-optimum
-      # check, the PenaltyDomain wanted-solar behaviour, the MinimumIncrement/grid-warning
-      # regressions, the determinism checks and the JSON round-trips - and drops only the
-      # convergence sweeps, exhaustive enumerations and expensive reference comparisons, which
-      # long-running-tests.yml runs with the complementary Category=LongRunning filter. Untagged
-      # tests are FAST by default, so a new test is covered by the required check unless someone
-      # deliberately tags it out.
-      - name: Run fast tests (Release)
+      # The complement of the filter in build.yml. If a test is ever added with the LongRunning
+      # trait, it lands here automatically and disappears from the PR check — and vice versa — so
+      # the two filters cannot both drop the same test.
+      - name: Run LongRunning tests (Release)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $proj = "${{ env.REPO_NAME }}\SAM_SolarCalculator.Tests\SAM.SolarCalculator.Tests.csproj"
           & dotnet test $proj --no-build -c Release `
-            --filter "Category!=LongRunning" `
-            --logger "console;verbosity=normal"
-          if ($LASTEXITCODE -ne 0) { throw "Tests failed with exit code $LASTEXITCODE" }
+            --filter "Category=LongRunning" `
+            --logger "console;verbosity=normal" `
+            --logger "trx;LogFileName=long-running.trx" `
+            --results-directory "${{ github.workspace }}\test-results"
+          if ($LASTEXITCODE -ne 0) { throw "LongRunning tests failed with exit code $LASTEXITCODE" }
 
-      - name: Upload build folders (optional)
+      # These runs are infrequent and slow, so keep the result readable after the log scrolls away.
+      - name: Upload test results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.REPO_NAME }}-build-folders
-          path: |
-            **\build\*
+          name: long-running-test-results
+          path: test-results/*.trx
           if-no-files-found: warn

@@ -225,6 +225,7 @@ namespace SAM.SolarCalculator.Tests
         }
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void CellSize_Convergence()
         {
             AnalyticalModel analyticalModel = Load("ModelB-NoShadeSolarSimulation.sam");

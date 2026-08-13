@@ -140,6 +140,7 @@ namespace SAM.SolarCalculator.Tests
         }
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void T2_Detects_A_Timestamp_Midpoint_Error()
         {
             // Detection power for the exact defect class B2 is about. The weather is symmetric on

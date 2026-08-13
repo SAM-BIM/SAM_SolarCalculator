@@ -79,6 +79,7 @@ namespace SAM.SolarCalculator.Tests
         }
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void T1_EvaluatedHours_Conserved_Across_TimeShifts()
         {
             Location location = TestHelpers.London();

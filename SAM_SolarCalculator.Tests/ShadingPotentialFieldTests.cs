@@ -195,6 +195,7 @@ namespace SAM.SolarCalculator.Tests
         }
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void CaseA_ProfileAngle_ZeroCrossing_Lies_Within_The_Discretisation_Bracket()
         {
             // The profile-angle gate. Along the voxel row just above the window head the benefit
@@ -279,6 +280,7 @@ namespace SAM.SolarCalculator.Tests
         }
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void CaseA_ProfileAngle_Converges_Toward_The_Continuous_Cutoff_As_The_Grid_Refines()
         {
             // The companion to the bracket test: the bracket is wide only because the analysis grid

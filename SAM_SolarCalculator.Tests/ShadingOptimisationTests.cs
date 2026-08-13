@@ -90,6 +90,7 @@ namespace SAM.SolarCalculator.Tests
         // ------------------------------------------------------------------ case 2 ----
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void Case2_A_Deeper_Device_Eventually_Loses_Because_It_Destroys_Wanted_Solar()
         {
             // The sign test, done on the objective rather than on the score's algebra. Sweeping the
@@ -526,6 +527,7 @@ namespace SAM.SolarCalculator.Tests
         // ------------------------------------------------------------------ case 10 ----
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void Case10_Per_Element_Attribution_Reconciles_With_Total_Intercepted_Energy()
         {
             // Conservation on an optimised device with MANY overlapping elements, which is where a
@@ -906,6 +908,7 @@ namespace SAM.SolarCalculator.Tests
         }
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void Multi_Typology_Comparison_Ranks_Eligible_Families_Deterministically()
         {
             OptimisationFixture.Scenario scenario = OptimisationFixture.SouthSeasonal();

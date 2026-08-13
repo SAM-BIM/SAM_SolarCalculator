@@ -76,6 +76,7 @@ namespace SAM.SolarCalculator.Tests
         };
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void T3_Standalone_Plane_Radiation_Matches_CachedIrradiance()
         {
             Location location = TestHelpers.London();
@@ -167,6 +168,7 @@ namespace SAM.SolarCalculator.Tests
         }
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void T3_Both_Corrected_Paths_Match_An_Independent_Perez_Implementation()
         {
             // Neither of the two corrected paths is an independent check of the Perez formulation

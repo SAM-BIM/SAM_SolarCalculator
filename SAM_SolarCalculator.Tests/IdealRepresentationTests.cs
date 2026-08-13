@@ -133,6 +133,7 @@ namespace SAM.SolarCalculator.Tests
         }
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void Voxel_Plates_Understate_The_Ideal_Shape_Against_The_Voxel_Solid()
         {
             ApertureSolarTarget target = Target();

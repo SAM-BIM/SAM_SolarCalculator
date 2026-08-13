@@ -131,6 +131,7 @@ namespace SAM.SolarCalculator.Tests
         // ------------------------------------------------------- the convergence measurement ----
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void One_Device_Measured_On_Coarser_Grids_Is_Worst_At_Exactly_One_Cell_Pitch()
         {
             // THE experiment behind Create.MinimumElementPitchInGridSizes. ONE physical device — same
@@ -245,6 +246,7 @@ namespace SAM.SolarCalculator.Tests
         // --------------------------------------------------------------- the rule as applied ----
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void The_Optimiser_Cannot_Propose_A_Device_Its_Own_Warning_Would_Reject()
         {
             // THE REGRESSION FOR THE DEFECT ITSELF. Whatever the optimiser returns, the resolution

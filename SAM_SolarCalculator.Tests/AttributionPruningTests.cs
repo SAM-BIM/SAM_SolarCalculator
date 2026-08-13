@@ -59,6 +59,7 @@ namespace SAM.SolarCalculator.Tests
         }
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void The_Pruned_And_Complete_Attributions_Give_Identical_Energy()
         {
             // The equivalence proof, on every scenario and every family that has one.

@@ -82,6 +82,7 @@ namespace SAM.SolarCalculator.Tests
         // ============================================== GATE 3: SUN-GROUPING BIAS ====
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void Sun_Grouping_Has_No_Effect_At_All_On_An_Unobstructed_Aperture()
         {
             // A STRUCTURAL RESULT, and a better one than a small measured error would have been.
@@ -126,6 +127,7 @@ namespace SAM.SolarCalculator.Tests
         }
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void Sun_Grouping_Bias_Is_Measured_Where_It_Can_Exist_At_All()
         {
             // The bias study proper, on a CONTEXT-OBSTRUCTED aperture — the only place grouping can
@@ -199,6 +201,7 @@ namespace SAM.SolarCalculator.Tests
         }
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void Sun_Grouping_Is_Stressed_By_A_Sharp_Shading_Edge()
         {
             // Annual irradiance is a forgiving test of grouping: it averages over the whole sky. A
@@ -261,6 +264,7 @@ namespace SAM.SolarCalculator.Tests
         // ==================================================== GATE 4: GRID CONVERGENCE ====
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void Aperture_Irradiance_Converges_With_Grid_Size()
         {
             // Absolute energy per square metre, so aperture size and the sampled-area effect from
@@ -325,6 +329,7 @@ namespace SAM.SolarCalculator.Tests
         }
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void Verified_Shading_Metrics_Converge_With_Grid_Size()
         {
             // Where the grid ACTUALLY matters. A shading device casts a moving shadow edge across
@@ -433,6 +438,7 @@ namespace SAM.SolarCalculator.Tests
         }
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void Breaking_The_Minimum_Feature_Size_Rule_Costs_Far_More_Than_The_Grid_Itself()
         {
             // INDEPENDENT CONFIRMATION OF THE STAGE 10.2 RULE, found while measuring something else.

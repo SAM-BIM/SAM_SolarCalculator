@@ -138,6 +138,7 @@ namespace SAM.SolarCalculator.Tests
         // ----------------------------------------------- the chain, on every orientation ----
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void Every_Orientation_Produces_A_Field_A_Device_And_A_Verified_Result()
         {
             // The end-to-end reproduction of the manual test that failed: ApertureSolarTargets ->

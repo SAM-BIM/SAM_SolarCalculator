@@ -164,6 +164,7 @@ namespace SAM.SolarCalculator.Tests
         // ============================================ GATE 6: STAGE 7 MESH VS VOXEL ====
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void The_Stage_7_Display_Mesh_Intercepts_Materially_Less_Than_The_Region_It_Draws()
         {
             // REPRODUCED AND QUANTIFIED, not redesigned. Stage 9/10 reported a large discrepancy
@@ -277,6 +278,7 @@ namespace SAM.SolarCalculator.Tests
         // ================================================= GATE 7: OPTIMISER OPTIMALITY ====
 
         [Fact]
+        [Trait("Category", "LongRunning")]
         public void The_Bounded_Search_Is_Compared_Against_Exhaustive_Enumeration()
         {
             // THE MEASUREMENT STAGE 10.2 COULD NOT MAKE. Each family's parameter space is snapped to
