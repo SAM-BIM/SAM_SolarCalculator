@@ -36,8 +36,9 @@ keep a stale baseline for comparison.
 >   Phase-1 readiness review the LONG half was verified green **locally** (23 / 23); no GitHub
 >   LONG run is claimed.
 >
-> The partition is exact: 248 FAST + 23 LONG = 271, zero overlap, no orphaned tests. Untagged
-> tests are FAST by default, so a new test gates the PR unless it is deliberately tagged out.
+> Together, FAST and LONG cover all 271 tests: 248 FAST and 23 LONG, with no test omitted or run
+> in both groups. Untagged tests are FAST by default, so a new test gates the PR unless it is
+> deliberately tagged out.
 > The one skipped test — `ReferenceExport.Write_Reference_Inputs`, the reference-regeneration
 > tool — is expected `NotExecuted` behaviour and does not count against either half.
 
