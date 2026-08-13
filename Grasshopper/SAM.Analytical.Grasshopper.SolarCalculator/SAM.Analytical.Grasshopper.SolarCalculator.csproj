@@ -51,6 +51,9 @@
     <Reference Include="SAM.Geometry.Rhino">
       <HintPath>..\..\..\SAM\build\SAM.Geometry.Rhino.dll</HintPath>
     </Reference>
+    <Reference Include="SAM.Weather">
+      <HintPath>..\..\..\SAM\build\SAM.Weather.dll</HintPath>
+    </Reference>
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Grasshopper">
@@ -68,6 +71,7 @@
     <ProjectReference Include="..\..\SAM_SolarCalculator\SAM.Analytical.SolarCalculator\SAM.Analytical.SolarCalculator.csproj" />
     <ProjectReference Include="..\..\SAM_SolarCalculator\SAM.Core.SolarCalculator\SAM.Core.SolarCalculator.csproj" />
     <ProjectReference Include="..\..\SAM_SolarCalculator\SAM.Geometry.SolarCalculator\SAM.Geometry.SolarCalculator.csproj" />
+    <ProjectReference Include="..\..\SAM_SolarCalculator\SAM.Weather.SolarCalculator\SAM.Weather.SolarCalculator.csproj" />
   </ItemGroup>
   <PropertyGroup />
   <PropertyGroup>
