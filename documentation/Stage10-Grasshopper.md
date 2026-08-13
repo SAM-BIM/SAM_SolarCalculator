@@ -37,15 +37,18 @@ SAMAnalytical.VerifyShading               what it ACTUALLY achieves
 Two branches hang off it. Neither belongs in the main line, and neither is a step you are skipping.
 
 ```
-SAMAnalytical.ApertureSolarTargets
-      └──► SAMAnalytical.ApertureIrradiance      "how much solar reaches this window as it is?"
+SAMAnalytical.ApertureSolarTargets.apertureGuids
+      └──► SAMAnalytical.ApertureIrradiance._apertures_   "how much solar reaches this window as it is?"
 
 SAMAnalytical.ShadingPotentialField
       └──► SAMAnalytical.IdealShadingShape       "what does the physics ideally want?"
 ```
 
 * **ApertureIrradiance** is a diagnostic about the EXISTING window. It answers *how much solar
-  arrives*. It is not an input to shading design and is never required by it.
+  arrives*. It is not an input to shading design and is never required by it. It reads apertures as
+  SAM Apertures or Guids: wire the `apertureGuids` output of `ApertureSolarTargets` into
+  `_apertures_` — never the `apertureSolarTargets` themselves. A target plugged into `_apertures_`
+  is ignored with a warning, and the run then falls back to **every** external sun-exposed aperture.
 * **IdealShadingShape** is the free-form shape the field would fill if buildability were no object.
   It answers *what the physics wants*. **RationaliseShading answers what can actually be built**, and
   it works from the field directly — it does not take the ideal shape as an input, and wiring one
@@ -77,7 +80,9 @@ so a script never loses its wires to an unknown component.
 
 This is the ordinary case, and it needs no expertise.
 
-`ApertureSolarTargets` emits a **list** of targets. Every downstream Solar node takes **one** target.
+`ApertureSolarTargets` emits a **list** of targets. Every shading-design node downstream
+(`ShadingPotentialField`, `IdealShadingShape`, `RationaliseShading`, `VerifyShading`) takes
+**one** target.
 Grasshopper therefore runs each node once per target and puts each aperture's results in its **own
 branch**. You do not need to graft anything, and nothing cross-products: the model is a single item
 and is replicated against the list.
@@ -909,7 +914,8 @@ one with a neighbouring building or a deep soffit, and at least one with **many 
 
 ### Test A — solar analysis only
 
-`AnalyticalModel` → `ApertureSolarTargets` → `ApertureIrradiance`
+`AnalyticalModel` → `ApertureSolarTargets` → `ApertureIrradiance` (wire `apertureGuids` into
+`_apertures_`, never the targets)
 
 - [ ] every expected window appears; `count` matches the model
 - [ ] `azimuths` agree with the model's orientation; the preview arrow points OUT of the room on

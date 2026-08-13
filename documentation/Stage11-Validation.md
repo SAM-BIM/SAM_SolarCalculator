@@ -20,20 +20,26 @@ recorded on the build each was committed with. They were **not** re-measured whi
 register. If a change moves a number, update it at source in the stage document *and* here. Do not
 keep a stale baseline for comparison.
 
-> ### ⚠ The test suite is not executed by CI
+> ### How CI validates the figures in §2
 >
-> `.github/workflows/build.yml` runs `msbuild /t:Rebuild` and nothing else. **There is no
-> `dotnet test` step in any workflow**, and the only configuration built is `Release`
-> (`/p:Configuration=Release`).
+> CI runs the test suite in two halves on complementary filters (split at `ce08d2b`):
 >
-> Therefore a green `build` check means **the solution compiles, including the test project**. It
-> does **not** mean any test passed. It is exactly strong enough to catch what it caught on
-> `2bd94c8` — a test calling a method that does not exist — and no stronger.
+> - **`build.yml`** — the required PR check — runs the FAST half:
+>   `dotnet test … --filter "Category!=LongRunning"`. 248 tests. GitHub-verified green on
+>   `ce08d2b4ff23f9a0eff7c818deebc9c8ab528975`.
+> - **`long-running-tests.yml`** runs the LONG half — `Category=LongRunning`, 23 tests: the
+>   exhaustive Gate-7 enumeration, the convergence sweeps and the expensive reference comparisons —
+>   on push to `master`/`sow/**`, `workflow_dispatch` and the nightly schedule. It does **not** run
+>   on pull requests. `workflow_dispatch` and the schedule fire from the repository default branch,
+>   so they become available only once this workflow exists there; the first GitHub LONG run for
+>   this Phase-1 integration will come from the `sow/2026-Q3` push trigger after merge. For this
+>   Phase-1 readiness review the LONG half was verified green **locally** (23 / 23); no GitHub
+>   LONG run is claimed.
 >
-> Consequently, as of this document: **no test in this repository has been verified to pass by CI**,
-> and the figures in §2 rest on runs performed by the sessions that recorded them, which cannot be
-> re-verified from here. Adding a test step to CI is the single highest-value validation action
-> available, and it is listed first in §5.
+> The partition is exact: 248 FAST + 23 LONG = 271, zero overlap, no orphaned tests. Untagged
+> tests are FAST by default, so a new test gates the PR unless it is deliberately tagged out.
+> The one skipped test — `ReferenceExport.Write_Reference_Inputs`, the reference-regeneration
+> tool — is expected `NotExecuted` behaviour and does not count against either half.
 
 ---
 
@@ -117,7 +123,7 @@ through it.
 - Genuine DNI confirmed in `DirectSolarRadiation` (B6).
 - ModelB annual per-aperture averages recorded for 13 apertures at 0.5 m grid.
 
-### 2.5 Gates 1–2 — independent and analytical validation (added, **not executed**)
+### 2.5 Gates 1–2 — independent and analytical validation
 
 Gate 1 (`IndependentReferenceTests`) compares SAM against **Ladybug Tools**' `ladybug.sunpath.Sunpath`,
 run **once offline** by `Fixtures/Reference/generate_reference.py` into a committed
@@ -134,8 +140,9 @@ It is careful about what it actually proves, which matters more than the headlin
 | **Shared by design** | The DNI decomposition rule — SAM's documented modelling choice. Its low-sun clamp is *measured* separately rather than validated against itself. |
 | **Not covered** | Diffuse and ground-reflected transposition. Ladybug's Python API exposes decomposition (DISC/DIRINT), not Perez transposition onto a tilted surface. |
 
-Asserted thresholds (read from source, **not** observed results): sun altitude and azimuth MAE
-< 0.25°, max absolute < 1.0°, over all 8760 hours.
+Asserted thresholds: sun altitude and azimuth MAE
+< 0.25°, max absolute < 1.0°, over all 8760 hours. The gates assert these bounds in code and are
+now executed by CI (§0); the achieved values are not pasted here — see §5.
 
 Gate 2 (`AnalyticalValidationTests`) adds closed-form checks: NOAA sun position at solstices and
 equinoxes; solar-noon altitude against the declination identity; fractional time-zone offset; the
@@ -781,17 +788,19 @@ substitute for the suite.**
 
 Stated plainly, because it bounds what may be claimed:
 
-- **No test has been verified to pass.** See the warning in §0 — CI compiles and does not run the
-  suite, and this container has no .NET toolchain. Gates 1–2 exist as *code*; their results are
-  unobserved from here.
 - **Diffuse and ground-reflected transposition have no independent reference** (Gate 1, "not
   covered"). The Perez implementation is checked for internal consistency and against analytic view
   factors, not against another tool's tilted-surface diffuse.
 - **No full-Radiance annual run** for any typology.
 - **The desirability weighting is unvalidated against thermal outcome** — necessarily, since there is
-  no load model (§3, A1). Optimised devices are optimal *against the stated proxy*, not against energy.
+  no load model (§3, A1). Optimised devices are *best found within a bounded deterministic search*
+  against the stated proxy, not against energy.
 - **Debug configuration is never built.** CI builds `Release` only, so Debug-only failures
   (assertions, `#if DEBUG` paths, different overflow behaviour) would not be caught.
+
+Everything the suite asserts — the Stage-11 gates, the SAM-vs-TAS regression, the convergence
+studies, the optimiser regressions — is now executed: the FAST half on every PR, the LONG half on
+the integration triggers and locally (§0 and §7).
 
 ---
 
@@ -864,25 +873,22 @@ overhang may simply expose the fin behind it).
 
 ## 5. Recommended next validation work
 
-In priority order, with the reasoning:
+The former item 1 — add a test step to CI — is **done**: `build.yml` runs the FAST half on every PR
+and `long-running-tests.yml` runs the LONG half on the integration triggers (§0). What remains, in
+priority order, with the reasoning:
 
-1. **Add a test step to CI.** `.github/workflows/build.yml` compiles and stops. Adding
-   `dotnet test SAM_SolarCalculator/SAM_SolarCalculator.Tests` after the Rebuild step converts a
-   large, careful test suite from *written* to *enforced*. Everything below is worth less until this
-   exists — Gates 1–2 currently guarantee only that they compile. **This is the single highest-value
-   action available**, and it is a few lines of YAML.
-2. **Build Debug as well as Release** in CI, so Debug-only failures are caught.
-3. **Record observed results, not just thresholds.** The gates assert bounds (e.g. sun-position MAE
-   < 0.25°). Emitting the achieved values to test output, and pasting them into §2, turns a pass/fail
-   into a trend that can be watched for drift.
-4. **An independent reference for diffuse transposition** — the one gap Gate 1 explicitly does not
+1. **An independent reference for diffuse transposition** — the one gap Gate 1 explicitly does not
    cover. Ladybug's Python API does not expose Perez tilted-surface transposition, so this needs a
    different reference (a Radiance `gendaymtx` run, or published Perez validation data).
-5. **Quantify A12** — run two adjacent apertures with deep devices independently and together, and
+2. **Record observed results, not just thresholds.** The gates assert bounds (e.g. sun-position MAE
+   < 0.25°). Emitting the achieved values to test output, and pasting them into §2, turns a pass/fail
+   into a trend that can be watched for drift.
+3. **Build Debug as well as Release** in CI, so Debug-only failures are caught.
+4. **Quantify A12** — run two adjacent apertures with deep devices independently and together, and
    record the difference. It is the one scope limitation likely to bite on a real façade.
-6. **Quantify A2** on an urban-canyon fixture, even roughly, so the largest unquantified physics
+5. **Quantify A2** on an urban-canyon fixture, even roughly, so the largest unquantified physics
    assumption has an order of magnitude.
-7. **A3 worked example** — the same aperture reported as incident and as transmitted through a stated
+6. **A3 worked example** — the same aperture reported as incident and as transmitted through a stated
    construction, so the factor is concrete for anyone reading a result.
 
 ---
@@ -906,15 +912,39 @@ Recorded so they are not mistaken for oversights:
 
 ## 7. Running the suite
 
+The suite is split on the `Category` trait, with complementary filters so the two halves between
+them run every test (271 total; see §0 for the partition). Both commands assume the Release
+binaries already exist from the solution build (`--no-build`); drop that flag to have `dotnet test`
+rebuild first.
+
+FAST — the required PR half (248 tests), the one `build.yml` runs on every PR:
+
 ```bash
-dotnet test SAM_SolarCalculator/SAM_SolarCalculator.Tests
+dotnet test SAM_SolarCalculator.Tests/SAM.SolarCalculator.Tests.csproj --no-build -c Release --filter "Category!=LongRunning"
 ```
 
-Green means the validated behaviour still holds.
+LONG — the expensive half (23 tests: the exhaustive Gate-7 enumeration, convergence sweeps,
+expensive reference comparisons), run separately via `long-running-tests.yml`. Its configured
+triggers are push to `master`/`sow/**`, `workflow_dispatch` and the nightly schedule — but
+`workflow_dispatch` and the schedule fire from the repository **default** branch (`master`), so
+they become available only once the workflow also exists there. Until then, only push triggers on
+branches that carry the workflow (such as `sow/2026-Q3` after this PR merges) can run it:
 
-**CI does not do this.** The `build` workflow compiles (`msbuild /t:Rebuild`, `Release` only) and has
-no test step — see the warning in §0 and item 1 of §5. Until that changes, the command above must be
-run by hand, and a green PR is not evidence that any test passed.
+```bash
+dotnet test SAM_SolarCalculator.Tests/SAM.SolarCalculator.Tests.csproj --no-build -c Release --filter "Category=LongRunning"
+```
+
+For this Phase-1 readiness review the LONG half was verified green **locally** (23 / 23). It has
+not run on GitHub for this branch, and no GitHub LONG evidence is claimed — the first GitHub LONG
+run for this Phase-1 integration will come from the `sow/2026-Q3` push trigger after merge. The
+full suite can also be run in one local pass:
+
+```bash
+dotnet test SAM_SolarCalculator.Tests/SAM.SolarCalculator.Tests.csproj --no-build -c Release
+```
+
+Green means the validated behaviour still holds. A green FAST check on a PR means the FAST half
+passed on GitHub; a green local run of both halves means the whole suite holds locally.
 
 **A trap when reproducing the SPDX check locally:** it greps for the copyright line with the character
 class `[-–]`, and the repo's headers use an en-dash. Under an unset or `C` locale that class is
