@@ -1,5 +1,5 @@
-﻿// SPDX-License-Identifier: LGPL-3.0-or-later
-// Copyright (c) 2020â€“2026 Michal Dengusiak & Jakub Ziolkowski and contributors
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
 
 using System;
 using System.Collections.Generic;
@@ -14,16 +14,16 @@ using SAM.Geometry.Spatial;
 namespace SAM.SolarCalculator.Tests
 {
     /// <summary>
-    /// The KoÅ‚obrzeg acceptance cases for the retractable awning, run against the committed
-    /// real-project fixture (the SAME file the resolution study used â€” byte-identical, so no new
+    /// The Kołobrzeg acceptance cases for the retractable awning, run against the committed
+    /// real-project fixture (the SAME file the resolution study used — byte-identical, so no new
     /// fixture is added by this PR).
     ///
     /// The three studied apertures sit on one WSW wall (panel 9c05c380-79da-40e8-9761-fc6ee7aaade3,
-    /// azimuth ~257.5Â°, 3.30 m long) with a combined envelope 2.70 m wide, effectively zero gaps
+    /// azimuth ~257.5°, 3.30 m long) with a combined envelope 2.70 m wide, effectively zero gaps
     /// and aligned heads. With a 0.15 m side extension the awning width is 3.00 m.
     ///
-    /// A. the low-level geometry and product-validation check (fast â€” no weather);
-    /// B. the real optimisation (LongRunning â€” real 2018 KoÅ‚obrzeg weather, projection and tilt
+    /// A. the low-level geometry and product-validation check (fast — no weather);
+    /// B. the real optimisation (LongRunning — real 2018 Kołobrzeg weather, projection and tilt
     ///    both left to the analysis).
     /// </summary>
     public class KolobrzegAwningTests
@@ -121,7 +121,7 @@ namespace SAM.SolarCalculator.Tests
             RetractableAwning awning = new RetractableAwning(2.6, 15.0, 0.0, Extension, 0.0);
             List<ShadingElement> elements = awning.ShadingElements(group.Plane, group.MinX, group.MaxX, group.MaxY);
 
-            // ONE canopy face for the whole group â€” not one canopy rebuilt around each window.
+            // ONE canopy face for the whole group — not one canopy rebuilt around each window.
             Assert.Single(elements);
             ShadingElement canopy = elements[0];
             Assert.Equal("RetractableAwning_Canopy", canopy.Name);
@@ -208,7 +208,7 @@ namespace SAM.SolarCalculator.Tests
                     analyticalModel, apertureGuids, year, out string message, out bool _,
                     specification: AwningSpecification.Dakar,
                     projection: null,          // left to the analysis
-                    tiltDegrees: null,         // left to the analysis (5Â°-40Â°)
+                    tiltDegrees: null,         // left to the analysis (5°-40°)
                     riseAboveHead: 0.0,
                     extensionBeyondJambs: Extension,
                     valanceDepth: 0.0,
@@ -238,8 +238,8 @@ namespace SAM.SolarCalculator.Tests
             Assert.True(first.Evaluations > 0);
             Assert.NotEqual(ShadingDesignStatus.NotEvaluated, first.Status);
 
-            // Every evaluated candidate is a Dakar projection valid for the 3.00 m group width â€”
-            // 1.60 m, 2.10 m and 2.60 m â€” with a tilt inside the 5Â°-40Â° product range.
+            // Every evaluated candidate is a Dakar projection valid for the 3.00 m group width —
+            // 1.60 m, 2.10 m and 2.60 m — with a tilt inside the 5°-40° product range.
             Assert.NotEmpty(first.EvaluatedCandidates);
             foreach (AwningSearchCandidate candidate in first.EvaluatedCandidates)
             {
@@ -262,7 +262,7 @@ namespace SAM.SolarCalculator.Tests
                     Assert.False(candidate.Score > 1e-9, "a NO SHADE verdict must not hide a better evaluated candidate");
                 }
 
-                output.WriteLine($"KoÅ‚obrzeg awning answer: NO SHADE â€” best candidate scored {first.EvaluatedCandidates[0].Score:0.###} kWh");
+                output.WriteLine($"Kołobrzeg awning answer: NO SHADE — best candidate scored {first.EvaluatedCandidates[0].Score:0.###} kWh");
             }
             else
             {
@@ -274,7 +274,7 @@ namespace SAM.SolarCalculator.Tests
                 Assert.True(first.Projection <= 2.6 + 1e-9);
                 Assert.InRange(first.TiltDegrees, AwningSpecification.Dakar.MinimumTiltDegrees, AwningSpecification.Dakar.MaximumTiltDegrees);
 
-                // The selected tilt is a design outcome on the awning-specific 1Â° granularity.
+                // The selected tilt is a design outcome on the awning-specific 1° granularity.
                 Assert.Equal(Math.Round(first.TiltDegrees), first.TiltDegrees, 9);
 
                 // Brackets follow the product table for the 3.00 m width.
@@ -287,7 +287,7 @@ namespace SAM.SolarCalculator.Tests
                 foreach (AwningSearchCandidate candidate in first.EvaluatedCandidates)
                 {
                     Assert.False(candidate.Score > winnerScore + 1e-9,
-                        $"evaluated candidate ({candidate.Projection} m, {candidate.TiltDegrees}Â°) outscores the reported winner");
+                        $"evaluated candidate ({candidate.Projection} m, {candidate.TiltDegrees}°) outscores the reported winner");
                 }
 
                 // The reported typology rebuilds the reported geometry: same element Guids, same
@@ -307,7 +307,7 @@ namespace SAM.SolarCalculator.Tests
                     Assert.Equal(member.DirectSolarIntercepted, member.ReconciledInterceptedEnergy, 9);
                 }
 
-                output.WriteLine($"KoÅ‚obrzeg awning answer: Projection {first.Projection:0.##} m, TiltDegrees {first.TiltDegrees:0.#}Â°, " +
+                output.WriteLine($"Kołobrzeg awning answer: Projection {first.Projection:0.##} m, TiltDegrees {first.TiltDegrees:0.#}°, " +
                     $"valance {first.ValanceDepth:0.##} m, {first.Evaluations} candidates, score {winnerScore:0.###} kWh, " +
                     $"unwanted blocked {100 * first.Performance.UnwantedSolarBlocked:0.#} %, wanted retained {100 * first.Performance.WantedSolarRetained:0.#} %");
             }

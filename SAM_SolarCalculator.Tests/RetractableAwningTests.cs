@@ -1,5 +1,5 @@
-﻿// SPDX-License-Identifier: LGPL-3.0-or-later
-// Copyright (c) 2020â€“2026 Michal Dengusiak & Jakub Ziolkowski and contributors
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
 
 using System;
 using System.Collections.Generic;
@@ -14,8 +14,8 @@ namespace SAM.SolarCalculator.Tests
 {
     /// <summary>
     /// The retractable folding-arm awning as a first-class shading family, and the Dakar product
-    /// preset that constrains it. The family is pure plane-building mathematics â€” one deployed
-    /// canopy quad plus an optional valance quad â€” and the preset is pure product policy; these
+    /// preset that constrains it. The family is pure plane-building mathematics — one deployed
+    /// canopy quad plus an optional valance quad — and the preset is pure product policy; these
     /// tests pin both, and that the existing four families are untouched.
     /// </summary>
     public class RetractableAwningTests
@@ -31,7 +31,7 @@ namespace SAM.SolarCalculator.Tests
 
         private static Face3D SouthWindowFace()
         {
-            // 2 m across (x), 1 m up (z), sill at z = 1, outward +Y â€” the repository's canonical
+            // 2 m across (x), 1 m up (z), sill at z = 1, outward +Y — the repository's canonical
             // south-facing test window.
             return new Face3D(new Polygon3D(new List<Point3D>
             {
@@ -89,7 +89,7 @@ namespace SAM.SolarCalculator.Tests
         public void The_Awning_Is_Eligible_As_A_Horizontal_Family()
         {
             // A south window's unwanted solar arrives high in the aperture frame, so every
-            // horizontal family â€” overhang, louvres AND the awning â€” must be admitted.
+            // horizontal family — overhang, louvres AND the awning — must be admitted.
             ApertureSolarTarget target = Target();
             SolarVisibilityCache cache = Cache(target);
             ApertureDesirability desirability = Desirability(target, cache);
@@ -280,7 +280,7 @@ namespace SAM.SolarCalculator.Tests
             Assert.False(AwningSpecification.Dakar.IsValid(6.20, 2.60, 15.0, out message));
             Assert.Contains("maximum", message);
 
-            // Tilt outside 5Â°-40Â° is refused.
+            // Tilt outside 5°-40° is refused.
             Assert.False(AwningSpecification.Dakar.IsValid(3.00, 2.60, 4.0, out message));
             Assert.False(AwningSpecification.Dakar.IsValid(3.00, 2.60, 41.0, out message));
             Assert.True(AwningSpecification.Dakar.IsValid(3.00, 2.60, 5.0, out message));
@@ -314,7 +314,7 @@ namespace SAM.SolarCalculator.Tests
         public void Single_Aperture_Search_Lattice_Is_The_Dakar_Projection_Set()
         {
             // The generic optimiser's parameter lattice for the awning family must sample the exact
-            // Dakar nominal projections â€” the 0.5 m step over the 1.6-3.6 m bounds.
+            // Dakar nominal projections — the 0.5 m step over the 1.6-3.6 m bounds.
             RetractableAwning awning = new RetractableAwning();
             List<ShadingParameter> parameters = Analytical.SolarCalculator.Create.ShadingParameters(awning);
 
