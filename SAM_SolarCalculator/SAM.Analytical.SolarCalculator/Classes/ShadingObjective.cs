@@ -265,6 +265,63 @@ namespace SAM.Analytical.SolarCalculator
             return Benefit(performance) - wantedSolarPenalty * Harm(performance) - materialPenalty * Cost(performance);
         }
 
+        /// <summary>
+        /// The same objective over a GROUP performance: benefit, harm and cost read from the group's
+        /// summed energies and its ONE shared material charge — never from per-window costs summed.
+        /// </summary>
+        public double Score(GroupedShadingPerformance performance)
+        {
+            if (performance == null)
+            {
+                return double.NaN;
+            }
+
+            return Benefit(performance) - wantedSolarPenalty * Harm(performance) - materialPenalty * Cost(performance);
+        }
+
+        /// <summary>The admitted energy the group material cost is measured against, kWh.</summary>
+        public double ReferenceEnergy(GroupedShadingPerformance performance)
+        {
+            if (performance == null)
+            {
+                return double.NaN;
+            }
+
+            return materialCostReference == MaterialCostReference.AdmittedUnwantedEnergy
+                ? performance.AdmittedUnwantedEnergy
+                : performance.AdmittedDirectEnergy;
+        }
+
+        /// <summary>Benefit: the unwanted beam the shared device intercepts across the group, kWh.</summary>
+        public double Benefit(GroupedShadingPerformance performance)
+        {
+            return performance == null ? double.NaN : performance.UnwantedSolarIntercepted;
+        }
+
+        /// <summary>Harm: the wanted beam the shared device destroys across the group, kWh.</summary>
+        public double Harm(GroupedShadingPerformance performance)
+        {
+            return performance == null ? double.NaN : performance.WantedSolarBlocked;
+        }
+
+        /// <summary>Cost: the ONE shared material charge priced in kWh.</summary>
+        public double Cost(GroupedShadingPerformance performance)
+        {
+            if (performance == null)
+            {
+                return double.NaN;
+            }
+
+            double materialFraction = performance.MaterialFraction;
+            if (double.IsNaN(materialFraction))
+            {
+                materialFraction = 0.0;
+            }
+
+            double reference = ReferenceEnergy(performance);
+            return double.IsNaN(reference) ? 0.0 : materialFraction * reference;
+        }
+
         public bool FromJsonObject(JsonObject jObject)
         {
             if (jObject == null)
