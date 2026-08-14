@@ -303,5 +303,62 @@ namespace SAM.SolarCalculator.Tests
             Assert.Equal(result.Performance.MaterialFraction, reloaded.Performance.MaterialFraction, 9);
             Assert.Equal(result.Performance.PerAperture.Count, reloaded.Performance.PerAperture.Count);
         }
+
+        [Fact]
+        public void Mounting_Offset_Produces_A_Distinct_Device_And_Report()
+        {
+            Scenario scenario = Build(0.15);
+
+            GroupedAwningResult atFacade = Optimise.RetractableAwningGroup(
+                scenario.Group, scenario.SharedCache, scenario.Desirabilities, scenario.Context,
+                new ShadingObjective(0.0, 0.0), AwningSpecification.Dakar,
+                projection: 2.6, tiltDegrees: 15.0, riseAboveHead: 0.0, extensionBeyondJambs: 0.15, valanceDepth: 0.0, maximumEvaluations: 400, mountingOffset: 0.0);
+
+            GroupedAwningResult recessed = Optimise.RetractableAwningGroup(
+                scenario.Group, scenario.SharedCache, scenario.Desirabilities, scenario.Context,
+                new ShadingObjective(0.0, 0.0), AwningSpecification.Dakar,
+                projection: 2.6, tiltDegrees: 15.0, riseAboveHead: 0.0, extensionBeyondJambs: 0.15, valanceDepth: 0.0, maximumEvaluations: 400, mountingOffset: 0.35);
+
+            Assert.NotNull(atFacade.Device);
+            Assert.NotNull(recessed.Device);
+
+            // The reported mounting offset is the offset the geometry was actually built from.
+            Assert.Equal(0.0, atFacade.MountingOffset, 9);
+            Assert.Equal(0.35, recessed.MountingOffset, 9);
+
+            // Distinct geometry identity: the element GUID scheme hashes the mounting offset, so two
+            // otherwise identical awnings at different offsets never share an element identity and
+            // can never reuse each other's geometry.
+            List<ShadingElement> facadeElements = atFacade.Device.ShadingElements(atFacade.Group);
+            List<ShadingElement> recessedElements = recessed.Device.ShadingElements(recessed.Group);
+            Assert.Single(facadeElements);
+            Assert.Single(recessedElements);
+            Assert.NotEqual(facadeElements[0].Guid, recessedElements[0].Guid);
+
+            // The design summary records where the awning was mounted.
+            Assert.Contains("MountingOffset 0.35", recessed.DesignSummary);
+            Assert.Contains("MountingOffset 0", atFacade.DesignSummary);
+        }
+
+        [Fact]
+        public void Group_Result_Json_Round_Trip_Preserves_Mounting_Offset()
+        {
+            Scenario scenario = Build(0.15);
+
+            // Zero penalties guarantee a measurable awning recommendation, so the recommended device
+            // carries a RetractableAwning typology whose MountingOffset must survive the round trip.
+            GroupedAwningResult result = Optimise.RetractableAwningGroup(
+                scenario.Group, scenario.SharedCache, scenario.Desirabilities, scenario.Context,
+                new ShadingObjective(0.0, 0.0), AwningSpecification.Dakar,
+                projection: 2.6, tiltDegrees: 15.0, riseAboveHead: 0.0, extensionBeyondJambs: 0.15, valanceDepth: 0.0, maximumEvaluations: 400, mountingOffset: 0.35);
+
+            Assert.Equal(ShadingDesignStatus.Ok, result.Status);
+
+            GroupedAwningResult reloaded = Core.Create.IJSAMObject<GroupedAwningResult>(result.ToJsonObject().ToJsonString());
+
+            Assert.NotNull(reloaded);
+            Assert.Equal(0.35, reloaded.MountingOffset, 12);
+            Assert.Equal(0.35, reloaded.Device.Typology.GetParameter("MountingOffset"), 12);
+        }
     }
 }

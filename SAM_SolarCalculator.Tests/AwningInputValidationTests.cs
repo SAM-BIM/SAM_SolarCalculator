@@ -118,12 +118,13 @@ namespace SAM.SolarCalculator.Tests
             };
         }
 
-        private static GroupedAwningResult Run(Scenario scenario, double? projection = null, double? tiltDegrees = null, double? valanceDepth = 0.0, double riseAboveHead = 0.0, double extensionBeyondJambs = 0.15, AwningSpecification specification = null)
+        private static GroupedAwningResult Run(Scenario scenario, double? projection = null, double? tiltDegrees = null, double? valanceDepth = 0.0, double riseAboveHead = 0.0, double extensionBeyondJambs = 0.15, double mountingOffset = 0.0, AwningSpecification specification = null)
         {
             return Optimise.RetractableAwningGroup(
                 scenario.Group, scenario.SharedCache, scenario.Desirabilities, scenario.Context,
                 new ShadingObjective(0.0, 0.0), specification ?? AwningSpecification.Dakar,
-                projection, tiltDegrees, riseAboveHead, extensionBeyondJambs, valanceDepth);
+                projection, tiltDegrees, riseAboveHead, extensionBeyondJambs, valanceDepth,
+                maximumEvaluations: 400, mountingOffset: mountingOffset);
         }
 
         /// <summary>A refusal must be NOT EVALUATED with a reason, and must build nothing at all.</summary>
@@ -228,6 +229,76 @@ namespace SAM.SolarCalculator.Tests
         public void Fixed_Rise_Beyond_The_Family_Bounds_Is_Refused()
         {
             AssertRefused(Run(Build(), projection: 2.6, riseAboveHead: 2.0), "outside the RetractableAwning range");
+        }
+
+        // ------------------------------------------------- mounting offset placement input ----
+
+        [Fact]
+        public void A_Negative_Mounting_Offset_Is_Refused_Rather_Than_Clamped()
+        {
+            // A mounting offset is the outward distance from the aperture plane to the mounting line:
+            // a negative value would mean mounting INSIDE the facade, and must be refused — not
+            // silently clamped to 0, which would report a recessed mounting that never happened.
+            AssertRefused(Run(Build(), projection: 2.6, mountingOffset: -0.35), "mounting offset");
+        }
+
+        [Fact]
+        public void A_NaN_Mounting_Offset_Is_Refused_Explicitly()
+        {
+            // The sharp case: every ordinary comparison against NaN is false, so a bounds test alone
+            // would wave it through and the canopy would be built at a NaN offset.
+            AssertRefused(Run(Build(), projection: 2.6, mountingOffset: double.NaN), "not a finite number of metres");
+        }
+
+        [Theory]
+        [InlineData(double.PositiveInfinity)]
+        [InlineData(double.NegativeInfinity)]
+        public void A_Non_Finite_Mounting_Offset_Is_Refused(double mountingOffset)
+        {
+            GroupedAwningResult result = Run(Build(), projection: 2.6, mountingOffset: mountingOffset);
+
+            Assert.NotNull(result);
+            Assert.Equal(ShadingDesignStatus.NotEvaluated, result.Status);
+            Assert.Null(result.Device);
+            Assert.Null(result.Performance);
+        }
+
+        [Fact]
+        public void A_Valid_Non_Zero_Mounting_Offset_Is_Accepted_And_Reported()
+        {
+            // A positive offset is project geometry, not a product limit: it must be accepted and
+            // flow through to the reported result unchanged.
+            GroupedAwningResult result = Run(Build(), projection: 2.6, tiltDegrees: 15.0, valanceDepth: 0.0, mountingOffset: 0.35);
+
+            Assert.NotNull(result);
+            Assert.Equal(ShadingDesignStatus.Ok, result.Status);
+            Assert.NotNull(result.Device);
+            Assert.Equal(0.35, result.MountingOffset, 9);
+            Assert.Contains("MountingOffset 0.35", result.DesignSummary);
+        }
+
+        // ---------------------------------------------- old positional call compatibility ----
+
+        [Fact]
+        public void Old_Positional_Call_Maps_The_Trailing_Integer_To_MaximumEvaluations()
+        {
+            // The pre-mounting-offset signature ended in (..., valanceDepth, maximumEvaluations).
+            // A caller compiled against it passes 400 positionally and must get
+            // maximumEvaluations = 400, never mountingOffset = 400 m.
+            Scenario scenario = Build(0.15);
+
+            GroupedAwningResult result = Optimise.RetractableAwningGroup(
+                scenario.Group, scenario.SharedCache, scenario.Desirabilities, scenario.Context,
+                new ShadingObjective(0.0, 0.0), AwningSpecification.Dakar,
+                2.6, 15.0, 0.0, 0.15, (double?)0.0, 400);
+
+            Assert.NotNull(result);
+            Assert.Equal(ShadingDesignStatus.Ok, result.Status);
+            Assert.Equal(2.6, result.Projection, 9);
+            Assert.Equal(15.0, result.TiltDegrees, 9);
+
+            // The trailing 400 must NOT have become a 400 m mounting offset.
+            Assert.Equal(0.0, result.MountingOffset, 9);
         }
 
         [Fact]
@@ -389,7 +460,7 @@ namespace SAM.SolarCalculator.Tests
             // And through the shared group-independent half that Create.AwningGroupResults calls
             // before it pays for a solar context. Same verdict, same sentence.
             Assert.False(Optimise.ValidAwningInputs(
-                AwningSpecification.Dakar, projection, tiltDegrees, 0.0, 0.15, valanceDepth, out string message));
+                AwningSpecification.Dakar, projection, tiltDegrees, 0.0, 0.15, valanceDepth, 0.0, out string message));
 
             Assert.False(string.IsNullOrWhiteSpace(message));
             Assert.Contains(result.Warnings, x => x == message);

@@ -28,8 +28,8 @@ namespace SAM.Analytical.SolarCalculator
         ///   - valance depth 0 and the preset standard depth, only when valance optimisation is
         ///     enabled (null); otherwise the caller's fixed value.
         ///
-        /// RiseAboveHead and the side extension stay fixed from the caller, which keeps the search
-        /// small by design.
+        /// RiseAboveHead, MountingOffset and the side extension stay fixed from the caller, which
+        /// keeps the search small by design.
         ///
         /// REFUSED, NEVER CLAMPED. This method is public in its own right, so it validates the
         /// caller's fixed projection, tilt, valance, rise and extension ITSELF rather than assuming
@@ -78,6 +78,44 @@ namespace SAM.Analytical.SolarCalculator
             double? valanceDepth = null,
             int maximumEvaluations = 400)
         {
+            return RetractableAwningGroup(
+                group, baseVisibilityCache, desirabilities, contextOccluders,
+                objective, specification, projection, tiltDegrees, riseAboveHead, extensionBeyondJambs,
+                valanceDepth, maximumEvaluations, mountingOffset: 0.0);
+        }
+
+        /// <summary>
+        /// The mounting-offset overload. The original twelve-parameter signature above is retained
+        /// exactly for binary compatibility and forwards here with MountingOffset = 0.0.
+        /// </summary>
+        /// <param name="group">The group, members ordered left-to-right.</param>
+        /// <param name="baseVisibilityCache">Visibility with CONTEXT ONLY, shared by every member.</param>
+        /// <param name="desirabilities">Per-member desirability, aligned to the group's member order.</param>
+        /// <param name="contextOccluders">Existing context (takes effect through baseVisibilityCache).</param>
+        /// <param name="objective">The objective. Null for the Stage 9 default.</param>
+        /// <param name="specification">Product preset. Null = Dakar.</param>
+        /// <param name="projection">Fixed projection [m], or null to search the valid preset projections.</param>
+        /// <param name="tiltDegrees">Fixed deployment tilt [°], or null to select it by analysis.</param>
+        /// <param name="riseAboveHead">Fixed rise above the head line [m].</param>
+        /// <param name="extensionBeyondJambs">Fixed symmetric side extension [m].</param>
+        /// <param name="valanceDepth">Fixed valance depth [m] (0 or the preset standard); null enables valance optimisation.</param>
+        /// <param name="maximumEvaluations">Hard budget on distinct candidate evaluations for this group.</param>
+        /// <param name="mountingOffset">Fixed horizontal outward distance from the aperture plane to the awning mounting line [m].</param>
+        public static GroupedAwningResult RetractableAwningGroup(
+            this ApertureShadingGroup group,
+            SolarVisibilityCache baseVisibilityCache,
+            List<ApertureDesirability> desirabilities,
+            List<LinkedFace3D> contextOccluders,
+            ShadingObjective objective,
+            AwningSpecification specification,
+            double? projection,
+            double? tiltDegrees,
+            double riseAboveHead,
+            double extensionBeyondJambs,
+            double? valanceDepth,
+            int maximumEvaluations,
+            double mountingOffset)
+        {
             specification = specification ?? AwningSpecification.Dakar;
             objective = objective ?? new ShadingObjective();
 
@@ -92,7 +130,7 @@ namespace SAM.Analytical.SolarCalculator
             // CLAMPS into the family bounds, so a fixed tilt of 50° would build 40° of geometry
             // while the answer still reported 50°. A refused request is always better than a design
             // that disagrees with its own parameters.
-            if (!ValidFixedInputs(group, specification, projection, tiltDegrees, riseAboveHead, extensionBeyondJambs, valanceDepth, out string refusal))
+            if (!ValidFixedInputs(group, specification, projection, tiltDegrees, riseAboveHead, extensionBeyondJambs, valanceDepth, mountingOffset, out string refusal))
             {
                 return Refused(group, refusal);
             }
@@ -180,7 +218,7 @@ namespace SAM.Analytical.SolarCalculator
                     specification.Name, specification.MinimumTiltDegrees, specification.MaximumTiltDegrees, familyTiltMinimum, familyTiltMaximum, tiltMinimum, tiltMaximum));
             }
 
-            AwningEvaluator evaluator = new AwningEvaluator(group, targets, offsets, baseVisibilityCache, desirabilityMap, contextOccluders, objective, specification, riseAboveHead, extensionBeyondJambs, latticeWarnings);
+            AwningEvaluator evaluator = new AwningEvaluator(group, targets, offsets, baseVisibilityCache, desirabilityMap, contextOccluders, objective, specification, riseAboveHead, extensionBeyondJambs, mountingOffset, latticeWarnings);
 
             // The null device first: measured like every other candidate, and the zero the rest must beat.
             AwningCandidate nullDevice = evaluator.Evaluate(null, double.NaN, 0.0);
@@ -347,9 +385,9 @@ namespace SAM.Analytical.SolarCalculator
         /// Nothing is clamped and nothing is nudged to the nearest legal value — the message says
         /// what to change.
         /// </summary>
-        private static bool ValidFixedInputs(ApertureShadingGroup group, AwningSpecification specification, double? projection, double? tiltDegrees, double riseAboveHead, double extensionBeyondJambs, double? valanceDepth, out string message)
+        private static bool ValidFixedInputs(ApertureShadingGroup group, AwningSpecification specification, double? projection, double? tiltDegrees, double riseAboveHead, double extensionBeyondJambs, double? valanceDepth, double mountingOffset, out string message)
         {
-            if (!ValidAwningInputs(specification, projection, tiltDegrees, riseAboveHead, extensionBeyondJambs, valanceDepth, out message))
+            if (!ValidAwningInputs(specification, projection, tiltDegrees, riseAboveHead, extensionBeyondJambs, valanceDepth, mountingOffset, out message))
             {
                 return false;
             }
@@ -374,7 +412,7 @@ namespace SAM.Analytical.SolarCalculator
         /// a bad request before paying for a solar context and both layers refuse it in the same
         /// words. Anything that depends on a particular group's width belongs to the caller.
         /// </summary>
-        internal static bool ValidAwningInputs(AwningSpecification specification, double? projection, double? tiltDegrees, double riseAboveHead, double extensionBeyondJambs, double? valanceDepth, out string message)
+        internal static bool ValidAwningInputs(AwningSpecification specification, double? projection, double? tiltDegrees, double riseAboveHead, double extensionBeyondJambs, double? valanceDepth, double mountingOffset, out string message)
         {
             message = null;
             specification = specification ?? AwningSpecification.Dakar;
@@ -466,6 +504,24 @@ namespace SAM.Analytical.SolarCalculator
                 return false;
             }
 
+            // MountingOffset is a project/building placement input, not a product limit: there is no
+            // product maximum to check against, so the rule is finite and non-negative. It is refused
+            // rather than clamped because Define would turn a negative offset into a silently moved
+            // mounting line and an infinite one into an awning built at the wrong position.
+            if (double.IsNaN(mountingOffset) || double.IsInfinity(mountingOffset))
+            {
+                message = "The requested mounting offset is not a finite number of metres. Supply the horizontal outward distance from the aperture plane to the awning mounting line, or 0.0 m to mount directly on the aperture plane.";
+                return false;
+            }
+
+            if (mountingOffset < 0.0)
+            {
+                message = string.Format(CultureInfo.InvariantCulture,
+                    "The requested mounting offset {0:0.###} m is negative. The mounting offset is the horizontal outward distance from the aperture plane to the awning mounting line and must be zero or more; use a positive value for a recessed aperture mounted on the external facade or soffit.",
+                    mountingOffset);
+                return false;
+            }
+
             return true;
         }
 
@@ -529,9 +585,9 @@ namespace SAM.Analytical.SolarCalculator
             if (typology != null)
             {
                 stringBuilder.AppendFormat(CultureInfo.InvariantCulture,
-                    " | Projection {0:0.##} m, TiltDegrees {1:0.#}°, ValanceDepth {2:0.##} m, width {3:0.##} m",
+                    " | Projection {0:0.##} m, TiltDegrees {1:0.#}°, MountingOffset {2:0.##} m, ValanceDepth {3:0.##} m, width {4:0.##} m",
                     typology.GetParameter("Projection"), typology.GetParameter("TiltDegrees"),
-                    typology.GetParameter("ValanceDepth"), device.Width(group));
+                    typology.GetParameter("MountingOffset"), typology.GetParameter("ValanceDepth"), device.Width(group));
             }
 
             AppendPercentage(stringBuilder, performance.UnwantedSolarBlocked, "unwanted blocked");
@@ -650,6 +706,7 @@ namespace SAM.Analytical.SolarCalculator
             public double Projection;
             public double TiltDegrees;
             public double ValanceDepth;
+            public double MountingOffset = double.NaN;
             public double Score = double.NaN;
             public double MaterialFraction = double.NaN;
             public bool Measurable;
@@ -675,11 +732,12 @@ namespace SAM.Analytical.SolarCalculator
             private readonly AwningSpecification specification;
             private readonly double riseAboveHead;
             private readonly double extensionBeyondJambs;
+            private readonly double mountingOffset;
             private readonly List<string> latticeWarnings;
             private readonly Dictionary<string, AwningCandidate> cache = new Dictionary<string, AwningCandidate>();
             private readonly List<AwningCandidate> allEvaluated = new List<AwningCandidate>();
 
-            public AwningEvaluator(ApertureShadingGroup group, List<ApertureSolarTarget> targets, List<int> offsets, SolarVisibilityCache baseVisibilityCache, Dictionary<Guid, ApertureDesirability> desirabilityMap, List<LinkedFace3D> contextOccluders, ShadingObjective objective, AwningSpecification specification, double riseAboveHead, double extensionBeyondJambs, List<string> latticeWarnings = null)
+            public AwningEvaluator(ApertureShadingGroup group, List<ApertureSolarTarget> targets, List<int> offsets, SolarVisibilityCache baseVisibilityCache, Dictionary<Guid, ApertureDesirability> desirabilityMap, List<LinkedFace3D> contextOccluders, ShadingObjective objective, AwningSpecification specification, double riseAboveHead, double extensionBeyondJambs, double mountingOffset, List<string> latticeWarnings = null)
             {
                 this.latticeWarnings = latticeWarnings ?? new List<string>();
                 this.group = group;
@@ -692,6 +750,7 @@ namespace SAM.Analytical.SolarCalculator
                 this.specification = specification;
                 this.riseAboveHead = riseAboveHead;
                 this.extensionBeyondJambs = extensionBeyondJambs;
+                this.mountingOffset = mountingOffset;
             }
 
             public int Evaluations { get { return cache.Count; } }
@@ -708,7 +767,7 @@ namespace SAM.Analytical.SolarCalculator
                     return NullDevice();
                 }
 
-                RetractableAwning awning = new RetractableAwning(candidate.Projection, candidate.TiltDegrees, riseAboveHead, extensionBeyondJambs, candidate.ValanceDepth);
+                RetractableAwning awning = new RetractableAwning(candidate.Projection, candidate.TiltDegrees, riseAboveHead, extensionBeyondJambs, candidate.ValanceDepth, mountingOffset);
                 return new GroupedShadingDevice(group.GroupGuid, group.PanelGuid, group.ApertureGuids, awning, specification);
             }
 
@@ -772,12 +831,13 @@ namespace SAM.Analytical.SolarCalculator
                 // and the device rebuilt from the winner — uses the BUILT value, so the search can
                 // never report a design it did not measure, nor measure one geometry twice under
                 // two different names.
-                RetractableAwning awning = new RetractableAwning(projection, tiltDegrees, riseAboveHead, extensionBeyondJambs, valanceDepth);
+                RetractableAwning awning = new RetractableAwning(projection, tiltDegrees, riseAboveHead, extensionBeyondJambs, valanceDepth, mountingOffset);
                 double builtProjection = awning.GetParameter("Projection");
                 double builtTiltDegrees = awning.GetParameter("TiltDegrees");
                 double builtValanceDepth = awning.GetParameter("ValanceDepth");
+                double builtMountingOffset = awning.GetParameter("MountingOffset");
 
-                string key = Key(builtProjection, builtTiltDegrees, builtValanceDepth);
+                string key = Key(builtProjection, builtTiltDegrees, builtValanceDepth, builtMountingOffset);
                 if (cache.TryGetValue(key, out AwningCandidate cached))
                 {
                     return cached;
@@ -786,7 +846,7 @@ namespace SAM.Analytical.SolarCalculator
                 List<ShadingElement> elements = awning.ShadingElements(group.Plane, group.MinX, group.MaxX, group.MaxY);
                 if (elements == null)
                 {
-                    AwningCandidate failed = new AwningCandidate { Projection = builtProjection, TiltDegrees = builtTiltDegrees, ValanceDepth = builtValanceDepth };
+                    AwningCandidate failed = new AwningCandidate { Projection = builtProjection, TiltDegrees = builtTiltDegrees, ValanceDepth = builtValanceDepth, MountingOffset = builtMountingOffset };
                     cache[key] = failed;
                     return failed;
                 }
@@ -818,6 +878,7 @@ namespace SAM.Analytical.SolarCalculator
                     Projection = projection,
                     TiltDegrees = tiltDegrees,
                     ValanceDepth = valanceDepth,
+                    MountingOffset = mountingOffset,
                     Elements = elements,
                     SharedDeviceArea = deviceArea,
                 };
@@ -853,12 +914,13 @@ namespace SAM.Analytical.SolarCalculator
                 return result;
             }
 
-            private static string Key(double projection, double tiltDegrees, double valanceDepth)
+            private static string Key(double projection, double tiltDegrees, double valanceDepth, double mountingOffset)
             {
                 return string.Concat(
                     projection.ToString("R", CultureInfo.InvariantCulture), "|",
                     tiltDegrees.ToString("R", CultureInfo.InvariantCulture), "|",
-                    valanceDepth.ToString("R", CultureInfo.InvariantCulture));
+                    valanceDepth.ToString("R", CultureInfo.InvariantCulture), "|",
+                    mountingOffset.ToString("R", CultureInfo.InvariantCulture));
             }
         }
     }

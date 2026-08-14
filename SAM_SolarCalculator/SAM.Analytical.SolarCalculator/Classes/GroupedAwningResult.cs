@@ -159,6 +159,9 @@ namespace SAM.Analytical.SolarCalculator
 
         public double ValanceDepth { get { return Parameter("ValanceDepth"); } }
 
+        /// <summary>The fixed horizontal outward distance from the aperture plane to the awning mounting line [m].</summary>
+        public double MountingOffset { get { return Parameter("MountingOffset"); } }
+
         /// <summary>Wall bracket count for the recommended awning width. 0 when there is no awning.</summary>
         public int RequiredWallBrackets
         {
