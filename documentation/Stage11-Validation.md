@@ -891,6 +891,11 @@ priority order, with the reasoning:
    assumption has an order of magnitude.
 6. **A3 worked example** — the same aperture reported as incident and as transmitted through a stated
    construction, so the factor is concrete for anyone reading a result.
+7. **Replace the wall-clock assertion in `AttributionPruningTests.Pruning_Actually_Saves_Work_Where_There_Is_Work_To_Save`.**
+   It asserts `pruned < complete` on elapsed time and flaked on shared CI (complete 65.9 ms vs pruned
+   70.9 ms — a few milliseconds of noise). Replace or remove the timing comparison; retain a
+   deterministic structural work-reduction assertion instead (e.g. cells/sun-groups actually traced
+   on each path), so the saving is proven by what is counted rather than by what a stopwatch says.
 
 ---
 
