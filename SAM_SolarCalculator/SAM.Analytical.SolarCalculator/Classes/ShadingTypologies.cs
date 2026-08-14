@@ -383,6 +383,107 @@ namespace SAM.Analytical.SolarCalculator
         }
     }
 
+    /// <summary>
+    /// A retractable folding-arm awning, analysed in its fully deployed position: one sloping canopy
+    /// quad in front of the aperture plus, when a valance depth is given, one front valance quad.
+    ///
+    /// PROJECTION is the manufacturer's HORIZONTAL reach from the mounting plane to the front bar —
+    /// the plan dimension a product is sized by. TiltDegrees is the DOWNWARD angle of the deployed
+    /// fabric from horizontal, the fixed installation setting, so the canopy drops by
+    /// Projection x tan(tilt) at the front edge; the sloping fabric length Projection / cos(tilt) is
+    /// reflected automatically by the quad area and must never be substituted for the projection.
+    ///
+    /// THE FABRIC IS OPAQUE AND ZERO-THICKNESS, exactly like every other family here: the ray engine
+    /// answers "blocked or not blocked". Deployment scheduling, automatic retraction, fabric solar
+    /// transmittance, diffuse transmission, reflection, wind control and structural capacity are NOT
+    /// modelled — the geometry describes the deployed device only, and a real product that can
+    /// retract does not reduce the wanted-solar loss the analysis reports. Dynamic deployment
+    /// control is a documented future extension.
+    ///
+    /// The parameter bounds mirror the Dakar product envelope (see AwningSpecification.Dakar for the
+    /// authoritative limits and validation); the class itself is pure plane-building mathematics and
+    /// carries no product policy.
+    /// </summary>
+    public class RetractableAwning : ShadingTypology
+    {
+        public RetractableAwning() : this(2.1, 15.0, 0.0, 0.0, 0.0)
+        {
+        }
+
+        public RetractableAwning(double projection, double tiltDegrees = 15.0, double riseAboveHead = 0.0, double extensionBeyondJambs = 0.0, double valanceDepth = 0.0)
+        {
+            Define("Projection", projection, 1.6, 3.6);
+            Define("TiltDegrees", tiltDegrees, 5.0, 40.0);
+            Define("RiseAboveHead", riseAboveHead, 0.0, 1.0);
+            Define("ExtensionBeyondJambs", extensionBeyondJambs, 0.0, 1.0);
+            Define("ValanceDepth", valanceDepth, 0.0, 0.21);
+        }
+
+        public override string Name { get { return "RetractableAwning"; } }
+
+        public override List<ShadingElement> ShadingElements(ApertureSolarTarget target)
+        {
+            if (!TryGetLocalBounds(target, out double minX, out double maxX, out double _, out double maxY))
+            {
+                return null;
+            }
+
+            return ShadingElements(target.Plane, minX, maxX, maxY);
+        }
+
+        /// <summary>
+        /// The deployed canopy (and optional valance) for an explicit local extent — the geometry
+        /// entry point the grouped-aperture path uses, so one physical awning can span several
+        /// apertures instead of a copy being rebuilt around each.
+        /// </summary>
+        public List<ShadingElement> ShadingElements(Plane plane, double minX, double maxX, double maxY)
+        {
+            if (plane == null || double.IsNaN(minX) || double.IsNaN(maxX) || double.IsNaN(maxY))
+            {
+                return null;
+            }
+
+            double projection = GetParameter("Projection");
+            double tilt = GetParameter("TiltDegrees") * Math.PI / 180.0;
+            double rise = GetParameter("RiseAboveHead");
+            double extension = GetParameter("ExtensionBeyondJambs");
+            double valance = GetParameter("ValanceDepth");
+
+            double drop = projection * Math.Tan(tilt);
+            double x0 = minX - extension;
+            double x1 = maxX + extension;
+            double y0 = maxY + rise;
+            double y1 = y0 - drop;
+
+            List<ShadingElement> result = new List<ShadingElement>();
+
+            Face3D canopy = Quad(plane, new double[][]
+            {
+                new double[] { x0, y0, 0 },
+                new double[] { x1, y0, 0 },
+                new double[] { x1, y1, projection },
+                new double[] { x0, y1, projection },
+            });
+
+            result.Add(new ShadingElement(ElementGuid(0), "RetractableAwning_Canopy", canopy));
+
+            if (valance > 0)
+            {
+                Face3D valanceFace = Quad(plane, new double[][]
+                {
+                    new double[] { x0, y1, projection },
+                    new double[] { x1, y1, projection },
+                    new double[] { x1, y1 - valance, projection },
+                    new double[] { x0, y1 - valance, projection },
+                });
+
+                result.Add(new ShadingElement(ElementGuid(1), "RetractableAwning_Valance", valanceFace));
+            }
+
+            return result;
+        }
+    }
+
     /// <summary>Horizontal blades crossed with vertical fins: for facades with both a high and an oblique problem.</summary>
     public class EggCrate : ShadingTypology
     {

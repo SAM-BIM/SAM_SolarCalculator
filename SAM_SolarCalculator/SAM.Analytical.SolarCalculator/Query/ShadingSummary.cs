@@ -225,8 +225,10 @@ namespace SAM.Analytical.SolarCalculator
                 switch (name)
                 {
                     case "Depth":
+                    case "Projection":
                     case "RiseAboveHead":
                     case "ExtensionBeyondJambs":
+                    case "ValanceDepth":
                         stringBuilder.AppendFormat(CultureInfo.InvariantCulture, "{0} {1:0.##} m", name, parameter);
                         break;
                     case "TiltDegrees":

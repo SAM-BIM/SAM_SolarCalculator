@@ -170,7 +170,7 @@ namespace SAM.Analytical.SolarCalculator
         }
 
         /// <summary>A period on the analysis year, preserving its hour-of-year structure.</summary>
-        private static AnalysisPeriod ReRoot(AnalysisPeriod analysisPeriod, int year)
+        internal static AnalysisPeriod ReRoot(AnalysisPeriod analysisPeriod, int year)
         {
             if (analysisPeriod == null || analysisPeriod.Year == year)
             {

@@ -335,6 +335,55 @@ namespace SAM.Analytical.SolarCalculator
         }
 
         /// <summary>
+        /// The shared-elements path: measures an EXPLICIT element set against one aperture, without
+        /// regenerating the device around it.
+        ///
+        /// This is what the grouped-awning analysis uses. A single physical awning spans several
+        /// apertures, so its canopy is built ONCE from the group frame; every member aperture is
+        /// then measured against that same element list (same Guids) through this overload, with
+        /// its own cell window and shared-cache offset. Building the attribution per member is
+        /// necessary — the cache addresses each member's cells separately — but the geometry is
+        /// never duplicated or re-centred.
+        ///
+        /// The material fraction here is the per-member value (shared element area / THIS
+        /// aperture's gross area); the group-level charge — shared area / total gross area — is
+        /// computed once by GroupedShadingPerformance and must never be rebuilt by summing these.
+        /// </summary>
+        /// <param name="target">The member aperture.</param>
+        /// <param name="baseVisibilityCache">Visibility with CONTEXT ONLY, spanning the whole model.</param>
+        /// <param name="desirability">Stage 5 per-group energies for this aperture.</param>
+        /// <param name="contextOccluders">Existing context (takes effect through baseVisibilityCache).</param>
+        /// <param name="shadingElements">The shared device elements. Empty list = the null device, measured like any other.</param>
+        /// <param name="typologyName">Provenance label.</param>
+        /// <param name="cellIndexOffset">This target's first cell index within the shared cell space.</param>
+        public static ShadingPerformance ShadingPerformance(this ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, IEnumerable<ShadingElement> shadingElements, string typologyName, int cellIndexOffset = 0)
+        {
+            List<ShadingElement> elements = new List<ShadingElement>(shadingElements ?? new List<ShadingElement>());
+            elements.RemoveAll(x => x == null);
+
+            double elementArea = 0;
+            foreach (ShadingElement element in elements)
+            {
+                double area = element.Area;
+                if (!double.IsNaN(area))
+                {
+                    elementArea += area;
+                }
+            }
+
+            double grossArea = target?.GrossArea ?? double.NaN;
+            double materialFraction = double.IsNaN(grossArea) || grossArea <= 0 ? double.NaN : elementArea / grossArea;
+
+            SolarAttributionCache attributionCache = CandidateAttributionCache(baseVisibilityCache, elements, target.AnalysisCells, cellIndexOffset);
+            if (attributionCache == null)
+            {
+                return null;
+            }
+
+            return ShadingPerformance(target, baseVisibilityCache, attributionCache, desirability, elements, typologyName, materialFraction, cellIndexOffset);
+        }
+
+        /// <summary>
         /// First-hit attribution over the CANDIDATE'S faces alone, for the cell window belonging to
         /// one target. See the note above for why the context faces are not part of it.
         ///

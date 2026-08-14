@@ -1,0 +1,334 @@
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright (c) 2020–2026 Michal Dengusiak & Jakub Ziolkowski and contributors
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Xunit;
+using Xunit.Abstractions;
+using SAM.Analytical;
+using SAM.Analytical.SolarCalculator;
+using SAM.Core.SolarCalculator;
+using SAM.Geometry.Spatial;
+
+namespace SAM.SolarCalculator.Tests
+{
+    /// <summary>
+    /// The Kołobrzeg acceptance cases for the retractable awning, run against the committed
+    /// real-project fixture (the SAME file the resolution study used — byte-identical, so no new
+    /// fixture is added by this PR).
+    ///
+    /// The three studied apertures sit on one WSW wall (panel 9c05c380-79da-40e8-9761-fc6ee7aaade3,
+    /// azimuth ~257.5°, 3.30 m long) with a combined envelope 2.70 m wide, effectively zero gaps
+    /// and aligned heads. With a 0.15 m side extension the awning width is 3.00 m.
+    ///
+    /// A. the low-level geometry and product-validation check (fast — no weather);
+    /// B. the real optimisation (LongRunning — real 2018 Kołobrzeg weather, projection and tilt
+    ///    both left to the analysis).
+    /// </summary>
+    public class KolobrzegAwningTests
+    {
+        private readonly ITestOutputHelper output;
+
+        public KolobrzegAwningTests(ITestOutputHelper output)
+        {
+            this.output = output;
+        }
+
+        private static readonly Guid HostWallGuid = new Guid("9c05c380-79da-40e8-9761-fc6ee7aaade3");
+        private const double Extension = 0.15;
+
+        private static List<Guid> StudiedGuids()
+        {
+            return new List<Guid>
+            {
+                KolobrzegFixture.TallApertureGuid,
+                KolobrzegFixture.MidApertureGuid,
+                KolobrzegFixture.SmallApertureGuid,
+            };
+        }
+
+        private static List<ApertureSolarTarget> StudiedTargets()
+        {
+            List<ApertureSolarTarget> targets = KolobrzegFixture.Model().ApertureSolarTargets(StudiedGuids(), KolobrzegFixture.HistoricalGridSize);
+            Assert.Equal(3, targets.Count);
+            return targets;
+        }
+
+        // -------------------------------- A. geometry and product validation (fast) ----
+
+        [Fact]
+        public void Kolobrzeg_Three_Apertures_Form_One_Group_Of_Three_Metres()
+        {
+            List<ApertureSolarTarget> targets = StudiedTargets();
+
+            List<ApertureShadingGroup> groups = targets.ApertureShadingGroups(AwningSpecification.Dakar, Extension);
+
+            Assert.Single(groups);
+            ApertureShadingGroup group = groups[0];
+            Assert.Equal(HostWallGuid, group.PanelGuid);
+            Assert.Equal(3, group.ApertureGuids.Count);
+            Assert.Equal(new HashSet<Guid>(StudiedGuids()), new HashSet<Guid>(group.ApertureGuids));
+
+            // Combined envelope 2.70 m + 2 x 0.15 m extension = 3.00 m.
+            Assert.Equal(2.70, group.Width, 6);
+            Assert.Equal(3.00, group.Width + 2.0 * Extension, 6);
+
+            // Members are ordered left-to-right; gaps and head spread are effectively zero.
+            List<double> extents = new List<double>();
+            foreach (ApertureSolarTarget target in group.Targets)
+            {
+                Geometry.Planar.BoundingBox2D boundingBox2D = group.Plane.Convert(target.Face3D)?.GetBoundingBox();
+                Assert.NotNull(boundingBox2D);
+                extents.Add(boundingBox2D.Min.X);
+                extents.Add(boundingBox2D.Max.X);
+            }
+
+            double memberMinX = extents.Min();
+            double memberMaxX = extents.Max();
+            Assert.Equal(0.0, memberMinX - group.MinX, 6);
+            Assert.Equal(0.0, group.MaxX - memberMaxX, 6);
+
+            // Heads align well inside the default 0.02 m tolerance.
+            List<ApertureSolarTarget> ordered = group.Targets;
+            for (int i = 0; i < ordered.Count - 1; i++)
+            {
+                Geometry.Planar.BoundingBox2D a = group.Plane.Convert(ordered[i].Face3D)?.GetBoundingBox();
+                Geometry.Planar.BoundingBox2D b = group.Plane.Convert(ordered[i + 1].Face3D)?.GetBoundingBox();
+                Assert.True(Math.Abs(a.Max.Y - b.Max.Y) <= 0.02, "heads must align within 0.02 m");
+                Assert.True(b.Min.X - a.Max.X <= 0.20, "gaps must stay within 0.20 m");
+            }
+
+            output.WriteLine($"one group {group.GroupGuid} on wall {group.PanelGuid}: {string.Join(", ", group.ApertureGuids)}, " +
+                $"envelope {group.Width:0.###} m, awning width {group.Width + 2.0 * Extension:0.###} m");
+        }
+
+        [Fact]
+        public void Kolobrzeg_Product_Validation_And_Brackets()
+        {
+            Assert.True(AwningSpecification.Dakar.IsValid(3.00, 2.60, 15.0, out string message), message);
+            Assert.False(AwningSpecification.Dakar.IsValid(3.00, 3.10, 15.0, out message), "3.10 m projection needs at least 3.50 m");
+            Assert.Contains("minimum width", message);
+            Assert.Equal(2, AwningSpecification.Dakar.RequiredWallBracketCount(3.00));
+        }
+
+        [Fact]
+        public void Kolobrzeg_Shared_Canopy_Covers_All_Three_Apertures_From_One_Build()
+        {
+            List<ApertureSolarTarget> targets = StudiedTargets();
+            ApertureShadingGroup group = targets.ApertureShadingGroups(AwningSpecification.Dakar, Extension).Single();
+
+            RetractableAwning awning = new RetractableAwning(2.6, 15.0, 0.0, Extension, 0.0);
+            List<ShadingElement> elements = awning.ShadingElements(group.Plane, group.MinX, group.MaxX, group.MaxY);
+
+            // ONE canopy face for the whole group — not one canopy rebuilt around each window.
+            Assert.Single(elements);
+            ShadingElement canopy = elements[0];
+            Assert.Equal("RetractableAwning_Canopy", canopy.Name);
+
+            // The canopy is axis-aligned in the group frame: the planar bounding box is the quad.
+            Geometry.Planar.BoundingBox2D boundingBox2D = group.Plane.Convert(canopy.Face3D)?.GetBoundingBox();
+            Assert.NotNull(boundingBox2D);
+
+            // The canopy lies in front of the facade: back edge at z = 0, front bar at z = 2.60 m.
+            Point3D backLeft = Point(group.Plane, boundingBox2D.Min.X, boundingBox2D.Max.Y, 0.0);
+            Point3D backRight = Point(group.Plane, boundingBox2D.Max.X, boundingBox2D.Max.Y, 0.0);
+            Point3D frontRight = Point(group.Plane, boundingBox2D.Max.X, boundingBox2D.Min.Y, 2.6);
+            Point3D frontLeft = Point(group.Plane, boundingBox2D.Min.X, boundingBox2D.Min.Y, 2.6);
+
+            Assert.True(canopy.Face3D.InRange(backLeft, 1e-6));
+            Assert.True(canopy.Face3D.InRange(backRight, 1e-6));
+            Assert.True(canopy.Face3D.InRange(frontRight, 1e-6));
+            Assert.True(canopy.Face3D.InRange(frontLeft, 1e-6));
+
+            foreach (Point3D corner in new Point3D[] { backLeft, backRight, frontRight, frontLeft })
+            {
+                Assert.True(Analytical.SolarCalculator.Query.TryGetApertureLocal(group.Targets[0], corner, out double x, out double y, out double z));
+                Assert.True(z >= -1e-9, "the canopy must lie in front of the facade");
+            }
+
+            // The canopy spans the whole group plus both extensions: it covers every member window.
+            Assert.Equal(group.MinX - Extension, boundingBox2D.Min.X, 9);
+            Assert.Equal(group.MaxX + Extension, boundingBox2D.Max.X, 9);
+
+            foreach (ApertureSolarTarget target in group.Targets)
+            {
+                Geometry.Planar.BoundingBox2D memberBox = group.Plane.Convert(target.Face3D)?.GetBoundingBox();
+                Assert.True(memberBox.Min.X >= boundingBox2D.Min.X + 1e-9 && memberBox.Max.X <= boundingBox2D.Max.X - 1e-9,
+                    "the shared canopy must cover every member aperture across the facade");
+            }
+
+            // The back edge hangs at or above the highest head.
+            Assert.True(boundingBox2D.Max.Y >= group.MaxY - 1e-9);
+
+            // Deterministic identity: rebuilding the same device reproduces the same element.
+            List<ShadingElement> rebuilt = new RetractableAwning(2.6, 15.0, 0.0, Extension, 0.0).ShadingElements(group.Plane, group.MinX, group.MaxX, group.MaxY);
+            Assert.Equal(elements[0].Guid, rebuilt[0].Guid);
+            Assert.Equal(elements[0].Area, rebuilt[0].Area, 9);
+        }
+
+        private static Point3D Point(Plane plane, double x, double y, double z)
+        {
+            return new Point3D(
+                plane.Origin.X + x * plane.AxisX.X + y * plane.AxisY.X + z * plane.Normal.X,
+                plane.Origin.Y + x * plane.AxisX.Y + y * plane.AxisY.Y + z * plane.Normal.Y,
+                plane.Origin.Z + x * plane.AxisX.Z + y * plane.AxisY.Z + z * plane.Normal.Z);
+        }
+
+        [Fact]
+        public void Kolobrzeg_Valance_Adds_Exactly_One_Face()
+        {
+            List<ApertureSolarTarget> targets = StudiedTargets();
+            ApertureShadingGroup group = targets.ApertureShadingGroups(AwningSpecification.Dakar, Extension).Single();
+
+            RetractableAwning withoutValance = new RetractableAwning(2.6, 15.0, 0.0, Extension, 0.0);
+            RetractableAwning withValance = new RetractableAwning(2.6, 15.0, 0.0, Extension, 0.21);
+
+            Assert.Single(withoutValance.ShadingElements(group.Plane, group.MinX, group.MaxX, group.MaxY));
+
+            List<ShadingElement> valanced = withValance.ShadingElements(group.Plane, group.MinX, group.MaxX, group.MaxY);
+            Assert.Equal(2, valanced.Count);
+            Assert.Equal("RetractableAwning_Valance", valanced[1].Name);
+            Assert.True(valanced[1].Area > 0);
+        }
+
+        // ------------------------------------- B. the real optimisation (LongRunning) ----
+
+        [Fact]
+        [Trait("Category", "LongRunning")]
+        public void Kolobrzeg_Optimisation_Selects_Projection_And_Tilt_Deterministically()
+        {
+            AnalyticalModel analyticalModel = KolobrzegFixture.Model();
+            int year = KolobrzegFixture.Year(analyticalModel);
+            List<Guid> apertureGuids = StudiedGuids();
+
+            GroupedAwningResult Run()
+            {
+                List<GroupedAwningResult> results = Analytical.SolarCalculator.Create.AwningGroupResults(
+                    analyticalModel, apertureGuids, year, out string message, out bool _,
+                    specification: AwningSpecification.Dakar,
+                    projection: null,          // left to the analysis
+                    tiltDegrees: null,         // left to the analysis (5°-40°)
+                    riseAboveHead: 0.0,
+                    extensionBeyondJambs: Extension,
+                    valanceDepth: 0.0,
+                    maximumGap: 0.20,
+                    headTolerance: 0.02,
+                    gridSize: KolobrzegFixture.HistoricalGridSize,
+                    sunAngleStep: 2.0,
+                    recalculate: false,
+                    objective: new ShadingObjective(1.0, 0.1),
+                    maximumEvaluations: 400);
+
+                Assert.Null(message);
+                Assert.NotNull(results);
+                Assert.Single(results);
+                return results[0];
+            }
+
+            GroupedAwningResult first = Run();
+            GroupedAwningResult second = Run();
+
+            // One physical awning for the three apertures.
+            Assert.Equal(3.00, first.Width, 6);
+            Assert.Equal(HostWallGuid, first.Group.PanelGuid);
+            Assert.Equal(new HashSet<Guid>(apertureGuids), new HashSet<Guid>(first.Group.ApertureGuids));
+
+            // The run must have genuinely searched: distinct awning candidates were measured.
+            Assert.True(first.Evaluations > 0);
+            Assert.NotEqual(ShadingDesignStatus.NotEvaluated, first.Status);
+
+            // Every evaluated candidate is a Dakar projection valid for the 3.00 m group width —
+            // 1.60 m, 2.10 m and 2.60 m — with a tilt inside the 5°-40° product range.
+            Assert.NotEmpty(first.EvaluatedCandidates);
+            foreach (AwningSearchCandidate candidate in first.EvaluatedCandidates)
+            {
+                Assert.Contains(candidate.Projection, AwningSpecification.Dakar.AllowedProjections);
+                Assert.True(candidate.Projection <= 2.6 + 1e-9, "3.00 m width admits projections up to 2.60 m only");
+                Assert.InRange(candidate.TiltDegrees, AwningSpecification.Dakar.MinimumTiltDegrees, AwningSpecification.Dakar.MaximumTiltDegrees);
+            }
+
+            if (first.Status == ShadingDesignStatus.NoShading)
+            {
+                // A successful measured answer: the null device, a real baseline, and no candidate
+                // that beat zero.
+                Assert.True(first.Device.IsNoShading);
+                Assert.NotNull(first.BestCandidateDevice);
+                Assert.NotNull(first.Performance);
+                Assert.True(first.Performance.AdmittedDirectEnergy > 0);
+                Assert.Equal(0.0, first.Performance.DirectSolarIntercepted, 9);
+                foreach (AwningSearchCandidate candidate in first.EvaluatedCandidates)
+                {
+                    Assert.False(candidate.Score > 1e-9, "a NO SHADE verdict must not hide a better evaluated candidate");
+                }
+
+                output.WriteLine($"Kołobrzeg awning answer: NO SHADE — best candidate scored {first.EvaluatedCandidates[0].Score:0.###} kWh");
+            }
+            else
+            {
+                // The recommendation: a Dakar awning with a projection and tilt selected by the analysis.
+                Assert.Equal(ShadingDesignStatus.Ok, first.Status);
+                Assert.False(first.Device.IsNoShading);
+                Assert.Equal("RetractableAwning", first.Device.TypologyName);
+                Assert.Contains(first.Projection, AwningSpecification.Dakar.AllowedProjections);
+                Assert.True(first.Projection <= 2.6 + 1e-9);
+                Assert.InRange(first.TiltDegrees, AwningSpecification.Dakar.MinimumTiltDegrees, AwningSpecification.Dakar.MaximumTiltDegrees);
+
+                // The selected tilt is a design outcome on the awning-specific 1° granularity.
+                Assert.Equal(Math.Round(first.TiltDegrees), first.TiltDegrees, 9);
+
+                // Brackets follow the product table for the 3.00 m width.
+                Assert.Equal(2, first.RequiredWallBrackets);
+
+                // The winner heads the search record, and no evaluated candidate beats it.
+                Assert.Equal(first.Projection, first.EvaluatedCandidates[0].Projection, 9);
+                Assert.Equal(first.TiltDegrees, first.EvaluatedCandidates[0].TiltDegrees, 9);
+                double winnerScore = first.EvaluatedCandidates[0].Score;
+                foreach (AwningSearchCandidate candidate in first.EvaluatedCandidates)
+                {
+                    Assert.False(candidate.Score > winnerScore + 1e-9,
+                        $"evaluated candidate ({candidate.Projection} m, {candidate.TiltDegrees}°) outscores the reported winner");
+                }
+
+                // The reported typology rebuilds the reported geometry: same element Guids, same
+                // shared device area.
+                RetractableAwning reported = new RetractableAwning(first.Projection, first.TiltDegrees, 0.0, Extension, first.ValanceDepth);
+                List<ShadingElement> rebuiltElements = reported.ShadingElements(first.Group.Plane, first.Group.MinX, first.Group.MaxX, first.Group.MaxY);
+
+                HashSet<Guid> rebuiltGuids = new HashSet<Guid>(rebuiltElements.Select(x => x.Guid));
+                Assert.Equal(rebuiltGuids, new HashSet<Guid>(first.Performance.EnergyPerElement.Keys));
+                Assert.Equal(first.Performance.SharedDeviceArea, rebuiltElements.Sum(x => x.Area), 9);
+
+                // Every member keeps its own aperture GUID and reconciles its own accounting.
+                Assert.Equal(3, first.Performance.PerAperture.Count);
+                foreach (ShadingPerformance member in first.Performance.PerAperture)
+                {
+                    Assert.Contains(member.ApertureGuid, apertureGuids);
+                    Assert.Equal(member.DirectSolarIntercepted, member.ReconciledInterceptedEnergy, 9);
+                }
+
+                output.WriteLine($"Kołobrzeg awning answer: Projection {first.Projection:0.##} m, TiltDegrees {first.TiltDegrees:0.#}°, " +
+                    $"valance {first.ValanceDepth:0.##} m, {first.Evaluations} candidates, score {winnerScore:0.###} kWh, " +
+                    $"unwanted blocked {100 * first.Performance.UnwantedSolarBlocked:0.#} %, wanted retained {100 * first.Performance.WantedSolarRetained:0.#} %");
+            }
+
+            // Determinism: identical inputs give the identical answer.
+            Assert.Equal(first.Status, second.Status);
+            Assert.Equal(first.Group.GroupGuid, second.Group.GroupGuid);
+            Assert.Equal(first.Projection, second.Projection, 9);
+            Assert.Equal(first.TiltDegrees, second.TiltDegrees, 9);
+            Assert.Equal(first.ValanceDepth, second.ValanceDepth, 9);
+            Assert.Equal(first.Width, second.Width, 9);
+            Assert.Equal(first.Device.TypologyName, second.Device.TypologyName);
+            if (first.Performance != null)
+            {
+                Assert.Equal(first.Performance.AdmittedDirectEnergy, second.Performance.AdmittedDirectEnergy, 9);
+                Assert.Equal(first.Performance.DirectSolarIntercepted, second.Performance.DirectSolarIntercepted, 9);
+                Assert.Equal(first.Performance.UnwantedSolarIntercepted, second.Performance.UnwantedSolarIntercepted, 9);
+            }
+
+            output.WriteLine(first.DesignSummary);
+        }
+    }
+}
+

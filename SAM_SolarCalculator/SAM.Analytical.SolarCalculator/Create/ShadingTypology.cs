@@ -15,6 +15,7 @@ namespace SAM.Analytical.SolarCalculator
             "HorizontalLouvres",
             "VerticalFins",
             "EggCrate",
+            "RetractableAwning",
         };
 
         /// <summary>
@@ -83,6 +84,7 @@ namespace SAM.Analytical.SolarCalculator
                 case "HorizontalLouvres": return new HorizontalLouvres();
                 case "VerticalFins": return new VerticalFins();
                 case "EggCrate": return new EggCrate();
+                case "RetractableAwning": return new RetractableAwning();
                 default: return null;
             }
         }
@@ -145,6 +147,15 @@ namespace SAM.Analytical.SolarCalculator
                     case "RiseAboveHead":
                     case "ExtensionBeyondJambs":
                         step = 0.01; // 10 mm: below this is not a buildable distinction
+                        break;
+                    case "Projection":
+                        // The awning projection lattice: 0.5 m over the typology's [1.6, 3.6] m
+                        // bounds gives exactly the Dakar nominal set 1.6, 2.1, 2.6, 3.1, 3.6 m.
+                        step = 0.5;
+                        break;
+                    case "ValanceDepth":
+                        // Either no valance or the preset standard depth — the two buildable states.
+                        step = 0.21;
                         break;
                     case "TiltDegrees":
                         step = 5.0; // a manufacturable blade increment

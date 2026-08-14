@@ -35,6 +35,20 @@ namespace SAM.Analytical.SolarCalculator
         }
 
         /// <summary>
+        /// Optimises a retractable folding-arm awning (deployed): projection, deployed tilt, rise
+        /// above the head, extension past the jambs and valance depth.
+        ///
+        /// Projection is the horizontal reach, so the Stage 6 seed — an outward horizontal distance
+        /// in the aperture frame — applies directly, without trigonometric conversion. The tilt is a
+        /// free search variable within the product range, selected by the analysis; it is the fixed
+        /// installation setting of the deployed fabric, not an hourly tracking angle.
+        /// </summary>
+        public static OptimisedShadingResult RetractableAwning(this ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, ShadingObjective objective = null, ShadingPotentialField field = null, int maximumEvaluations = 400, int cellIndexOffset = 0)
+        {
+            return ShadingTypology(target, baseVisibilityCache, desirability, contextOccluders, "RetractableAwning", objective, null, Seed(field, target, "RetractableAwning", objective), maximumEvaluations, 3, cellIndexOffset);
+        }
+
+        /// <summary>
         /// Optimises every ELIGIBLE family for the aperture and returns them best first.
         ///
         /// Eligibility comes from Query.EligibleShadingTypologies, which decides from where the
@@ -143,7 +157,10 @@ namespace SAM.Analytical.SolarCalculator
             }
 
             IShadingTypology result = Create.ShadingTypology(typologyName);
-            result?.SetParameter("Depth", depth);
+
+            // The awning's horizontal reach is its Projection, not a Depth: writing the seed into a
+            // Depth parameter the family does not have would silently drop it.
+            result?.SetParameter(typologyName == "RetractableAwning" ? "Projection" : "Depth", depth);
             return result;
         }
     }
