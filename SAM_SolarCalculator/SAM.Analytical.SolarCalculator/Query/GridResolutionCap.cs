@@ -31,9 +31,10 @@ namespace SAM.Analytical.SolarCalculator
         ///
         /// WHY THE RECORDED BOUNDS ARE THE SOURCE. The optimised result stores the parameter bounds
         /// the search was actually allowed (<see cref="OptimisedShadingResult.Bounds"/>), which are
-        /// the capped ones by construction. Comparing those against the typology's own declared
-        /// bounds reuses the same numbers the search used, instead of recomputing the cap with a
-        /// second, potentially inconsistent formula.
+        /// the capped ones by construction on the DEFAULT optimisation parameter path (an explicit
+        /// caller-supplied parameter list bypasses the resolution cap). Comparing those against the
+        /// typology's own declared bounds reuses the same numbers the search used, instead of
+        /// recomputing the cap with a second, potentially inconsistent formula.
         /// </summary>
         /// <param name="optimisedShadingResult">The winning result of Optimise.ShadingDevice.</param>
         /// <param name="message">An actionable sentence, or null when there is nothing to report.</param>
@@ -93,10 +94,9 @@ namespace SAM.Analytical.SolarCalculator
                     continue;
                 }
 
-                string elementName = name == "LouvreCount" ? "louvres" : (name == "FinCount" ? "fins" : "elements");
                 message = string.Format(CultureInfo.InvariantCulture,
-                    "The selected {0} solution uses {1:0} {2} — the most the analysis grid ({3:0.####} m) can resolve. The element count was limited by the grid, not by the design. Refine the grid and re-run to confirm the count.",
-                    typology.Name, Math.Round(winner), elementName, optimisedShadingResult.GridSize);
+                    "The selected {0} solution reached the analysis-grid resolution limit ({1:0.####} m). The analysis grid may have limited the element count. Refine the grid and compare the result to confirm the recommendation.",
+                    typology.Name, optimisedShadingResult.GridSize);
                 return true;
             }
 

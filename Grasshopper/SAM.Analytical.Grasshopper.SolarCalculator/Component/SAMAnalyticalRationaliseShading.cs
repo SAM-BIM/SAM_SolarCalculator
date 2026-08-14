@@ -41,9 +41,8 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// added so the three parts sum to what the device stops.
         ///
         /// 1.0.3 — a warning is raised when the winning device's element count sits exactly on the
-        /// analysis-grid resolution cap: the count was limited by the grid, not by the design, and
-        /// should be confirmed on a finer grid. Nothing else changes — the search itself is
-        /// untouched.
+        /// analysis-grid resolution cap: the grid may have limited the count and it should be
+        /// confirmed on a finer grid. Nothing else changes — the search itself is untouched.
         /// </summary>
         public override string LatestComponentVersion => "1.0.3";
 
