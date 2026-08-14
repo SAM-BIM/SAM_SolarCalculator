@@ -57,6 +57,37 @@ namespace SAM.Weather.SolarCalculator
         /// </param>
         public static SolarAttributionCache SolarAttributionCache(this SolarVisibilityCache solarVisibilityCache, List<LinkedFace3D> occluders, List<AnalysisCell> analysisCells, int cellIndexOffset = 0, double tolerance_Area = Core.Tolerance.MacroDistance, double tolerance_Snap = Core.Tolerance.MacroDistance, double tolerance_Angle = Core.Tolerance.Angle, double tolerance_Distance = Core.Tolerance.Distance, bool baseLitSamplesOnly = false)
         {
+            return SolarAttributionCache(solarVisibilityCache, occluders, analysisCells, cellIndexOffset, tolerance_Area, tolerance_Snap, tolerance_Angle, tolerance_Distance, baseLitSamplesOnly, null);
+        }
+
+        /// <summary>
+        /// As the overload above, with an ACTIVE-BIN MASK: rows whose mask entry is false are left
+        /// UNTRACED (null) and their bin indices are never removed, so <see cref="SolarAttributionCache.BinCount"/>
+        /// stays equal to the visibility cache's bin count and the two caches remain index-compatible
+        /// in the bin dimension exactly as before.
+        ///
+        /// WHY THE ROWS STAY PRESENT. The pruning is a performance optimisation for candidate
+        /// scoring, not a change to the cache contract. A null row already exists today (no lit
+        /// sample at that sun group) and reads as a negative sentinel; a masked row behaves the same,
+        /// so downstream accounting can be told which bins may be read and which never will be.
+        /// Because the identity and the attribution-table hash cover the occluder table and the
+        /// sampling, not the traced rows, a masked cache carries the same identity as the full one.
+        ///
+        /// Rows are private to their own sun group, so the mask check preserves the build's
+        /// determinism: the Parallel.For still has no accumulation order to disagree about.
+        /// </summary>
+        /// <param name="solarVisibilityCache">Supplies the sun groups and the sampling identity.</param>
+        /// <param name="occluders">Context plus any candidate shading faces, in a stable order.</param>
+        /// <param name="analysisCells">The window of cells to attribute, in visibility-cache order.</param>
+        /// <param name="cellIndexOffset">Where that window starts in the visibility cache's cell space.</param>
+        /// <param name="tolerance_Area">Area tolerance.</param>
+        /// <param name="tolerance_Snap">Snap tolerance (also the ray-start offset).</param>
+        /// <param name="tolerance_Angle">Angle tolerance, RADIANS.</param>
+        /// <param name="tolerance_Distance">Distance tolerance.</param>
+        /// <param name="baseLitSamplesOnly">Trace only the samples the baseline reports as lit.</param>
+        /// <param name="activeBins">Per-bin mask, one entry per sun group. Null = trace every bin (the full path). A bin with a false entry, or an index past the mask, is left untraced.</param>
+        public static SolarAttributionCache SolarAttributionCache(this SolarVisibilityCache solarVisibilityCache, List<LinkedFace3D> occluders, List<AnalysisCell> analysisCells, int cellIndexOffset, double tolerance_Area, double tolerance_Snap, double tolerance_Angle, double tolerance_Distance, bool baseLitSamplesOnly, bool[] activeBins)
+        {
             List<SunBin> bins = solarVisibilityCache?.Bins;
             if (bins == null || bins.Count == 0 || analysisCells == null || analysisCells.Count == 0)
             {
@@ -103,6 +134,11 @@ namespace SAM.Weather.SolarCalculator
 
             Parallel.For(0, bins.Count, b =>
             {
+                if (activeBins != null && (b >= activeBins.Length || !activeBins[b]))
+                {
+                    return; // masked row: left null/untraced, bin index preserved
+                }
+
                 Vector3D representativeDirection = bins[b]?.RepresentativeDirection;
                 if (representativeDirection == null || !representativeDirection.IsValid())
                 {

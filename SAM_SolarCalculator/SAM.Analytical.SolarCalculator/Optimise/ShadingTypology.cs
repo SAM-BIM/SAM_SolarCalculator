@@ -139,6 +139,41 @@ namespace SAM.Analytical.SolarCalculator
             int cellIndexOffset,
             int refinementStarts)
         {
+            return ShadingTypology(target, baseVisibilityCache, desirability, contextOccluders, typologyName,
+                objective, parameters, seed, maximumEvaluations, coarseLevels, cellIndexOffset, refinementStarts, true);
+        }
+
+        /// <summary>
+        /// As the overload above, with explicit control over ACTIVE-BIN PRUNING of the candidate
+        /// attribution (see Create.ActiveDesirabilityBins). The default and only production path is
+        /// <c>true</c>: candidate attribution is traced only at bins whose Benefit/Harm contribution
+        /// can be non-zero, which cannot change any candidate score, comparison, or the selected
+        /// design — every reported number of the winning device comes from one complete, unpruned
+        /// attribution pass run after the winner is known.
+        ///
+        /// INTERNAL ON PURPOSE. The parameter exists only so the test assembly can compare the
+        /// pruned search against the unpruned one; it is not part of the public SAM API and no
+        /// consumer should ever need to disable the fast path, which is answer-preserving anyway.
+        /// Passing <c>false</c> restores the unpruned per-candidate attribution for that
+        /// equivalence test. The assembly grants its test project friend access for this one seam
+        /// (see AssemblyInfo).
+        /// </summary>
+        /// <param name="pruneActiveBins">True (default via the other overloads) traces candidate attribution at active desirability bins only; false traces the complete timeline for every candidate.</param>
+        internal static OptimisedShadingResult ShadingTypology(
+            this ApertureSolarTarget target,
+            SolarVisibilityCache baseVisibilityCache,
+            ApertureDesirability desirability,
+            List<LinkedFace3D> contextOccluders,
+            string typologyName,
+            ShadingObjective objective,
+            List<ShadingParameter> parameters,
+            IShadingTypology seed,
+            int maximumEvaluations,
+            int coarseLevels,
+            int cellIndexOffset,
+            int refinementStarts,
+            bool pruneActiveBins)
+        {
             if (target == null || baseVisibilityCache == null || desirability == null)
             {
                 return null;
@@ -164,7 +199,13 @@ namespace SAM.Analytical.SolarCalculator
             }
 
             Stopwatch stopwatch = Stopwatch.StartNew();
-            Evaluator evaluator = new Evaluator(target, baseVisibilityCache, desirability, contextOccluders, typologyName, objective_Local, parameters_Local, cellIndexOffset);
+
+            // THE ACTIVE-BIN MASK: built ONCE for this aperture/desirability pair and reused for
+            // every candidate. Null restores the unpruned full-timeline attribution (equivalence
+            // testing); null is also the safe fallback when the desirability cannot produce a mask.
+            bool[] activeBins = pruneActiveBins ? Create.ActiveDesirabilityBins(desirability, baseVisibilityCache.BinCount) : null;
+
+            Evaluator evaluator = new Evaluator(target, baseVisibilityCache, desirability, contextOccluders, typologyName, objective_Local, parameters_Local, cellIndexOffset, activeBins);
 
             // --- the starting vector: the caller's seed where given, the family default otherwise.
             double[] seedVector = new double[parameters_Local.Count];
@@ -456,6 +497,12 @@ namespace SAM.Analytical.SolarCalculator
                 return null;
             }
 
+            // The winner's reported performance comes from ONE complete, unpruned attribution pass
+            // over the full timeline, run only now that the winner is known. A no-op on the
+            // unpruned path and for unmeasured winners. Scores are unchanged by construction, so the
+            // selection, the null-device verdict and every statistic below are already final.
+            evaluator.VerifyFull(best);
+
             // --- the null device scores exactly zero: no benefit, no harm, no material.
             //
             // A candidate that could NOT BE MEASURED at all has a NaN score, and NaN > 0 is false —
@@ -617,12 +664,13 @@ namespace SAM.Analytical.SolarCalculator
             private readonly ShadingObjective objective;
             private readonly List<ShadingParameter> parameters;
             private readonly int cellIndexOffset;
+            private readonly bool[] activeBins;
             private readonly Dictionary<string, Candidate> cache = new Dictionary<string, Candidate>();
 
             private double geometryMilliseconds;
             private double evaluationMilliseconds;
 
-            public Evaluator(ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, string typologyName, ShadingObjective objective, List<ShadingParameter> parameters, int cellIndexOffset)
+            public Evaluator(ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, string typologyName, ShadingObjective objective, List<ShadingParameter> parameters, int cellIndexOffset, bool[] activeBins)
             {
                 this.cellIndexOffset = cellIndexOffset;
                 this.target = target;
@@ -632,6 +680,7 @@ namespace SAM.Analytical.SolarCalculator
                 this.typologyName = typologyName;
                 this.objective = objective;
                 this.parameters = parameters;
+                this.activeBins = activeBins;
             }
 
             /// <summary>Distinct geometries actually built and ray-traced (cache hits excluded).</summary>
@@ -685,12 +734,14 @@ namespace SAM.Analytical.SolarCalculator
 
                 // Context is already in baseVisibilityCache and is not traced again per candidate —
                 // see Create.ShadingPerformance for why that is exact, and what it costs not to.
-                SolarAttributionCache attributionCache = Create.CandidateAttributionCache(baseVisibilityCache, elements, target.AnalysisCells, cellIndexOffset);
+                // The active-bin mask prunes ONLY the attribution at bins whose Benefit/Harm
+                // contribution is provably zero; admitted accounting is never pruned.
+                SolarAttributionCache attributionCache = Create.CandidateAttributionCache(baseVisibilityCache, elements, target.AnalysisCells, cellIndexOffset, activeBins);
                 if (attributionCache != null)
                 {
                     ShadingPerformance performance = Create.ShadingPerformance(
                         target, baseVisibilityCache, attributionCache, desirability, elements,
-                        typologyName, typology.MaterialFraction(target), cellIndexOffset);
+                        typologyName, typology.MaterialFraction(target), cellIndexOffset, activeBins);
 
                     if (performance != null)
                     {
@@ -706,6 +757,69 @@ namespace SAM.Analytical.SolarCalculator
 
                 cache[key] = result;
                 return result;
+            }
+
+            /// <summary>
+            /// THE FINAL FULL VERIFICATION OF THE WINNER. When candidates were scored through a
+            /// pruned attribution, the winning device is rebuilt from its winning parameters and
+            /// measured ONCE through the complete, unpruned attribution path, and its provisional
+            /// performance is replaced by the full result. Every reported quantity — intercepted
+            /// totals, per-element credits, unattributed energy, the attribution-table hash — then
+            /// comes from the complete pass, exactly as it did before pruning existed.
+            ///
+            /// The score cannot move: the pruned and full paths agree bit-for-bit on Benefit, Harm
+            /// and the admitted sums (see the pruning notes in Create.ShadingPerformance), and the
+            /// score is recomputed here from the same objective over the same numbers.
+            ///
+            /// THE MEMO IS NOT TOUCHED. The candidate object being replaced is already the instance
+            /// stored under its parameter key, so no new entry is created and Evaluations is
+            /// unchanged by the verification.
+            /// </summary>
+            public void VerifyFull(Candidate candidate)
+            {
+                if (candidate == null || candidate.Performance == null || activeBins == null)
+                {
+                    return; // unmeasured winner, or the unpruned path: nothing to verify
+                }
+
+                Stopwatch stopwatch = Stopwatch.StartNew();
+
+                IShadingTypology typology = Create.ShadingTypology(typologyName);
+                for (int i = 0; i < parameters.Count; i++)
+                {
+                    typology.SetParameter(parameters[i].Name, candidate.Parameters[i]);
+                }
+
+                List<ShadingElement> elements = typology.ShadingElements(target);
+
+                stopwatch.Stop();
+                geometryMilliseconds += stopwatch.Elapsed.TotalMilliseconds;
+
+                if (elements == null || elements.Count == 0)
+                {
+                    return;
+                }
+
+                stopwatch = Stopwatch.StartNew();
+
+                SolarAttributionCache attributionCache = Create.CandidateAttributionCache(baseVisibilityCache, elements, target.AnalysisCells, cellIndexOffset);
+                if (attributionCache != null)
+                {
+                    ShadingPerformance performance = Create.ShadingPerformance(
+                        target, baseVisibilityCache, attributionCache, desirability, elements,
+                        typologyName, typology.MaterialFraction(target), cellIndexOffset);
+
+                    if (performance != null)
+                    {
+                        candidate.Performance = performance;
+                        candidate.MaterialFraction = performance.MaterialFraction;
+                        candidate.Score = objective.Score(performance);
+                        candidate.AttributionTableHash = attributionCache.AttributionTableHash;
+                    }
+                }
+
+                stopwatch.Stop();
+                evaluationMilliseconds += stopwatch.Elapsed.TotalMilliseconds;
             }
 
             /// <summary>

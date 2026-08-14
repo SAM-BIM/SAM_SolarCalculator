@@ -113,6 +113,18 @@ namespace SAM.SolarCalculator.Tests
             return new SeasonalDesirability(new AnalysisPeriod(Year), null);
         }
 
+        /// <summary>One August day unwanted, nothing wanted: the narrow-brief regime.</summary>
+        public static IDesirabilityStrategy OneDayUnwanted()
+        {
+            return new SeasonalDesirability(new AnalysisPeriod(Year, 8, 1, 8, 1), null);
+        }
+
+        /// <summary>One August day unwanted, one January day wanted: both periods narrow.</summary>
+        public static IDesirabilityStrategy OneDayUnwantedOneDayWanted()
+        {
+            return new SeasonalDesirability(new AnalysisPeriod(Year, 8, 1, 8, 1), new AnalysisPeriod(Year, 1, 15, 1, 15));
+        }
+
         /// <summary>
         /// A memoised scenario. The key must capture everything that changes the result, or two
         /// different scenarios would silently share one cache.
@@ -189,6 +201,16 @@ namespace SAM.SolarCalculator.Tests
         public static Scenario SouthAllUnwanted()
         {
             return Get("south-all-unwanted", SouthWindow, null, EverythingUnwanted);
+        }
+
+        public static Scenario SouthOneDayUnwanted()
+        {
+            return Get("south-one-day-unwanted", SouthWindow, null, OneDayUnwanted);
+        }
+
+        public static Scenario SouthOneDayBoth()
+        {
+            return Get("south-one-day-both", SouthWindow, null, OneDayUnwantedOneDayWanted);
         }
     }
 }

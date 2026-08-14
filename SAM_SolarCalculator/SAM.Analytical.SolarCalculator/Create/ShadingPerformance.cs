@@ -13,6 +13,67 @@ namespace SAM.Analytical.SolarCalculator
     public static partial class Create
     {
         /// <summary>
+        /// THE ACTIVE-BIN RULE for candidate scoring: the sun bins whose Benefit/Harm contribution
+        /// can be non-zero under the existing accounting, as a per-bin mask aligned with the
+        /// visibility cache's bins.
+        ///
+        /// The rule is the literal complement of the skip gate in ShadingPerformance's accounting
+        /// loop, intersected with "carries wanted or unwanted energy":
+        ///
+        ///   active[b] = (unwanted[b] != 0 || wanted[b] != 0)
+        ///            && !(|direct[b]| + |unwanted[b]| + |wanted[b]| &lt; 1e-12)
+        ///
+        /// WHY THE GATE IS PART OF THE RULE, AND WHY IT IS THE LOOP'S OWN EXPRESSION. A bin with a
+        /// sub-gate non-zero unwanted energy is skipped by the accounting today and contributes
+        /// exactly zero; tracing and scoring it under a bare "unwanted != 0 || wanted != 0" rule
+        /// would ADD a spurious contribution and change scores. A bin whose wanted and unwanted
+        /// energies are both exactly zero contributes exactly 0.0 to both accumulators whatever the
+        /// attribution says, so it may be left untraced with no effect. The gate is therefore not a
+        /// tuning choice: excluding it from the mask breaks bit-identity with the full accounting.
+        /// The complement form (!(x &lt; 1e-12) rather than x &gt;= 1e-12) is written to stay
+        /// consistent with the loop even if an energy were NaN (they are not, by construction — see
+        /// ApertureDesirability — but the mask must never diverge from the loop it mirrors).
+        ///
+        /// The mask is computed ONCE per aperture/desirability pair and reused for every candidate:
+        /// the arrays it reads are brief-independent after Stage 5, so nothing here is recomputed
+        /// per candidate.
+        ///
+        /// INTERNAL ON PURPOSE. The only production caller is the Stage-9 optimiser, in this
+        /// assembly; no consumer outside it needs the mask. The rule's contract is still pinned by
+        /// the public paths: the equivalence and gate-edge tests exercise the mask through the
+        /// public attribution builder and the unpruned/full comparison. Promote it to public only
+        /// when an outside caller genuinely wants it.
+        /// </summary>
+        /// <param name="desirability">Stage 5 per-group energies for this aperture.</param>
+        /// <param name="binCount">The visibility cache's bin count the mask must align with.</param>
+        /// <returns>A bool per bin, null when the inputs cannot produce one.</returns>
+        internal static bool[] ActiveDesirabilityBins(ApertureDesirability desirability, int binCount)
+        {
+            if (desirability == null || binCount <= 0)
+            {
+                return null;
+            }
+
+            double[] direct = desirability.DirectEnergyPerGroup;
+            double[] unwanted = desirability.UnwantedEnergyPerGroup;
+            double[] wanted = desirability.WantedEnergyPerGroup;
+            if (direct == null || unwanted == null || wanted == null
+                || direct.Length != binCount || unwanted.Length != binCount || wanted.Length != binCount)
+            {
+                return null;
+            }
+
+            bool[] result = new bool[binCount];
+            for (int b = 0; b < binCount; b++)
+            {
+                result[b] = (unwanted[b] != 0 || wanted[b] != 0)
+                    && !(Math.Abs(direct[b]) + Math.Abs(unwanted[b]) + Math.Abs(wanted[b]) < 1e-12);
+            }
+
+            return result;
+        }
+
+        /// <summary>
         /// Stage 8: the energy performance of a set of shading elements against one aperture,
         /// attributed to the element the sun physically reaches FIRST.
         ///
@@ -51,6 +112,39 @@ namespace SAM.Analytical.SolarCalculator
         /// <param name="materialFraction">Device area / aperture gross area.</param>
         /// <param name="cellIndexOffset">This target's first cell index within the visibility cache's shared cell space.</param>
         public static ShadingPerformance ShadingPerformance(this ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, SolarAttributionCache attributionCache, ApertureDesirability desirability, IEnumerable<ShadingElement> shadingElements, string typologyName, double materialFraction, int cellIndexOffset = 0)
+        {
+            return ShadingPerformanceCore(target, baseVisibilityCache, attributionCache, desirability, shadingElements, typologyName, materialFraction, cellIndexOffset, null);
+        }
+
+        /// <summary>
+        /// THE PRUNED SCORING PATH. Identical accounting to the public overload above except that
+        /// attribution is consulted ONLY at active bins (see <see cref="ActiveDesirabilityBins"/>);
+        /// the mask is passed through, never recomputed here.
+        ///
+        /// WHAT THE PRUNING DOES NOT TOUCH, and why the score is bit-identical to the full path:
+        ///
+        ///   - the per-bin skip gate and the bin iteration order are unchanged, so every addition the
+        ///     full path performs for Benefit/Harm is performed here in the same order;
+        ///   - a masked (inactive) bin contributes exactly 0.0 to UnwantedSolarIntercepted and
+        ///     WantedSolarBlocked whatever the attribution says — that is what the mask's definition
+        ///     guarantees — and 0.0 additions cannot move a non-negative accumulator, so skipping
+        ///     those reads changes no bit;
+        ///   - the ADMITTED sums are accumulated before the mask check, over exactly the bins and
+        ///     cells the full path uses. AdmittedDirectEnergy (and with it the material-cost
+        ///     reference) must NOT shrink: pruning the admitted accounting would silently change
+        ///     Score through Cost, which is the one mistake this ordering exists to prevent.
+        ///
+        /// The intercepted totals and the per-element credits are therefore INCOMPLETE by design —
+        /// they under-count the neutral direct beam the candidate would stop. This overload exists
+        /// for SCORING ONLY. A performance object it returns must never be reported: the optimiser
+        /// re-measures its winner through the full path before the result is built.
+        /// </summary>
+        internal static ShadingPerformance ShadingPerformance(this ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, SolarAttributionCache attributionCache, ApertureDesirability desirability, IEnumerable<ShadingElement> shadingElements, string typologyName, double materialFraction, int cellIndexOffset, bool[] activeBins)
+        {
+            return ShadingPerformanceCore(target, baseVisibilityCache, attributionCache, desirability, shadingElements, typologyName, materialFraction, cellIndexOffset, activeBins);
+        }
+
+        private static ShadingPerformance ShadingPerformanceCore(ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, SolarAttributionCache attributionCache, ApertureDesirability desirability, IEnumerable<ShadingElement> shadingElements, string typologyName, double materialFraction, int cellIndexOffset, bool[] activeBins)
         {
             List<AnalysisCell> cells = target?.AnalysisCells;
             if (cells == null || cells.Count == 0 || baseVisibilityCache == null || attributionCache == null || desirability == null)
@@ -134,6 +228,13 @@ namespace SAM.Analytical.SolarCalculator
                     admittedDirect += area * direct;
                     admittedUnwanted += area * unwanted;
                     admittedWanted += area * wanted;
+
+                    // THE PRUNING POINT: admitted accounting above is never pruned; only the
+                    // attribution reads below are skipped for inactive bins.
+                    if (activeBins != null && !activeBins[b])
+                    {
+                        continue;
+                    }
 
                     int firstHit = attributionCache.FirstHitIndex(b, c);
                     if (firstHit < 0)
@@ -240,7 +341,7 @@ namespace SAM.Analytical.SolarCalculator
         /// (a 9.2x reduction in rays traced) against 85.2 % on the south (1.2x). The saving is
         /// largest exactly where the old cost was least justified.
         /// </summary>
-        internal static SolarAttributionCache CandidateAttributionCache(SolarVisibilityCache baseVisibilityCache, List<ShadingElement> elements, List<AnalysisCell> analysisCells, int cellIndexOffset)
+        internal static SolarAttributionCache CandidateAttributionCache(SolarVisibilityCache baseVisibilityCache, List<ShadingElement> elements, List<AnalysisCell> analysisCells, int cellIndexOffset, bool[] activeBins = null)
         {
             List<LinkedFace3D> occluders = new List<LinkedFace3D>();
             foreach (ShadingElement element in elements ?? new List<ShadingElement>())
@@ -255,7 +356,7 @@ namespace SAM.Analytical.SolarCalculator
             return Weather.SolarCalculator.Create.SolarAttributionCache(
                 baseVisibilityCache, occluders, analysisCells, cellIndexOffset,
                 Core.Tolerance.MacroDistance, Core.Tolerance.MacroDistance, Core.Tolerance.Angle, Core.Tolerance.Distance,
-                baseLitSamplesOnly: true);
+                true, activeBins);
         }
     }
 }
