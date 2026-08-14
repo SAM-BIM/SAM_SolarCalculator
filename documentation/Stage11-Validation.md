@@ -785,7 +785,38 @@ axis count and one fixture. The two regimes that broke — a one-dimensional pro
 budget — were both already covered by the suite, and only a full run surfaced them. **A gate is not a
 substitute for the suite.**
 
-### 2.14 What remains **not** validated
+### 2.14 Real-project regression fixture — the Kołobrzeg office
+
+The Kołobrzeg office model that produced the PR 2 resolution evidence is now a committed
+**validation/regression fixture** (`SAM_SolarCalculator.Tests/Fixtures/KolobrzegOffice.sam`), run
+through the same production entry points Grasshopper uses (`ApertureSolarTargets`,
+`ApertureShadingSetup`, `Optimise.ShadingDevice`). It is a **real exported project** — three
+WSW-facing apertures (0.90 × 2.25 m, 1.20 × 1.39 m, 0.60 × 1.39 m) with embedded Kołobrzeg weather
+— not a synthetic scenario.
+
+`KolobrzegRegressionTests` preserves the engineering conclusions, not incidental optimiser
+decimals:
+
+- **Fixture integrity** — the fixture loads, carries the three studied aperture GUIDs with their
+  expected geometry, and reproduces the historical 10 / 9 / 6-cell pattern at the 0.5 m default.
+- **The coarse-grid sampling artefact** — at 0.5 m the smallest aperture recommends a thin single
+  vertical fin claiming ~88 % blocked; the same physical device re-measured at 0.25 m and 0.2 m
+  blocks ~0 %, and at 0.1 m still only ~18 %.
+- **Family/decision stability** — across 0.5 / 0.25 / 0.2 m the small aperture's winner family
+  differs at the coarse grid and stabilises at HorizontalLouvres from the design-grade 0.25 m; the
+  mid and tall apertures stay HorizontalLouvres throughout. Exact tall-aperture geometry is
+  deliberately not asserted: the study showed it keeps moving with resolution.
+- **PR 2 guidance and cap warning, natural cases** — the 0.5 m analysis is flagged as coarser than
+  the 0.25 m set recommendation (guidance only: nothing is changed), and the coarse winner rides
+  the grid-narrowed count maximum, triggering the resolution-cap warning; fine-grid winners carry
+  none.
+
+**This fixture must not be used to tune algorithms specifically to Kołobrzeg.** It exists to
+validate behaviour and to keep the resolution findings enforced; it is one project, and any
+optimiser, grid-rule or guidance change must stand on its own evidence, not on making these tests
+pass.
+
+### 2.15 What remains **not** validated
 
 Stated plainly, because it bounds what may be claimed:
 
