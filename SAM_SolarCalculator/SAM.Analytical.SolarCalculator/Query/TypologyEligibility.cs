@@ -132,6 +132,7 @@ namespace SAM.Analytical.SolarCalculator
                 {
                     case "Overhang":
                     case "HorizontalLouvres":
+                    case "RetractableAwning":
                         eligible = horizontal;
                         break;
                     case "VerticalFins":

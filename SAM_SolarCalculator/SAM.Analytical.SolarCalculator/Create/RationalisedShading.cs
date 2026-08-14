@@ -147,6 +147,13 @@ namespace SAM.Analytical.SolarCalculator
                 return null;
             }
 
+            if (typologyName == "RetractableAwning")
+            {
+                // The awning's horizontal reach is a PROJECTION, not a depth, and its allowed values
+                // are the product lattice — the seeded-depth machinery below does not apply.
+                return RationalisedAwningSweep(target, baseVisibilityCache, desirability, contextOccluders, out performance, wantedSolarPenalty, materialPenalty, cellIndexOffset);
+            }
+
             double seed = SeedOverhangDepth(field, target, wantedSolarPenalty);
             List<double> depths = new List<double>();
             if (double.IsNaN(seed) || seed <= 0)
@@ -169,6 +176,45 @@ namespace SAM.Analytical.SolarCalculator
             {
                 foreach (IShadingTypology candidate in Candidates(typologyName, depth))
                 {
+                    ShadingPerformance candidatePerformance = ShadingPerformance(target, baseVisibilityCache, desirability, contextOccluders, candidate, cellIndexOffset);
+                    if (candidatePerformance == null)
+                    {
+                        continue;
+                    }
+
+                    double score = ShadingFitScore(candidatePerformance, wantedSolarPenalty, materialPenalty);
+                    if (double.IsNaN(score) || score <= bestScore)
+                    {
+                        continue;
+                    }
+
+                    bestScore = score;
+                    best = candidate;
+                    performance = candidatePerformance;
+                }
+            }
+
+            return best;
+        }
+
+        /// <summary>
+        /// The quick candidate set for a retractable awning: the Dakar projection lattice crossed
+        /// with the 5° tilt lattice, rise/extension/valance fixed at zero. The full product-
+        /// constrained search lives in Optimise.AwningGroup; this keeps the seeded-sweep component
+        /// path working for the new family.
+        /// </summary>
+        private static IShadingTypology RationalisedAwningSweep(ApertureSolarTarget target, SolarVisibilityCache baseVisibilityCache, ApertureDesirability desirability, List<LinkedFace3D> contextOccluders, out ShadingPerformance performance, double wantedSolarPenalty, double materialPenalty, int cellIndexOffset)
+        {
+            performance = null;
+
+            IShadingTypology best = null;
+            double bestScore = double.NegativeInfinity;
+
+            foreach (double projection in AwningSpecification.Dakar.AllowedProjections)
+            {
+                for (double tilt = AwningSpecification.Dakar.MinimumTiltDegrees; tilt <= AwningSpecification.Dakar.MaximumTiltDegrees + 1e-9; tilt += 5.0)
+                {
+                    IShadingTypology candidate = new RetractableAwning(projection, tilt, 0.0, 0.0, 0.0);
                     ShadingPerformance candidatePerformance = ShadingPerformance(target, baseVisibilityCache, desirability, contextOccluders, candidate, cellIndexOffset);
                     if (candidatePerformance == null)
                     {
