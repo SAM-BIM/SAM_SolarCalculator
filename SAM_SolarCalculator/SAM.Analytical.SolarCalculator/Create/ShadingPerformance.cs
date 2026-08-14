@@ -180,6 +180,16 @@ namespace SAM.Analytical.SolarCalculator
                 return null;
             }
 
+            // The mask is indexed by bin in the loop below, so it must cover exactly the bins this
+            // call accounts for. A mask of any other length is a wiring error, not a shorter brief:
+            // treating a missing tail as inactive would silently drop the Benefit/Harm at bins the
+            // attribution did trace, which is precisely the divergence pruning must never introduce.
+            // Rejected here, with the method's other shape guards, rather than thrown at the index.
+            if (activeBins != null && activeBins.Length != bins.Count)
+            {
+                return null;
+            }
+
             // Only these Guids may receive credit. Anything else hit first is context.
             Dictionary<Guid, double> energyPerElement = new Dictionary<Guid, double>();
             Dictionary<Guid, string> namePerElement = new Dictionary<Guid, string>();

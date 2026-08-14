@@ -144,6 +144,41 @@ namespace SAM.SolarCalculator.Tests
             return traced;
         }
 
+        /// <summary>
+        /// THE PRODUCTION SCORING CALL: masked cache AND masked scorer, which is the combination the
+        /// optimiser actually runs. Scoring a masked cache through the PUBLIC unmasked overload
+        /// reaches the same accumulators by a different route — an untraced row reads as the
+        /// negative first-hit sentinel and takes the same `continue` — so it is a valid check but it
+        /// is not the shipped code. Both are compared against the complete pass.
+        /// </summary>
+        private static ShadingPerformance ScoreMasked(ApertureSolarTarget target, SolarVisibilityCache baseCache, SolarAttributionCache attributionCache, ApertureDesirability desirability, List<ShadingElement> elements, IShadingTypology device, bool[] activeBins)
+        {
+            return SAM.Analytical.SolarCalculator.Create.ShadingPerformance(
+                target, baseCache, attributionCache, desirability, elements,
+                device.Name, device.MaterialFraction(target), 0, activeBins);
+        }
+
+        /// <summary>
+        /// The objective components and the admitted sums, EXACTLY — no tolerance, because a
+        /// tolerance here would hide the drift these tests exist to forbid.
+        /// </summary>
+        private static void AssertIdenticalScoring(ShadingPerformance expected, ShadingPerformance actual)
+        {
+            Assert.NotNull(expected);
+            Assert.NotNull(actual);
+
+            ShadingObjective objective = new ShadingObjective(1.0, 0.1);
+            Assert.Equal(objective.Benefit(expected), objective.Benefit(actual));
+            Assert.Equal(objective.Harm(expected), objective.Harm(actual));
+            Assert.Equal(objective.Cost(expected), objective.Cost(actual));
+            Assert.Equal(objective.Score(expected), objective.Score(actual));
+
+            // The admitted accounting must be identical: pruning reads, not the baseline.
+            Assert.Equal(expected.AdmittedDirectEnergy, actual.AdmittedDirectEnergy);
+            Assert.Equal(expected.AdmittedUnwantedEnergy, actual.AdmittedUnwantedEnergy);
+            Assert.Equal(expected.AdmittedWantedEnergy, actual.AdmittedWantedEnergy);
+        }
+
         private static void AssertIdenticalResult(OptimisedShadingResult pruned, OptimisedShadingResult full)
         {
             Assert.NotNull(pruned);
@@ -220,17 +255,15 @@ namespace SAM.SolarCalculator.Tests
                 scenario.Target, scenario.BaseCache, pruned, probe, elements,
                 device.Name, device.MaterialFraction(scenario.Target));
 
+            // The shipped combination: masked cache AND masked scorer, at the gate boundary.
+            ShadingPerformance fromMasked = ScoreMasked(
+                scenario.Target, scenario.BaseCache, pruned, probe, elements, device, mask);
+
             Assert.NotNull(fromComplete);
             Assert.NotNull(fromPruned);
 
-            ShadingObjective objective = new ShadingObjective(1.0, 0.1);
-            Assert.Equal(objective.Benefit(fromComplete), objective.Benefit(fromPruned));
-            Assert.Equal(objective.Harm(fromComplete), objective.Harm(fromPruned));
-            Assert.Equal(objective.Cost(fromComplete), objective.Cost(fromPruned));
-            Assert.Equal(objective.Score(fromComplete), objective.Score(fromPruned));
-            Assert.Equal(fromComplete.AdmittedDirectEnergy, fromPruned.AdmittedDirectEnergy);
-            Assert.Equal(fromComplete.AdmittedUnwantedEnergy, fromPruned.AdmittedUnwantedEnergy);
-            Assert.Equal(fromComplete.AdmittedWantedEnergy, fromPruned.AdmittedWantedEnergy);
+            AssertIdenticalScoring(fromComplete, fromPruned);
+            AssertIdenticalScoring(fromComplete, fromMasked);
         }
 
         [Fact]
@@ -305,8 +338,6 @@ namespace SAM.SolarCalculator.Tests
             // the masked cache must return bit-identical Benefit, Harm, Cost and Score — no
             // tolerance, because a tolerance here would hide exactly the drift this PR must not
             // introduce. The admitted sums are compared too: the pruning must never touch them.
-            ShadingObjective objective = new ShadingObjective(1.0, 0.1);
-
             foreach (OptimisationFixture.Scenario scenario in new OptimisationFixture.Scenario[]
             {
                 OptimisationFixture.SouthSeasonal(),
@@ -349,20 +380,44 @@ namespace SAM.SolarCalculator.Tests
                         scenario.Target, scenario.BaseCache, pruned, scenario.Desirability, elements,
                         device.Name, device.MaterialFraction(scenario.Target));
 
+                    // The shipped combination: masked cache AND masked scorer.
+                    ShadingPerformance fromMasked = ScoreMasked(
+                        scenario.Target, scenario.BaseCache, pruned, scenario.Desirability, elements, device, mask);
+
                     Assert.NotNull(fromComplete);
                     Assert.NotNull(fromPruned);
 
-                    Assert.Equal(objective.Benefit(fromComplete), objective.Benefit(fromPruned));
-                    Assert.Equal(objective.Harm(fromComplete), objective.Harm(fromPruned));
-                    Assert.Equal(objective.Cost(fromComplete), objective.Cost(fromPruned));
-                    Assert.Equal(objective.Score(fromComplete), objective.Score(fromPruned));
-
-                    // The admitted accounting must be identical: pruning reads, not the baseline.
-                    Assert.Equal(fromComplete.AdmittedDirectEnergy, fromPruned.AdmittedDirectEnergy);
-                    Assert.Equal(fromComplete.AdmittedUnwantedEnergy, fromPruned.AdmittedUnwantedEnergy);
-                    Assert.Equal(fromComplete.AdmittedWantedEnergy, fromPruned.AdmittedWantedEnergy);
+                    AssertIdenticalScoring(fromComplete, fromPruned);
+                    AssertIdenticalScoring(fromComplete, fromMasked);
                 }
             }
+        }
+
+        [Fact]
+        public void A_Mask_That_Does_Not_Cover_Every_Bin_Is_Rejected_Rather_Than_Indexed()
+        {
+            // The scorer indexes the mask by bin, so a mask of any other length is a wiring error.
+            // The accounting must refuse it with the same null it returns for every other shape
+            // mismatch — never an IndexOutOfRangeException, and never a silent "the missing tail is
+            // inactive", which would drop Benefit/Harm at bins the attribution did trace.
+            OptimisationFixture.Scenario scenario = OptimisationFixture.SouthSeasonal();
+            int binCount = scenario.BaseCache.BinCount;
+            Assert.True(binCount > 1);
+
+            IShadingTypology device = new HorizontalLouvres(0.3, 3, 0.0);
+            List<ShadingElement> elements = device.ShadingElements(scenario.Target);
+            SolarAttributionCache complete = Attribution(scenario.BaseCache, elements, scenario.Target.AnalysisCells, 0, null);
+
+            foreach (bool[] wrong in new bool[][] { new bool[binCount - 1], new bool[binCount + 1], new bool[0] })
+            {
+                Assert.Null(ScoreMasked(
+                    scenario.Target, scenario.BaseCache, complete, scenario.Desirability, elements, device, wrong));
+            }
+
+            // A correctly sized mask is still accepted — including the all-inactive extreme, which
+            // scores a real (fully pruned) performance rather than failing.
+            Assert.NotNull(ScoreMasked(
+                scenario.Target, scenario.BaseCache, complete, scenario.Desirability, elements, device, new bool[binCount]));
         }
 
         [Fact]
