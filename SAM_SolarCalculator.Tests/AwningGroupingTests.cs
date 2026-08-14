@@ -282,5 +282,69 @@ namespace SAM.SolarCalculator.Tests
             Assert.Equal(group.Width, reloaded.Width, 9);
             Assert.Equal(group.TotalGrossArea, reloaded.TotalGrossArea, 9);
         }
+
+        // ------------------------------------------- envelopes measured over every member ----
+
+        /// <summary>
+        /// The width of a run is the envelope of ALL its members, not the span from the first
+        /// member's left edge to the last one's right edge.
+        ///
+        /// Members are sorted by LEFT edge, and that does not make the last one the rightmost: a
+        /// wide aperture followed by a narrow one that sits within its span puts the widest member
+        /// first. Reading the width off the ends of the list then understates it — the one
+        /// direction that matters, because an understated width is what lets a unit the product
+        /// cannot supply pass the maximum-width check and be reported as buildable.
+        /// </summary>
+        [Fact]
+        public void Group_Width_Is_The_Envelope_Of_Every_Member_Not_The_Span_Of_The_End_Ones()
+        {
+            // A spans 0.0-4.0 m; B sits inside it at 1.0-2.0 m. Sorted by left edge, A is first and
+            // B is last, so "last.MaxX - first.MinX" would report 2.0 m for a 4.0 m envelope.
+            ApertureSolarTarget a = Aperture(PanelA, G(1), 0.0, 4.0, 1.0, 2.25);
+            ApertureSolarTarget b = Aperture(PanelA, G(2), 1.0, 1.0, 1.0, 2.25);
+
+            List<ApertureShadingGroup> groups = new List<ApertureSolarTarget> { a, b }.ApertureShadingGroups();
+
+            Assert.Single(groups);
+            Assert.Equal(4.0, groups[0].Width, 9);
+        }
+
+        /// <summary>
+        /// The width test that decides whether a run must be SPLIT is measured over every member
+        /// too, and this is where getting it wrong actually escapes: the group's own envelope is
+        /// computed correctly, so a run wrongly judged narrow enough is returned as one group whose
+        /// reported width is beyond anything the product can supply.
+        ///
+        /// Nothing stops a model handing over apertures whose boundaries overlap — duplicated or
+        /// mis-modelled openings, curtain-wall panels carrying nested aperture boundaries — and the
+        /// ordering only has to be unlucky once: sorted by left edge, the member reaching furthest
+        /// right need not be last.
+        /// </summary>
+        [Fact]
+        public void An_Over_Wide_Run_Is_Split_Even_When_Its_Last_Member_Is_Not_Its_Rightmost()
+        {
+            // A spans 0.0-3.0 m, B spans 2.9-6.5 m, C sits inside B at 3.0-3.5 m. Sorted by left
+            // edge the order is A, B, C — so the LAST member reaches only 3.5 m while the run truly
+            // reaches 6.5 m. Reading the ends gives 3.5 m, comfortably inside the 6.0 m product, and
+            // the whole 6.5 m run is returned as one buildable unit. No single member is oversized
+            // on its own, so the split is genuinely required rather than merely reported.
+            ApertureSolarTarget a = Aperture(PanelA, G(1), 0.0, 3.0, 1.0, 2.25);
+            ApertureSolarTarget b = Aperture(PanelA, G(2), 2.9, 3.6, 1.0, 2.25);
+            ApertureSolarTarget c = Aperture(PanelA, G(3), 3.0, 0.5, 1.0, 2.25);
+
+            List<ApertureShadingGroup> groups = new List<ApertureSolarTarget> { a, b, c }.ApertureShadingGroups();
+
+            Assert.True(groups.Count > 1, "a 6.5 m envelope cannot be supplied as one 6.0 m unit");
+            foreach (ApertureShadingGroup group in groups)
+            {
+                Assert.True(group.Width <= AwningSpecification.Dakar.MaximumWidth + 1e-9,
+                    $"group {group.GroupGuid} is {group.Width:0.###} m wide, beyond the {AwningSpecification.Dakar.MaximumWidth:0.#} m product maximum");
+            }
+
+            // Every aperture still belongs to exactly one unit: a split must not drop a window.
+            List<Guid> placed = groups.SelectMany(x => x.ApertureGuids).ToList();
+            Assert.Equal(3, placed.Count);
+            Assert.Equal(new HashSet<Guid> { G(1), G(2), G(3) }, new HashSet<Guid>(placed));
+        }
     }
 }

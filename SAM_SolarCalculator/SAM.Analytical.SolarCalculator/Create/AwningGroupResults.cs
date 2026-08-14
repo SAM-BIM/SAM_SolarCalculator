@@ -82,28 +82,12 @@ namespace SAM.Analytical.SolarCalculator
                 return null;
             }
 
-            // Static fixed-value validation first: these are properties of the request alone.
-            if (projection.HasValue && !specification.IsProjectionAllowed(projection.Value))
+            // Static fixed-value validation first: these are properties of the request alone, so
+            // they are settled before a solar context is paid for. The SAME check runs again inside
+            // Optimise.RetractableAwningGroup — that method is public in its own right and must not
+            // depend on this one having been called — and both refuse in the same words.
+            if (!Optimise.ValidAwningInputs(specification, projection, tiltDegrees, riseAboveHead, extensionBeyondJambs, valanceDepth, out message))
             {
-                message = string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                    "The requested projection {0:0.###} m is not an allowed {1} projection. Allowed nominal projections are {2} m.",
-                    projection.Value, specification.Name, string.Join(", ", specification.AllowedProjections.ConvertAll(x => x.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))));
-                return null;
-            }
-
-            if (tiltDegrees.HasValue && (tiltDegrees.Value < specification.MinimumTiltDegrees || tiltDegrees.Value > specification.MaximumTiltDegrees))
-            {
-                message = string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                    "The requested tilt {0:0.#}° is outside the {1} tilt range of {2:0.#}° to {3:0.#}°. Leave _tiltDegrees_ empty to let the analysis select the tilt.",
-                    tiltDegrees.Value, specification.Name, specification.MinimumTiltDegrees, specification.MaximumTiltDegrees);
-                return null;
-            }
-
-            if (valanceDepth.HasValue && !specification.IsValidValanceDepth(valanceDepth.Value))
-            {
-                message = string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                    "The requested valance depth {0:0.###} m is not supported: {1} valances are either 0 or the standard {2:0.##} m.",
-                    valanceDepth.Value, specification.Name, specification.StandardValanceDepth);
                 return null;
             }
 

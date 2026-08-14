@@ -177,6 +177,7 @@ namespace SAM.Analytical.SolarCalculator
             List<List<Member>> runs = new List<List<Member>>();
             List<Member> current = new List<Member>();
             double headMax = double.NaN;
+            double runMaxX = double.NaN;
 
             foreach (Member member in members)
             {
@@ -184,20 +185,26 @@ namespace SAM.Analytical.SolarCalculator
                 {
                     current.Add(member);
                     headMax = member.MaxY;
+                    runMaxX = member.MaxX;
                     continue;
                 }
 
-                double gap = member.MinX - current[current.Count - 1].MaxX;
+                // The gap is measured from the run's RIGHTMOST edge so far, not from the previously
+                // added member's: sorting is by left edge, so the last member added is not
+                // necessarily the one that reaches furthest right.
+                double gap = member.MinX - runMaxX;
                 if (gap > maximumGap || Math.Abs(member.MaxY - headMax) > headTolerance)
                 {
                     runs.Add(current);
                     current = new List<Member> { member };
                     headMax = member.MaxY;
+                    runMaxX = member.MaxX;
                     continue;
                 }
 
                 current.Add(member);
                 headMax = Math.Max(headMax, member.MaxY);
+                runMaxX = Math.Max(runMaxX, member.MaxX);
             }
 
             if (current.Count != 0)
@@ -233,9 +240,12 @@ namespace SAM.Analytical.SolarCalculator
             // Preferred split: the largest gap, if both sides stay within the product width.
             int largestGapIndex = -1;
             double largestGap = double.NegativeInfinity;
+            double leftMaxX = double.NegativeInfinity;
             for (int i = 0; i < run.Count - 1; i++)
             {
-                double gap = run[i + 1].MinX - run[i].MaxX;
+                // Again measured from everything to the left, not from the immediate predecessor.
+                leftMaxX = Math.Max(leftMaxX, run[i].MaxX);
+                double gap = run[i + 1].MinX - leftMaxX;
                 if (gap > largestGap)
                 {
                     largestGap = gap;
@@ -286,10 +296,26 @@ namespace SAM.Analytical.SolarCalculator
             return greedy;
         }
 
+        /// <summary>
+        /// The awning width a set of members needs: their combined envelope plus both extensions.
+        ///
+        /// The extremes are taken over EVERY member, not off the ends of the list. Members are
+        /// sorted by their left edge, which does not make the last one the rightmost: one aperture
+        /// horizontally containing another would put the wider one first and the envelope would be
+        /// measured short — understating the width is exactly the direction that lets an oversized
+        /// unit pass the product check.
+        /// </summary>
         private static double Width(List<Member> members, double extensionBeyondJambs)
         {
-            double width = members[members.Count - 1].MaxX - members[0].MinX;
-            return width + 2.0 * extensionBeyondJambs;
+            double minX = double.PositiveInfinity;
+            double maxX = double.NegativeInfinity;
+            foreach (Member member in members)
+            {
+                minX = Math.Min(minX, member.MinX);
+                maxX = Math.Max(maxX, member.MaxX);
+            }
+
+            return maxX - minX + 2.0 * extensionBeyondJambs;
         }
 
         private static ApertureShadingGroup Build(Guid panelGuid, List<Member> members, double extensionBeyondJambs)

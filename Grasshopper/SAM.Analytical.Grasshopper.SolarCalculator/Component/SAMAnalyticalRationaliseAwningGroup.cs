@@ -417,7 +417,11 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             index = Params.IndexOfOutputParam("groupedShadingDevices");
             if (index != -1)
             {
-                dataAccess.SetDataList(index, results.ConvertAll(x => new GooSAMObject(x)));
+                // The DEVICE, not the whole result: this output is declared as one grouped shading
+                // device per group, and the single-aperture component's shadingDevice output means
+                // the same thing. Emitting the result object here would give downstream nodes
+                // something that is not a device on a socket that promises one.
+                dataAccess.SetDataList(index, results.ConvertAll(x => x?.Device == null ? null : new GooSAMObject(x.Device)));
             }
 
             index = Params.IndexOfOutputParam("shadingGeometry");
