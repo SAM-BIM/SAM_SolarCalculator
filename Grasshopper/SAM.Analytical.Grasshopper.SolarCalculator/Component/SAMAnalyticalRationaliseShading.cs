@@ -39,8 +39,12 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// penalties refuse negative values outright and remark on extreme ones. benefit / harm are
         /// renamed unwantedSolarIntercepted / wantedSolarBlocked, and neutralSolarIntercepted is
         /// added so the three parts sum to what the device stops.
+        ///
+        /// 1.0.3 — a warning is raised when the winning device's element count sits exactly on the
+        /// analysis-grid resolution cap: the grid may have limited the count and it should be
+        /// confirmed on a finer grid. Nothing else changes — the search itself is untouched.
         /// </summary>
-        public override string LatestComponentVersion => "1.0.2";
+        public override string LatestComponentVersion => "1.0.3";
 
         /// <summary>
         /// Provides an Icon for the component.
@@ -554,6 +558,20 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, "No device beats leaving this window unshaded. That is a successful answer, not a failure: shadingDevice carries the null device so it can be verified, and the least-bad candidate is on bestCandidateDevice so the recommendation can be checked rather than taken on trust.");
             }
 
+            // Distinct from the spacing warning above: a winner whose element count sits exactly on
+            // the grid-resolution cap may have been stopped by the grid rather than by the design.
+            // Checked only for the RECOMMENDED device — a rejected candidate riding the cap is not a
+            // recommendation and does not need the reader's attention.
+            bool gridResolutionCapReached = false;
+            if (optimise && optimisedResults.Count != 0 && best != null && !recommendsNoShading)
+            {
+                gridResolutionCapReached = SolarQuery.GridResolutionCapReached(optimisedResults[0], out string capMessage);
+                if (gridResolutionCapReached)
+                {
+                    AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, capMessage);
+                }
+            }
+
             // The RECOMMENDATION and the DIAGNOSTIC are different things and are kept on different
             // wires. Handing the least-bad candidate out as "the device" is how a rejected design
             // ends up built.
@@ -591,6 +609,13 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 ShadingDesignStatus status = optimise && optimisedResults.Count != 0
                     ? SolarQuery.DesignStatus(optimisedResults[0], resolutionState)
                     : (resolutionState == ShadingResolutionState.Resolved ? ShadingDesignStatus.Ok : ShadingDesignStatus.Warning);
+
+                // A device that rode the grid-resolution cap is a "check before building" answer
+                // too. NO SHADE still outranks: it is only promoted when a device is recommended.
+                if (status == ShadingDesignStatus.Ok && gridResolutionCapReached)
+                {
+                    status = ShadingDesignStatus.Warning;
+                }
 
                 dataAccess.SetData(index, SolarQuery.StatusText(status));
             }

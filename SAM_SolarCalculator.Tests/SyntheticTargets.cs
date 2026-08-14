@@ -32,6 +32,16 @@ namespace SAM.SolarCalculator.Tests
         /// <summary>A square face of the given size, centred at centre, with its plane normal = outward.</summary>
         public static Face3D Face(Vector3D outward, Point3D centre = null, double size = 1.0)
         {
+            return Face(outward, centre, size, size);
+        }
+
+        /// <summary>
+        /// A rectangular face of the given width and height, centred at centre, with its plane
+        /// normal = outward. Width runs along the local X axis (horizontal for a vertical window),
+        /// height along the local Y axis (up-slope).
+        /// </summary>
+        public static Face3D Face(Vector3D outward, Point3D centre, double width, double height)
+        {
             Vector3D normal = outward.Unit;
             centre = centre ?? new Point3D(0, 0, 5);
 
@@ -39,13 +49,14 @@ namespace SAM.SolarCalculator.Tests
             axisX = axisX == null || axisX.Length < 1e-9 ? Vector3D.WorldX : axisX.Unit;
             Vector3D axisY = normal.CrossProduct(axisX).Unit;
 
-            double half = size / 2.0;
+            double halfX = width / 2.0;
+            double halfY = height / 2.0;
             Face3D result = new Face3D(new Polygon3D(new List<Point3D>
             {
-                Corner(centre, axisX, axisY, -half, -half),
-                Corner(centre, axisX, axisY, half, -half),
-                Corner(centre, axisX, axisY, half, half),
-                Corner(centre, axisX, axisY, -half, half),
+                Corner(centre, axisX, axisY, -halfX, -halfY),
+                Corner(centre, axisX, axisY, halfX, -halfY),
+                Corner(centre, axisX, axisY, halfX, halfY),
+                Corner(centre, axisX, axisY, -halfX, halfY),
             }));
 
             Plane plane = result.GetPlane();

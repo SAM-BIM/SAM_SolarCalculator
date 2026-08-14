@@ -551,6 +551,44 @@ finer device" a true instruction — it just no longer comes with a warning atta
 The 0.05 m row is the manual test's `Count 11` — the same device, now correctly reported as resolved,
 because at that grid the analysis really can see it.
 
+### Grid-resolution guidance *(PR 2)*
+
+The Kołobrzeg office convergence study added a second, aperture-level resolution finding: a
+plausible-looking shading recommendation can be a **coarse-grid sampling artefact**. The smallest
+fixture aperture (0.60 × 1.39 m) recommended a very thin single vertical fin with ~87.9 % blocking at
+the default 0.5 m grid, and ~0 % blocking at 0.3 / 0.25 / 0.2 m — where the recommended family also
+changed to HorizontalLouvres. The same study showed 0.5 m is adequate for some larger apertures, that
+one universal correct grid does not exist, and that geometry alone cannot guarantee convergence.
+
+PR 2 therefore adds **guidance, not enforcement** — the engineer's `_gridSize_` remains authoritative
+and nothing changes it:
+
+* `ApertureSolarTargets` gains a `recommendedGridSize` output:
+
+  `recommendedGridSize = min(DesignGradeGridSize, shortestSideOfSmallestAperture / 2)`,
+
+  clamped up to the existing `MinimumGridSize`. `DesignGradeGridSize = 0.25 m` is a **named internal
+  constant**, an empirical design-grade guidance value from the Gate-4
+  design-resolution evidence and the Kołobrzeg study — **not** a universal physical constant and **not**
+  a claim that 0.25 m guarantees convergence. One shared number is calculated for the whole selected
+  aperture set, governed by the smallest aperture, so a single grid stays valid for the whole workflow.
+* When `_gridSize_` is coarser than the recommendation, the node raises a **Warning**: *the selected
+  analysis grid is coarser than the recommended grid size… shading geometry may be under-resolved… this
+  is guidance, not a requirement: the calculation continues at your grid size, and the recommendation
+  does not guarantee convergence — confirm by re-running at a finer grid and comparing.* The message
+  deliberately does **not** say the result is wrong.
+* `RationaliseShading` raises a separate **Warning** when the winning device's element count sits
+  exactly on the **analysis-grid resolution cap** — i.e. only when the cap genuinely narrowed the
+  typology's own maximum **and** the winner equals that narrowed maximum. A winner at an independent
+  typology maximum, or below the cap, carries nothing. `status` becomes WARNING in this case.
+
+**Recorded follow-up — the single-element blind spot.** `Query.ShadingResolution` treats a device with
+a single repeated element as resolved because there is no pitch to evaluate. The Kołobrzeg study found
+exactly such a single-element case (one thin fin) was a coarse-grid artefact, but the evidence is not
+yet sufficient to define an element-extent resolution rule robustly. Until it is, the coarse-grid
+recommendation warning above covers the aperture-level risk and the cap warning covers grid-limited
+optimisation outputs; a single-element extent rule is deferred deliberately, not silently omitted.
+
 ---
 
 ## 11. Display geometry is not performance geometry
