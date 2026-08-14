@@ -27,8 +27,13 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// quantities a user has to keep straight are the SPACING between sample points (_gridSize_,
         /// in metres) and the NUMBER of them on the opening, and the output now says which it is.
         /// The name is not "gridCount": that would read as a count of grids.
+        ///
+        /// 1.0.2 — added recommendedGridSize, the grid-resolution guidance for the selected
+        /// apertures, with a warning when _gridSize_ is coarser than it. The recommendation is
+        /// guidance, not a requirement: it never changes the supplied grid, and it does not
+        /// guarantee convergence.
         /// </summary>
-        public override string LatestComponentVersion => "1.0.1";
+        public override string LatestComponentVersion => "1.0.2";
 
         /// <summary>
         /// Provides an Icon for the component.
@@ -39,7 +44,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
 
         public SAMAnalyticalApertureSolarTargets()
           : base("SAMAnalytical.ApertureSolarTargets", "SAMAnalytical.ApertureSolarTargets",
-              "SUMMARY\nPicks the windows and doors that can receive sun and prepares each one for solar analysis: the opening face with its OUTWARD direction resolved from the model's adjacency (never trusted to the way the surface happens to be drawn), its orientation, and the grid of sample points the calculation uses.\n\nThis is the first node of the shading workflow. The shading-design nodes use the apertureSolarTarget; ApertureIrradiance uses the corresponding apertureGuid to select the same aperture.\n\nINPUTS\n  _analyticalModel — the SAM Analytical Model.\n  _apertures_ — the apertures to analyse, as SAM Apertures or their Guids. LEAVE EMPTY for every external sun-exposed aperture in the model.\n  _gridSize_ — SPACING between the sample points across each opening, m. Default 0.5 m. It sets the finest shading detail the analysis can resolve, so keep the same value for the whole workflow.\n\nGRIDSIZE VS SAMPLEPOINTCOUNT. GridSize is a DISTANCE in metres: how far apart the analysis samples the opening. samplePointCount is a COUNT: how many sample locations that spacing produced on that opening. Halving GridSize roughly quadruples samplePointCount, and the run gets slower in proportion.\n\nOUTPUTS\n  apertureSolarTargets — one target per analysed aperture. Wire into ShadingPotentialField, RationaliseShading and VerifyShading; feed the apertureGuids output into ApertureIrradiance's _apertures_ input.\n  apertureGuids — the aperture identity behind each target.\n  azimuths — compass direction each opening faces, degrees (0 north, 90 east, 180 south, 270 west).\n  tilts — angle from horizontal, degrees (90 = vertical window).\n  areas — gross opening area, m².\n  samplePointCounts — number of analysis sample locations on each opening.\n  gridSize — the grid size used, so downstream nodes can be wired from it rather than retyped.\n  count — number of targets.\n\nMULTIPLE WINDOWS\nThis node emits a LIST of targets, and every shading-design node downstream takes ONE target. Grasshopper therefore runs them once per target and keeps each aperture's results in its own branch — you do not need to graft anything for the ordinary 'analyse these ten windows' case. Each result carries its own apertureGuid and azimuth so a batch stays readable.\n\nNOTES\nApertures in internal walls are never analysed: they receive no direct sun and any result would be meaningless. If one is asked for by name it is reported, not silently dropped.\nAn aperture too small to hold a single sample point at the chosen grid produces no target; reduce _gridSize_ if you need it.\n\nEXAMPLE\nAnalyticalModel → ApertureSolarTargets (leave _apertures_ empty) → ApertureIrradiance, wiring ApertureSolarTargets' apertureGuids output into ApertureIrradiance's _apertures_ input. Check the azimuths against the model before running anything expensive.",
+              "SUMMARY\nPicks the windows and doors that can receive sun and prepares each one for solar analysis: the opening face with its OUTWARD direction resolved from the model's adjacency (never trusted to the way the surface happens to be drawn), its orientation, and the grid of sample points the calculation uses.\n\nThis is the first node of the shading workflow. The shading-design nodes use the apertureSolarTarget; ApertureIrradiance uses the corresponding apertureGuid to select the same aperture.\n\nINPUTS\n  _analyticalModel — the SAM Analytical Model.\n  _apertures_ — the apertures to analyse, as SAM Apertures or their Guids. LEAVE EMPTY for every external sun-exposed aperture in the model.\n  _gridSize_ — SPACING between the sample points across each opening, m. Default 0.5 m. It sets the finest shading detail the analysis can resolve, so keep the same value for the whole workflow.\n\nGRIDSIZE VS SAMPLEPOINTCOUNT. GridSize is a DISTANCE in metres: how far apart the analysis samples the opening. samplePointCount is a COUNT: how many sample locations that spacing produced on that opening. Halving GridSize roughly quadruples samplePointCount, and the run gets slower in proportion.\n\nOUTPUTS\n  apertureSolarTargets — one target per analysed aperture. Wire into ShadingPotentialField, RationaliseShading and VerifyShading; feed the apertureGuids output into ApertureIrradiance's _apertures_ input.\n  apertureGuids — the aperture identity behind each target.\n  azimuths — compass direction each opening faces, degrees (0 north, 90 east, 180 south, 270 west).\n  tilts — angle from horizontal, degrees (90 = vertical window).\n  areas — gross opening area, m².\n  samplePointCounts — number of analysis sample locations on each opening.\n  gridSize — the grid size used, so downstream nodes can be wired from it rather than retyped.\n  recommendedGridSize — the grid-resolution guidance for these apertures, when _gridSize_ is coarser than it a warning appears on this node. GUIDANCE, NOT A REQUIREMENT: the calculation keeps _gridSize_ as supplied.\n  count — number of targets.\n\nMULTIPLE WINDOWS\nThis node emits a LIST of targets, and every shading-design node downstream takes ONE target. Grasshopper therefore runs them once per target and keeps each aperture's results in its own branch — you do not need to graft anything for the ordinary 'analyse these ten windows' case. Each result carries its own apertureGuid and azimuth so a batch stays readable.\n\nNOTES\nApertures in internal walls are never analysed: they receive no direct sun and any result would be meaningless. If one is asked for by name it is reported, not silently dropped.\nAn aperture too small to hold a single sample point at the chosen grid produces no target; reduce _gridSize_ if you need it.\n\nEXAMPLE\nAnalyticalModel → ApertureSolarTargets (leave _apertures_ empty) → ApertureIrradiance, wiring ApertureSolarTargets' apertureGuids output into ApertureIrradiance's _apertures_ input. Check the azimuths against the model before running anything expensive.",
               "SAM", "Solar")
         {
         }
@@ -74,6 +79,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "areas", NickName = "areas", Description = "Gross opening area [m²]", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Integer() { Name = "samplePointCounts", NickName = "samplePointCounts", Description = "Number of analysis sample locations on each opening.\nTheir SPACING is _gridSize_ [m]", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "gridSize", NickName = "gridSize", Description = "The analysis grid size used [m]", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "recommendedGridSize", NickName = "recommendedGridSize", Description = "Recommended analysis grid size for the selected apertures [m] — the finer of the design-grade resolution guidance (0.25 m) and half the shortest side of the smallest selected aperture, never below the smallest usable grid.\n\nGUIDANCE, NOT A REQUIREMENT: the calculation uses _gridSize_ as supplied and this output never changes it. It does not guarantee convergence — confirm by re-running at a finer grid and comparing.", Access = GH_ParamAccess.item }, ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Integer() { Name = "count", NickName = "count", Description = "Number of targets", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 return result.ToArray();
             }
@@ -222,6 +228,15 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                     gridSize, 100.0 * worstCoverage, worstTarget.SampledArea, worstTarget.GrossArea, 100.0 * (1.0 - worstCoverage)));
             }
 
+            // Grid-resolution guidance for the SELECTED aperture set. One shared number, from the
+            // governing (smallest) aperture, so a single grid stays valid for the whole workflow.
+            // It never changes the calculation: a coarse grid keeps running and simply warns.
+            double recommendedGridSize = SolarQuery.RecommendedGridSize(targets);
+            if (!double.IsNaN(recommendedGridSize) && SolarQuery.CoarserThanRecommended(gridSize, recommendedGridSize, out string coarseMessage))
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, coarseMessage);
+            }
+
             index = Params.IndexOfOutputParam("apertureSolarTargets");
             if (index != -1)
             {
@@ -269,6 +284,12 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             if (index != -1)
             {
                 dataAccess.SetData(index, gridSize);
+            }
+
+            index = Params.IndexOfOutputParam("recommendedGridSize");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, recommendedGridSize);
             }
 
             index = Params.IndexOfOutputParam("count");
