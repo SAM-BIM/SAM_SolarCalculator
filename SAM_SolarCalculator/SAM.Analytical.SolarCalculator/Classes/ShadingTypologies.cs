@@ -393,6 +393,12 @@ namespace SAM.Analytical.SolarCalculator
     /// Projection x tan(tilt) at the front edge; the sloping fabric length Projection / cos(tilt) is
     /// reflected automatically by the quad area and must never be substituted for the projection.
     ///
+    /// MOUNTINGOFFSET is the horizontal outward distance from the aperture plane to the awning rear
+    /// mounting line. It is a project/building placement input (a recessed aperture whose awning is
+    /// mounted on the external facade or soffit), not a product limit: the rear canopy edge sits at
+    /// z = MountingOffset and the front bar at z = MountingOffset + Projection, moving the whole
+    /// deployed awning outward without changing its product projection, drop or valance.
+    ///
     /// THE FABRIC IS OPAQUE AND ZERO-THICKNESS, exactly like every other family here: the ray engine
     /// answers "blocked or not blocked". Deployment scheduling, automatic retraction, fabric solar
     /// transmittance, diffuse transmission, reflection, wind control and structural capacity are NOT
@@ -410,13 +416,28 @@ namespace SAM.Analytical.SolarCalculator
         {
         }
 
+        /// <summary>
+        /// The original five-parameter constructor, retained exactly so callers compiled against the
+        /// pre-mounting-offset signature keep resolving without recompilation. It forwards to the
+        /// six-parameter overload with MountingOffset = 0.0.
+        /// </summary>
         public RetractableAwning(double projection, double tiltDegrees = 15.0, double riseAboveHead = 0.0, double extensionBeyondJambs = 0.0, double valanceDepth = 0.0)
+            : this(projection, tiltDegrees, riseAboveHead, extensionBeyondJambs, valanceDepth, 0.0)
+        {
+        }
+
+        public RetractableAwning(double projection, double tiltDegrees, double riseAboveHead, double extensionBeyondJambs, double valanceDepth, double mountingOffset)
         {
             Define("Projection", projection, 1.6, 3.6);
             Define("TiltDegrees", tiltDegrees, 5.0, 40.0);
             Define("RiseAboveHead", riseAboveHead, 0.0, 1.0);
             Define("ExtensionBeyondJambs", extensionBeyondJambs, 0.0, 1.0);
             Define("ValanceDepth", valanceDepth, 0.0, 0.21);
+            // MountingOffset is a project/building placement input, not a product limit: the awning
+            // may be mounted any finite, non-negative distance outward from the aperture plane. The
+            // upper bound is deliberately not a product restriction; the public API refuses negative,
+            // NaN and infinite values instead of clamping them (see Optimise.ValidAwningInputs).
+            Define("MountingOffset", mountingOffset, 0.0, double.MaxValue);
         }
 
         public override string Name { get { return "RetractableAwning"; } }
@@ -448,6 +469,14 @@ namespace SAM.Analytical.SolarCalculator
             double rise = GetParameter("RiseAboveHead");
             double extension = GetParameter("ExtensionBeyondJambs");
             double valance = GetParameter("ValanceDepth");
+            double offset = GetParameter("MountingOffset");
+
+            // Projection stays the HORIZONTAL reach from the mounting line to the front bar. The
+            // mounting line itself sits MountingOffset outward of the aperture plane, so the rear
+            // canopy edge is at z = MountingOffset and the front bar at z = MountingOffset + Projection.
+            // The vertical drop Projection x tan(tilt) is unchanged.
+            double rearZ = offset;
+            double frontZ = offset + projection;
 
             double drop = projection * Math.Tan(tilt);
             double x0 = minX - extension;
@@ -459,10 +488,10 @@ namespace SAM.Analytical.SolarCalculator
 
             Face3D canopy = Quad(plane, new double[][]
             {
-                new double[] { x0, y0, 0 },
-                new double[] { x1, y0, 0 },
-                new double[] { x1, y1, projection },
-                new double[] { x0, y1, projection },
+                new double[] { x0, y0, rearZ },
+                new double[] { x1, y0, rearZ },
+                new double[] { x1, y1, frontZ },
+                new double[] { x0, y1, frontZ },
             });
 
             result.Add(new ShadingElement(ElementGuid(0), "RetractableAwning_Canopy", canopy));
@@ -471,10 +500,10 @@ namespace SAM.Analytical.SolarCalculator
             {
                 Face3D valanceFace = Quad(plane, new double[][]
                 {
-                    new double[] { x0, y1, projection },
-                    new double[] { x1, y1, projection },
-                    new double[] { x1, y1 - valance, projection },
-                    new double[] { x0, y1 - valance, projection },
+                    new double[] { x0, y1, frontZ },
+                    new double[] { x1, y1, frontZ },
+                    new double[] { x1, y1 - valance, frontZ },
+                    new double[] { x0, y1 - valance, frontZ },
                 });
 
                 result.Add(new ShadingElement(ElementGuid(1), "RetractableAwning_Valance", valanceFace));

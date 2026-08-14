@@ -140,6 +140,15 @@ namespace SAM.Analytical.SolarCalculator
                     continue;
                 }
 
+                // MountingOffset is a fixed project/building placement input, never a search
+                // variable: it is not swept by Stage 9, so it must not appear in the variable
+                // lattice (its declared upper bound is deliberately not a product restriction and
+                // would otherwise be swept as an unbounded axis).
+                if (name == "MountingOffset")
+                {
+                    continue;
+                }
+
                 double step;
                 switch (name)
                 {

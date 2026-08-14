@@ -194,6 +194,105 @@ namespace SAM.SolarCalculator.Tests
                 plane.Origin.Z + x * plane.AxisX.Z + y * plane.AxisY.Z + z * plane.Normal.Z);
         }
 
+        // -------------------------------------------------------------- mounting offset ----
+
+        [Fact]
+        public void Zero_Mounting_Offset_Keeps_The_Awning_Anchored_To_The_Aperture_Plane()
+        {
+            // Backward compatibility: MountingOffset 0.0 must reproduce the original facade-anchored
+            // geometry — rear edge at z = 0, front bar at z = projection.
+            ApertureSolarTarget target = Target();
+            double projection = 2.6;
+            double tilt = 15.0;
+
+            RetractableAwning awning = new RetractableAwning(projection, tilt, 0.0, 0.0, 0.0); // offset defaults to 0
+            List<ShadingElement> elements = awning.ShadingElements(target);
+            Face3D canopy = elements[0].Face3D;
+
+            Assert.True(Analytical.SolarCalculator.Query.TryGetApertureLocalBounds(target, out double minX, out double maxX, out double _, out double maxY));
+            double drop = projection * Math.Tan(tilt * Math.PI / 180.0);
+
+            Assert.True(canopy.InRange(Point(target.Plane, minX, maxY, 0.0), 1e-6), "rear-left corner at the facade");
+            Assert.True(canopy.InRange(Point(target.Plane, maxX, maxY, 0.0), 1e-6), "rear-right corner at the facade");
+            Assert.True(canopy.InRange(Point(target.Plane, maxX, maxY - drop, projection), 1e-6), "front-right corner at the horizontal projection");
+            Assert.True(canopy.InRange(Point(target.Plane, minX, maxY - drop, projection), 1e-6), "front-left corner at the horizontal projection");
+        }
+
+        [Fact]
+        public void Mounting_Offset_Moves_The_Whole_Awning_Outward_Without_Changing_Projection()
+        {
+            // Rear canopy edge at z = MountingOffset, front bar at z = MountingOffset + Projection.
+            // The product projection (horizontal reach) is the difference, never the aperture-plane
+            // distance, and the vertical drop Projection x tan(tilt) is unchanged.
+            ApertureSolarTarget target = Target();
+            double projection = 2.6;
+            double tilt = 15.0;
+            double offset = 0.35;
+
+            RetractableAwning awning = new RetractableAwning(projection, tilt, 0.0, 0.0, 0.0, offset);
+            List<ShadingElement> elements = awning.ShadingElements(target);
+            Face3D canopy = elements[0].Face3D;
+
+            Assert.True(Analytical.SolarCalculator.Query.TryGetApertureLocalBounds(target, out double minX, out double maxX, out double _, out double maxY));
+            double drop = projection * Math.Tan(tilt * Math.PI / 180.0);
+            double rearZ = offset;
+            double frontZ = offset + projection;
+
+            Assert.True(canopy.InRange(Point(target.Plane, minX, maxY, rearZ), 1e-6), "rear-left corner at the mounting offset");
+            Assert.True(canopy.InRange(Point(target.Plane, maxX, maxY, rearZ), 1e-6), "rear-right corner at the mounting offset");
+            Assert.True(canopy.InRange(Point(target.Plane, maxX, maxY - drop, frontZ), 1e-6), "front-right corner at offset + projection");
+            Assert.True(canopy.InRange(Point(target.Plane, minX, maxY - drop, frontZ), 1e-6), "front-left corner at offset + projection");
+
+            Assert.Equal(projection, frontZ - rearZ, 12);
+        }
+
+        [Fact]
+        public void Valance_Sits_At_The_Front_Bar_Of_The_Mounting_Offset()
+        {
+            ApertureSolarTarget target = Target();
+            double projection = 2.6;
+            double tilt = 15.0;
+            double valance = 0.21;
+            double offset = 0.35;
+
+            RetractableAwning awning = new RetractableAwning(projection, tilt, 0.0, 0.0, valance, offset);
+            List<ShadingElement> elements = awning.ShadingElements(target);
+            Assert.Equal(2, elements.Count);
+            Face3D valanceFace = elements[1].Face3D;
+
+            Assert.True(Analytical.SolarCalculator.Query.TryGetApertureLocalBounds(target, out double minX, out double maxX, out double _, out double maxY));
+            double drop = projection * Math.Tan(tilt * Math.PI / 180.0);
+            double frontZ = offset + projection;
+
+            // The valance hangs from the front bar, so it sits at z = MountingOffset + Projection.
+            Assert.True(valanceFace.InRange(Point(target.Plane, minX, maxY - drop, frontZ), 1e-6));
+            Assert.True(valanceFace.InRange(Point(target.Plane, maxX, maxY - drop, frontZ), 1e-6));
+            Assert.True(valanceFace.InRange(Point(target.Plane, maxX, maxY - drop - valance, frontZ), 1e-6));
+            Assert.True(valanceFace.InRange(Point(target.Plane, minX, maxY - drop - valance, frontZ), 1e-6));
+        }
+
+        [Fact]
+        public void Mounting_Offset_Changes_The_Element_Identity()
+        {
+            // The element GUID scheme hashes every parameter, so two otherwise identical awnings at
+            // different mounting offsets must never share geometry identity.
+            ApertureSolarTarget target = Target();
+            RetractableAwning atFacade = new RetractableAwning(2.6, 15.0, 0.0, 0.0, 0.0, 0.0);
+            RetractableAwning recessed = new RetractableAwning(2.6, 15.0, 0.0, 0.0, 0.0, 0.35);
+
+            Assert.NotEqual(Guids(atFacade.ShadingElements(target)), Guids(recessed.ShadingElements(target)));
+        }
+
+        [Fact]
+        public void Json_Round_Trip_Preserves_A_Non_Zero_Mounting_Offset()
+        {
+            RetractableAwning awning = new RetractableAwning(2.6, 22.0, 0.1, 0.15, 0.21, 0.35);
+
+            IShadingTypology reloaded = Core.Create.IJSAMObject<IShadingTypology>(awning.ToJsonObject().ToJsonString());
+            Assert.IsType<RetractableAwning>(reloaded);
+            Assert.Equal(0.35, reloaded.GetParameter("MountingOffset"), 12);
+        }
+
         [Fact]
         public void Material_Area_Equals_Canopy_Plus_Optional_Valance()
         {

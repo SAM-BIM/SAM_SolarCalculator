@@ -71,6 +71,66 @@ namespace SAM.Analytical.SolarCalculator
             ShadingObjective objective = null,
             int maximumEvaluations = 400)
         {
+            return AwningGroupResults(
+                analyticalModel, apertureGuids, year, out message, out reusedPreviousCalculation,
+                weatherData, desirabilityStrategy, unwantedPeriod, wantedPeriod, specification,
+                projection, tiltDegrees, riseAboveHead, extensionBeyondJambs, valanceDepth,
+                maximumGap, headTolerance, gridSize, sunAngleStep, recalculate, objective, maximumEvaluations,
+                mountingOffset: 0.0);
+        }
+
+        /// <summary>
+        /// The mounting-offset overload. The original twenty-two-parameter signature above is retained
+        /// exactly for binary compatibility and forwards here with MountingOffset = 0.0.
+        /// </summary>
+        /// <param name="analyticalModel">The model.</param>
+        /// <param name="apertureGuids">The apertures one or more awnings may span. Empty selection returns null.</param>
+        /// <param name="year">Requested analysis year; resolved against the weather.</param>
+        /// <param name="message">Null on success; an actionable sentence otherwise.</param>
+        /// <param name="reusedPreviousCalculation">True when no ray casting was needed to set up.</param>
+        /// <param name="weatherData">Weather. Null = the weather attached to the model.</param>
+        /// <param name="desirabilityStrategy">Explicit weighting. Wins over the periods when supplied.</param>
+        /// <param name="unwantedPeriod">Hours whose solar should be blocked. Null with a null strategy = the default brief.</param>
+        /// <param name="wantedPeriod">Hours whose solar should be preserved.</param>
+        /// <param name="specification">Product preset. Null = Dakar.</param>
+        /// <param name="projection">Fixed projection [m], or null to search the valid preset projections.</param>
+        /// <param name="tiltDegrees">Fixed deployment tilt [°], or null to select it by analysis.</param>
+        /// <param name="riseAboveHead">Fixed rise above the head line [m].</param>
+        /// <param name="extensionBeyondJambs">Fixed symmetric side extension [m].</param>
+        /// <param name="valanceDepth">Fixed valance depth [m] (0 or the preset standard); null enables valance optimisation.</param>
+        /// <param name="maximumGap">Largest horizontal gap between consecutive apertures that still shares one awning [m].</param>
+        /// <param name="headTolerance">Largest head-level spread within one group [m].</param>
+        /// <param name="gridSize">Aperture analysis-grid size, m.</param>
+        /// <param name="sunAngleStep">Angular resolution used to group similar sun positions, degrees.</param>
+        /// <param name="recalculate">Force a rebuild even when a previous calculation could be reused.</param>
+        /// <param name="objective">The objective. Null for the Stage 9 default.</param>
+        /// <param name="maximumEvaluations">Hard budget on distinct candidate evaluations per group.</param>
+        /// <param name="mountingOffset">Fixed horizontal outward distance from the aperture plane to the awning mounting line [m].</param>
+        public static List<GroupedAwningResult> AwningGroupResults(
+            this AnalyticalModel analyticalModel,
+            IEnumerable<Guid> apertureGuids,
+            int year,
+            out string message,
+            out bool reusedPreviousCalculation,
+            WeatherData weatherData,
+            IDesirabilityStrategy desirabilityStrategy,
+            AnalysisPeriod unwantedPeriod,
+            AnalysisPeriod wantedPeriod,
+            AwningSpecification specification,
+            double? projection,
+            double? tiltDegrees,
+            double riseAboveHead,
+            double extensionBeyondJambs,
+            double? valanceDepth,
+            double maximumGap,
+            double headTolerance,
+            double gridSize,
+            double sunAngleStep,
+            bool recalculate,
+            ShadingObjective objective,
+            int maximumEvaluations,
+            double mountingOffset)
+        {
             message = null;
             reusedPreviousCalculation = false;
             specification = specification ?? AwningSpecification.Dakar;
@@ -86,7 +146,7 @@ namespace SAM.Analytical.SolarCalculator
             // they are settled before a solar context is paid for. The SAME check runs again inside
             // Optimise.RetractableAwningGroup — that method is public in its own right and must not
             // depend on this one having been called — and both refuse in the same words.
-            if (!Optimise.ValidAwningInputs(specification, projection, tiltDegrees, riseAboveHead, extensionBeyondJambs, valanceDepth, out message))
+            if (!Optimise.ValidAwningInputs(specification, projection, tiltDegrees, riseAboveHead, extensionBeyondJambs, valanceDepth, mountingOffset, out message))
             {
                 return null;
             }
@@ -161,7 +221,7 @@ namespace SAM.Analytical.SolarCalculator
                 GroupedAwningResult groupResult = Optimise.RetractableAwningGroup(
                     group, context.SolarVisibilityCache, desirabilities, context.ContextOccluders,
                     objective, specification, projection, tiltDegrees, riseAboveHead, extensionBeyondJambs,
-                    valanceDepth, maximumEvaluations);
+                    valanceDepth, maximumEvaluations: maximumEvaluations, mountingOffset: mountingOffset);
 
                 if (groupResult == null)
                 {

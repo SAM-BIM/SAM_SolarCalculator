@@ -329,6 +329,38 @@ namespace SAM.SolarCalculator.Tests
 
             output.WriteLine(first.DesignSummary);
         }
+
+        // ------------------------------------- C. old positional call compatibility ----
+
+        [Fact]
+        [Trait("Category", "LongRunning")]
+        public void Kolobrzeg_Old_Positional_Call_Maps_The_Trailing_Integer_To_MaximumEvaluations()
+        {
+            // The pre-mounting-offset signature ended in (..., valanceDepth, maximumGap, headTolerance,
+            // gridSize, sunAngleStep, recalculate, objective, maximumEvaluations). A caller compiled
+            // against it passes every argument positionally, so the trailing 400 must mean
+            // maximumEvaluations = 400, never mountingOffset = 400 m.
+            AnalyticalModel analyticalModel = KolobrzegFixture.Model();
+            int year = KolobrzegFixture.Year(analyticalModel);
+            List<Guid> apertureGuids = StudiedGuids();
+
+            List<GroupedAwningResult> results = Analytical.SolarCalculator.Create.AwningGroupResults(
+                analyticalModel, apertureGuids, year, out string message, out bool _,
+                null, null, null, null, AwningSpecification.Dakar,
+                null, null, 0.0, Extension, 0.0, 0.20, 0.02,
+                KolobrzegFixture.HistoricalGridSize, 2.0, false, new ShadingObjective(1.0, 0.1), 400);
+
+            Assert.Null(message);
+            Assert.NotNull(results);
+            Assert.Single(results);
+
+            // The trailing 400 must NOT have become a 400 m mounting offset.
+            Assert.Equal(0.0, results[0].MountingOffset, 9);
+            Assert.True(results[0].Evaluations > 0);
+            Assert.NotEqual(ShadingDesignStatus.NotEvaluated, results[0].Status);
+
+            output.WriteLine($"positional Kołobrzeg answer: {results[0].DesignSummary}");
+        }
     }
 }
 
