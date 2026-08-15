@@ -21,6 +21,8 @@ namespace SAM.Analytical.SolarCalculator
         /// exactly as Query.CachedIrradiance derives them (raw GHI/DHI fields only — the ambiguous
         /// DirectSolarRadiation field is never read; the sun is sampled at h + the shift recorded
         /// on the cache, so desirability and irradiance can never sit on different timelines).
+        /// The per-hour solar arithmetic itself lives in Create.ApertureSolarHour, which is the one
+        /// implementation this and the hourly SolarControlProfile both use.
         ///
         /// With w(h) = desirabilityStrategy.Weight(h):
         ///   DirectEnergy[g]   += energy(h)                    (all hours)
@@ -79,7 +81,6 @@ namespace SAM.Analytical.SolarCalculator
             int year = solarVisibilityCache.Year;
             double timeShiftInMinutes = solarVisibilityCache.SunPositionShiftInMinutes;
             DateTime yearStart = new DateTime(year, 1, 1);
-            double minSinElevation = Math.Sin(5.0 * Math.PI / 180.0);
 
             for (int g = 0; g < groupCount; g++)
             {
@@ -100,44 +101,26 @@ namespace SAM.Analytical.SolarCalculator
                         continue;
                     }
 
-                    // RAW fields only, as in Query.CachedIrradiance (B6).
-                    double globalSolarRadiation = weatherHour.GlobalSolarRadiation;
-                    double diffuseSolarRadiation = weatherHour.DiffuseSolarRadiation;
-                    if (double.IsNaN(globalSolarRadiation) || double.IsNaN(diffuseSolarRadiation))
+                    // The shared hourly evaluation: RAW GHI/DHI fields only (B6), the sun sampled at
+                    // h + the cache's own shift. Null means the hour cannot be evaluated at all — a
+                    // missing raw field or an unresolvable sun position — never a substituted value.
+                    // Context visibility is deliberately not asked for here (see remarks).
+                    ApertureSolarHour apertureSolarHour = ApertureSolarHour(location, weatherHour, outward, dateTime, hourOfYear, timeShiftInMinutes);
+                    if (apertureSolarHour == null)
                     {
                         missingWeatherHours++;
                         continue;
                     }
 
-                    DateTime sunTime = timeShiftInMinutes == 0 ? dateTime : dateTime.AddMinutes(timeShiftInMinutes);
-                    if (!Geometry.SolarCalculator.Query.TryGetSunAngles(location, sunTime, out double elevationDegrees, out double azimuthDegrees))
-                    {
-                        missingWeatherHours++;
-                        continue;
-                    }
-
-                    double elevationRadians = elevationDegrees * Math.PI / 180.0;
-                    double azimuthRadians = azimuthDegrees * Math.PI / 180.0;
-
-                    // Unit vector from the surface toward the sun (compass convention, +Y = north).
-                    double sinElevation = Math.Sin(elevationRadians);
-                    double sunX = Math.Cos(elevationRadians) * Math.Sin(azimuthRadians);
-                    double sunY = Math.Cos(elevationRadians) * Math.Cos(azimuthRadians);
-                    double sunZ = sinElevation;
-
-                    double cosThetaI = outward.X * sunX + outward.Y * sunY + outward.Z * sunZ;
-                    if (cosThetaI <= 0)
+                    if (!apertureSolarHour.SunInFrontOfAperture)
                     {
                         // Back-facing sun carries no beam onto this aperture: zero contribution,
                         // regardless of the hour's weight.
                         continue;
                     }
 
-                    double beamHorizontal = Math.Max(0.0, globalSolarRadiation - diffuseSolarRadiation);
-                    double directNormalIrradiance = beamHorizontal / Math.Max(sinElevation, minSinElevation);
-
                     // Wh/m2 over the whole hour, then kWh/m2 (x 1 h / 1000).
-                    double energy = directNormalIrradiance * cosThetaI / 1000.0;
+                    double energy = apertureSolarHour.ApertureDirectIrradiance / 1000.0;
 
                     double weight = desirabilityStrategy.Weight(dateTime, weatherHour, target);
                     if (double.IsNaN(weight))

@@ -103,7 +103,6 @@ namespace SAM.Analytical.SolarCalculator
             }
 
             double minHorizonAngleDegrees = solarVisibilityCache.MinHorizonAngle * 180.0 / Math.PI;
-            double minSinElevation = Math.Sin(5.0 * Math.PI / 180.0);
             double timeShiftInMinutes = solarVisibilityCache.SunPositionShiftInMinutes;
 
             int missedBinHours = 0;
@@ -134,10 +133,6 @@ namespace SAM.Analytical.SolarCalculator
                     missingWeatherHours++;
                     continue;
                 }
-
-                // Beam-horizontal is derived explicitly from global - diffuse (see remarks); the
-                // direct-solar field is never read, on any code path.
-                double beamHorizontal = Math.Max(0.0, globalSolarRadiation - diffuseSolarRadiation);
 
                 // Sun position on the timeline the cache's bins were built from. Query.TryGetSunAngles
                 // is the SAME angle source the bins were built with (Angle.Radians, no rounding, no
@@ -173,7 +168,11 @@ namespace SAM.Analytical.SolarCalculator
                 double sunY = Math.Cos(elevationRadians) * Math.Cos(azimuthRadians);
                 double sunZ = sinElevation;
 
-                double directNormalIrradiance = beamHorizontal / Math.Max(sinElevation, minSinElevation);
+                // Beam-horizontal is derived explicitly from global - diffuse inside
+                // Query.DirectNormalIrradiance (see remarks); the direct-solar field is never read,
+                // on any code path. That query is the one implementation of this conversion, shared
+                // with the aperture-plane hourly evaluation.
+                double directNormalIrradiance = DirectNormalIrradiance(globalSolarRadiation, diffuseSolarRadiation, elevationDegrees);
 
                 double f1 = 0;
                 double f2 = 0;
