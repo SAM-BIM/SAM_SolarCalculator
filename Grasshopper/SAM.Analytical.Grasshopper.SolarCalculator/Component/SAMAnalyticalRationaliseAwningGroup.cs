@@ -25,7 +25,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         public override Guid ComponentGuid => new Guid("9a2f5c81-3d47-4b6e-8f1a-2c7e6d4b0a93");
 
         /// <summary>The latest version of this component.</summary>
-        public override string LatestComponentVersion => "1.0.1";
+        public override string LatestComponentVersion => "1.1.0";
 
         /// <summary>Provides an Icon for the component.</summary>
         protected override System.Drawing.Bitmap Icon => Resources.SAM_SolarCalculator;
@@ -119,6 +119,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 // Appended AFTER every pre-existing output so saved definitions keep their positional
                 // parameter indices (the legacy parameter reader restores parameters by position).
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "mountingOffsets", NickName = "mountingOffsets", Description = "Horizontal outward distance from the aperture plane to the awning mounting line per group [m], so the physical mounting condition is visible and auditable", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new GooSAMObjectParam() { Name = "groupedAwningResults", NickName = "groupedAwningResults", Description = "The full GroupedAwningResult per group - the device, the group identity, the measured performance and the search record. Feed these into SAMAnalytical.AssembleShadingSchemes", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
                 return result.ToArray();
             }
         }
@@ -547,6 +548,12 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             if (index != -1)
             {
                 dataAccess.SetData(index, reusedPreviousCalculation);
+            }
+
+            index = Params.IndexOfOutputParam("groupedAwningResults");
+            if (index != -1)
+            {
+                dataAccess.SetDataList(index, results.ConvertAll(x => new GooSAMObject(x)));
             }
 
             if (index_Successful != -1)
