@@ -219,8 +219,19 @@ namespace SAM.SolarCalculator.Tests
             int shared = east.ShadeDemandHoursOfYear.Intersect(west.ShadeDemandHoursOfYear).Count();
             Assert.True(shared < 0.1 * Math.Min(east.ShadeDemandHours, west.ShadeDemandHours), $"east and west shared {shared} demand hours");
 
-            // The sun hours themselves are a property of the site, not the window.
-            Assert.Equal(east.SunHours, west.SunHours);
+            // Daylight is a property of the SITE, so the two agree on it exactly...
+            Assert.Equal(east.DaylightHours, west.DaylightHours);
+            Assert.Equal(east.DaylightHoursOfYear, west.DaylightHoursOfYear);
+
+            // ...and disagree completely on how much of it actually reaches them, which is the
+            // distinction the whole feature turns on.
+            Assert.True(east.ApertureSunHours < east.DaylightHours);
+            Assert.True(west.ApertureSunHours < west.DaylightHours);
+
+            double eastSunMean = east.ApertureSunHoursOfYear.Average(x => x % 24);
+            double westSunMean = west.ApertureSunHoursOfYear.Average(x => x % 24);
+            output.WriteLine($"daylight {east.DaylightHours} h; sun on the east façade {east.ApertureSunHours} h (mean hour {eastSunMean:0.0}), on the west {west.ApertureSunHours} h (mean hour {westSunMean:0.0})");
+            Assert.True(westSunMean > eastSunMean + 4.0);
         }
 
         // ------------------------------------------------------------------- solar threshold ----
@@ -263,23 +274,29 @@ namespace SAM.SolarCalculator.Tests
             // A threshold no hour can reach is a real answer, not a failure.
             SolarControlProfile impossible = target.SolarControlProfile(weatherData, new SolarControlSettings(5000.0), Year);
             Assert.Equal(0, impossible.ShadeDemandHours);
-            Assert.True(impossible.SunHours > 0);
+            Assert.True(impossible.ApertureSunHours > 0);
             Assert.True(double.IsNaN(impossible.ShadeUseFraction));
         }
 
         [Fact]
-        public void Every_Set_Is_A_Subset_Of_The_Sun_Hours()
+        public void Every_Set_Is_A_Subset_Of_The_Hours_The_Sun_Reaches_This_Window()
         {
             ApertureSolarTarget target = Target(SyntheticTargets.South);
             WeatherData weatherData = SyntheticWeather(900.0, 20.0, 12.0);
 
             SolarControlProfile profile = target.SolarControlProfile(weatherData, new SolarControlSettings(200.0, 15.0, 8.0), Year);
 
-            List<int> sun = profile.SunHoursOfYear;
-            Assert.Empty(profile.SolarDemandHoursOfYear.Except(sun));
-            Assert.Empty(profile.TemperatureDemandHoursOfYear.Except(sun));
-            Assert.Empty(profile.WindSafeHoursOfYear.Except(sun));
-            Assert.Empty(profile.ShadeDemandHoursOfYear.Except(sun));
+            // Daylight is the outer set; the hours the sun reaches THIS window are a subset of it;
+            // every criterion lives inside that.
+            List<int> daylight = profile.DaylightHoursOfYear;
+            List<int> apertureSun = profile.ApertureSunHoursOfYear;
+            Assert.Empty(apertureSun.Except(daylight));
+            Assert.True(profile.ApertureSunHours < profile.DaylightHours);
+
+            Assert.Empty(profile.SolarDemandHoursOfYear.Except(apertureSun));
+            Assert.Empty(profile.TemperatureDemandHoursOfYear.Except(apertureSun));
+            Assert.Empty(profile.WindSafeHoursOfYear.Except(apertureSun));
+            Assert.Empty(profile.ShadeDemandHoursOfYear.Except(apertureSun));
             Assert.Empty(profile.ShadeOnHoursOfYear.Except(profile.ShadeDemandHoursOfYear));
             Assert.Empty(profile.HighWindHoursOfYear.Except(profile.ShadeDemandHoursOfYear));
 
@@ -325,19 +342,22 @@ namespace SAM.SolarCalculator.Tests
             SolarControlProfile and = target.SolarControlProfile(weatherData, new SolarControlSettings(800.0, 15.0, double.NaN, SolarControlLogic.And), Year);
             SolarControlProfile or = target.SolarControlProfile(weatherData, new SolarControlSettings(800.0, 15.0, double.NaN, SolarControlLogic.Or), Year);
 
-            // OR admits every warm daylight hour, so it is strictly larger than the solar criterion.
+            // OR admits every warm hour the sun reaches the window, so it is strictly larger than
+            // the solar criterion — but it stops there, well short of the daylight year.
             Assert.True(or.ShadeDemandHours > and.ShadeDemandHours);
-            Assert.Equal(or.SunHours, or.ShadeDemandHours);
+            Assert.Equal(or.ApertureSunHours, or.ShadeDemandHours);
+            Assert.True(or.ShadeDemandHours < or.DaylightHours);
             Assert.Empty(and.ShadeDemandHoursOfYear.Except(or.ShadeDemandHoursOfYear));
 
             // AND admits only the hours both criteria claim.
             Assert.Equal(and.SolarDemandHours, and.ShadeDemandHours);
 
-            // And no night hour is ever a demand hour, however warm the air is: a shading device
-            // does nothing in the dark, so an OR on temperature must not deploy one.
-            Assert.Empty(or.ShadeDemandHoursOfYear.Except(or.SunHoursOfYear));
+            // And no hour the sun does not reach this window is ever a demand hour, however warm
+            // the air is — night included. A shading device cannot act on sun that is not there, so
+            // the temperature criterion must never carry such an hour on its own.
+            Assert.Empty(or.ShadeDemandHoursOfYear.Except(or.ApertureSunHoursOfYear));
 
-            output.WriteLine($"25 °C all year, 800 W/m² threshold: AND {and.ShadeDemandHours} h, OR {or.ShadeDemandHours} h, sun {or.SunHours} h");
+            output.WriteLine($"25 °C all year, 800 W/m² threshold: AND {and.ShadeDemandHours} h, OR {or.ShadeDemandHours} h, sun on the window {or.ApertureSunHours} h, daylight {or.DaylightHours} h");
         }
 
         [Fact]
@@ -354,7 +374,7 @@ namespace SAM.SolarCalculator.Tests
             // permanently true, and every daylight hour would come back as unwanted solar.
             Assert.Equal(solarOnly.ShadeDemandHoursOfYear, and.ShadeDemandHoursOfYear);
             Assert.Equal(solarOnly.ShadeDemandHoursOfYear, or.ShadeDemandHoursOfYear);
-            Assert.True(or.ShadeDemandHours < or.SunHours);
+            Assert.True(or.ShadeDemandHours < or.ApertureSunHours);
             Assert.Empty(or.TemperatureDemandHoursOfYear);
         }
 
@@ -376,9 +396,53 @@ namespace SAM.SolarCalculator.Tests
             Assert.Equal(0, and.ShadeDemandHours);
             Assert.Equal(solarOnly.ShadeDemandHoursOfYear, or.ShadeDemandHoursOfYear);
 
-            // And it is reported rather than hidden.
-            Assert.Equal(and.SunHours, and.MissingTemperatureHours);
+            // And it is reported rather than hidden — over the hours the criterion was actually
+            // asked about, which are the ones the sun reaches this window.
+            Assert.Equal(and.ApertureSunHours, and.MissingTemperatureHours);
             Assert.Equal(0, solarOnly.MissingTemperatureHours);
+        }
+
+        [Fact]
+        public void A_Hot_Hour_Never_Requests_Shading_For_A_Facade_The_Sun_Is_Behind()
+        {
+            // Hot all year and bright all year: under OR logic, temperature alone would carry every
+            // hour it is evaluated on. The question is WHICH hours it is evaluated on.
+            WeatherData weatherData = SyntheticWeather(Year, London(), 900.0, x => 30.0, x => 2.0);
+            SolarControlSettings settings = new SolarControlSettings(200.0, 15.0, double.NaN, SolarControlLogic.Or);
+
+            ApertureSolarTarget south = Target(SyntheticTargets.South);
+            ApertureSolarTarget north = Target(SyntheticTargets.North);
+
+            SolarControlProfile southProfile = south.SolarControlProfile(weatherData, settings, Year);
+            SolarControlProfile northProfile = north.SolarControlProfile(weatherData, settings, Year);
+
+            // Both windows stand in the same daylight.
+            Assert.Equal(southProfile.DaylightHours, northProfile.DaylightHours);
+            Assert.True(southProfile.DaylightHours > 4000);
+
+            // At London's latitude a north façade still catches early-morning and late-evening sun
+            // in high summer, so it is not a zero set — but it is a small fraction of the daylight
+            // year, and every demand hour it has is one of those.
+            Assert.True(northProfile.ApertureSunHours > 0);
+            Assert.True(northProfile.ApertureSunHours < 0.25 * northProfile.DaylightHours,
+                $"a north façade should see sun for a small share of the year, got {northProfile.ApertureSunHours} of {northProfile.DaylightHours} h");
+
+            Assert.Empty(northProfile.ShadeDemandHoursOfYear.Except(northProfile.ApertureSunHoursOfYear));
+            Assert.True(northProfile.ShadeDemandHours < southProfile.ShadeDemandHours);
+
+            // THE DEFECT THIS GUARDS. Gating the OR on daylight instead of on sun reaching the
+            // window would hand the north façade every warm daylight hour — 30 °C carries them all
+            // on its own — and the optimiser would then be asked to shade a window the sun is
+            // behind. The gap between these two numbers IS the bug.
+            output.WriteLine($"north façade: {northProfile.DaylightHours} h daylight, {northProfile.ApertureSunHours} h with sun on it, {northProfile.ShadeDemandHours} h shading requested");
+            Assert.True(northProfile.ShadeDemandHours < 0.25 * northProfile.DaylightHours,
+                $"a hot hour must not request shading where the sun cannot reach: {northProfile.ShadeDemandHours} of {northProfile.DaylightHours} daylight hours");
+
+            // Every hour that IS requested carries real beam on the north plane, so nothing has been
+            // over-corrected either.
+            HashSet<int> demand = new HashSet<int>(northProfile.ShadeDemandHoursOfYear);
+            Assert.All(north.ApertureSolarHours(weatherData, Year, Shift).FindAll(x => demand.Contains(x.HourOfYear)),
+                x => Assert.True(x.ApertureDirectIrradiance > 0));
         }
 
         // ------------------------------------------------------------------------------ wind ----
@@ -436,11 +500,11 @@ namespace SAM.SolarCalculator.Tests
             Assert.Equal(constrained.ShadeDemandHours, constrained.ShadeOnHours);
             Assert.Equal(0, constrained.HighWindHours);
             Assert.Empty(constrained.HighWindHoursOfYear);
-            Assert.Equal(constrained.SunHoursOfYear, constrained.WindSafeHoursOfYear);
+            Assert.Equal(constrained.ApertureSunHoursOfYear, constrained.WindSafeHoursOfYear);
 
             // It is never silent about it: the count is exactly how far the wind side of the answer
             // rests on an incomplete weather file.
-            Assert.Equal(constrained.SunHours, constrained.MissingWindSpeedHours);
+            Assert.Equal(constrained.ApertureSunHours, constrained.MissingWindSpeedHours);
 
             // A file that DOES carry wind still retracts on the hours that breach the limit, so the
             // rule above has not simply disabled the constraint.
@@ -535,7 +599,7 @@ namespace SAM.SolarCalculator.Tests
             Assert.Equal(leapYear, profile.Year);
             Assert.Equal(8760, profile.EvaluatedHours);
             Assert.Equal(24, profile.MissingWeatherHours);
-            Assert.All(profile.SunHoursOfYear, x => Assert.InRange(x, 0, 8783));
+            Assert.All(profile.DaylightHoursOfYear, x => Assert.InRange(x, 0, 8783));
 
             // A non-leap year loses nothing.
             SolarControlProfile common = target.SolarControlProfile(SyntheticWeather(), new SolarControlSettings(200.0), Year);
@@ -603,7 +667,8 @@ namespace SAM.SolarCalculator.Tests
             Assert.Equal(profile.ApertureGuid, profile_Restored.ApertureGuid);
             Assert.Equal(profile.Year, profile_Restored.Year);
             Assert.Equal(profile.TimeShiftInMinutes, profile_Restored.TimeShiftInMinutes, 12);
-            Assert.Equal(profile.SunHoursOfYear, profile_Restored.SunHoursOfYear);
+            Assert.Equal(profile.DaylightHoursOfYear, profile_Restored.DaylightHoursOfYear);
+            Assert.Equal(profile.ApertureSunHoursOfYear, profile_Restored.ApertureSunHoursOfYear);
             Assert.Equal(profile.SolarDemandHoursOfYear, profile_Restored.SolarDemandHoursOfYear);
             Assert.Equal(profile.TemperatureDemandHoursOfYear, profile_Restored.TemperatureDemandHoursOfYear);
             Assert.Equal(profile.WindSafeHoursOfYear, profile_Restored.WindSafeHoursOfYear);
@@ -619,6 +684,7 @@ namespace SAM.SolarCalculator.Tests
             // would throw here.
             string text = profile.ToJsonObject().ToJsonString();
             Assert.Contains("ShadeOnHoursOfYear", text);
+            Assert.Contains("ApertureSunHoursOfYear", text);
             Assert.True(profile.ShadeDemandHours > 0);
         }
 
@@ -690,17 +756,20 @@ namespace SAM.SolarCalculator.Tests
             output.WriteLine($"Kołobrzeg {year}, façade {target.Azimuth:0.#}°: {profile}");
             output.WriteLine($"evaluated {profile.EvaluatedHours} h, missing weather {profile.MissingWeatherHours} h");
 
-            Assert.True(profile.SunHours > 0);
+            Assert.True(profile.DaylightHours > 0);
             Assert.True(profile.ShadeDemandHours > 0);
 
-            // The generated hours are a small share of the daylight year: a façade threshold is not
-            // a daylight switch.
-            Assert.True(profile.ShadeDemandHours < profile.SunHours, "a solar threshold that admits every daylight hour is not orientation-specific");
+            // The three sets are nested and genuinely different sizes: the site's daylight, the
+            // hours the sun reaches THIS façade, and the hours its solar is unwanted.
+            Assert.True(profile.ApertureSunHours < profile.DaylightHours, "a WSW façade cannot see the sun for the whole daylight year");
+            Assert.True(profile.ShadeDemandHours < profile.ApertureSunHours, "a solar threshold that admits every sunlit hour is not a threshold");
 
             // The same site and the same weather, from the opposite direction.
             Vector3D outward = target.OutwardNormal;
             ApertureSolarTarget opposite = Target(new Vector3D(-outward.X, -outward.Y, outward.Z));
             SolarControlProfile oppositeProfile = opposite.SolarControlProfile(weatherData, settings, year);
+
+            output.WriteLine($"daylight {profile.DaylightHours} h | sun on this façade {profile.ApertureSunHours} h | shading requested {profile.ShadeDemandHours} h");
 
             double wswMean = profile.ShadeDemandHoursOfYear.Average(x => x % 24);
             double eneMean = oppositeProfile.ShadeDemandHoursOfYear.Average(x => x % 24);
@@ -711,8 +780,11 @@ namespace SAM.SolarCalculator.Tests
             int shared = profile.ShadeDemandHoursOfYear.Intersect(oppositeProfile.ShadeDemandHoursOfYear).Count();
             Assert.True(shared < 0.1 * Math.Min(profile.ShadeDemandHours, oppositeProfile.ShadeDemandHours), $"opposite façades shared {shared} unwanted hours");
 
-            // The daylight hours themselves belong to the site, so they are identical.
-            Assert.Equal(profile.SunHours, oppositeProfile.SunHours);
+            // Daylight belongs to the site, so the two façades agree on it exactly — and disagree
+            // on the hours the sun actually reaches them, which is the number an engineer wanted.
+            Assert.Equal(profile.DaylightHours, oppositeProfile.DaylightHours);
+            Assert.NotEqual(profile.ApertureSunHours, oppositeProfile.ApertureSunHours);
+            output.WriteLine($"sun on the façade: WSW {profile.ApertureSunHours} h, opposite {oppositeProfile.ApertureSunHours} h, out of {profile.DaylightHours} h of daylight");
         }
     }
 }

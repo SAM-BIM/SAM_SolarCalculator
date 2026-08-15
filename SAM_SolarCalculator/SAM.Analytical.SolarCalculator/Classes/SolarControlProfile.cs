@@ -11,12 +11,28 @@ namespace SAM.Analytical.SolarCalculator
 {
     /// <summary>
     /// The hour-by-hour control schedule of one aperture under a <see cref="SolarControlSettings"/>
-    /// rule: which hours of the weather year the sun is up, which of them make solar UNWANTED at
-    /// this particular window, and which of those a device could actually be deployed in.
+    /// rule: which hours of the weather year the sun actually reaches this window, which of them
+    /// make its solar UNWANTED, and which of those a device could actually be deployed in.
     ///
     /// EVERY HOUR NUMBER IS A 0-BASED HOUR OF THE YEAR: 0 = 1 Jan 00:00, 8759 = 31 Dec 23:00
     /// (8783 in a leap year). The sets are stored sparsely — a list of the hours that qualify, not
     /// an 8760-long array of flags.
+    ///
+    /// DAYLIGHT IS THE SITE'S; SUN ON THE WINDOW IS THE WINDOW'S. These are different sets and
+    /// both are reported:
+    ///
+    ///   <see cref="DaylightHoursOfYear"/> — the sun is above the horizon. A property of the SITE:
+    ///   every aperture on the building has the same daylight hours.
+    ///
+    ///   <see cref="ApertureSunHoursOfYear"/> — the sun is above the horizon, is in FRONT of this
+    ///   opening, and puts a non-zero direct beam on its plane. A property of the WINDOW: a
+    ///   north-facing and a south-facing opening on one building have very different sets, and this
+    ///   is the one to read for "how many hours does this façade actually see sun?".
+    ///
+    /// EVERY CRITERION IS EVALUATED ON THE APERTURE-SUN HOURS, never on daylight. Shading a window
+    /// the sun is behind achieves nothing, so a hot afternoon cannot request shading on a façade
+    /// facing away from the sun — not even under OR logic, where the temperature criterion would
+    /// otherwise carry the hour on its own.
     ///
     /// THE TWO QUESTIONS, KEPT APART:
     ///
@@ -31,10 +47,8 @@ namespace SAM.Analytical.SolarCalculator
     /// Wind never appears in the weights. A gale does not make solar welcome; it stops the awning
     /// coming out.
     ///
-    /// DAYLIGHT ONLY. Demand is only ever raised while the sun is above the horizon. A shading
-    /// device does nothing at night, and without this a warm night under OR logic would be reported
-    /// as a shading hour. There is deliberately no "shade off" set: it would be dominated by the
-    /// ~4400 night hours and would tell an engineer nothing.
+    /// There is deliberately no "shade off" set: it would be dominated by the ~4400 night hours
+    /// and would tell an engineer nothing.
     ///
     /// PHASE 1 WEIGHTS ARE BINARY: exactly +1 on each demand hour (the sign convention of
     /// <see cref="IDesirabilityStrategy"/> — positive means blocking is beneficial). The weights are
@@ -50,7 +64,8 @@ namespace SAM.Analytical.SolarCalculator
         private int year;
         private double timeShiftInMinutes;
         private SolarControlSettings settings;
-        private List<int> sunHoursOfYear;
+        private List<int> daylightHoursOfYear;
+        private List<int> apertureSunHoursOfYear;
         private List<int> solarDemandHoursOfYear;
         private List<int> temperatureDemandHoursOfYear;
         private List<int> windSafeHoursOfYear;
@@ -67,25 +82,27 @@ namespace SAM.Analytical.SolarCalculator
         /// <param name="year">The weather year the hours of the year are counted in.</param>
         /// <param name="timeShiftInMinutes">Sun-position sampling offset of the timeline, minutes.</param>
         /// <param name="settings">The control rule that produced the sets.</param>
-        /// <param name="sunHoursOfYear">Hours the sun was above the horizon.</param>
-        /// <param name="solarDemandHoursOfYear">Sun hours meeting the solar (and sunlit-share) criterion.</param>
-        /// <param name="temperatureDemandHoursOfYear">Sun hours meeting the temperature criterion. Empty when it is not in use.</param>
-        /// <param name="windSafeHoursOfYear">Sun hours the wind constraint permits deployment in.</param>
-        /// <param name="shadeDemandHoursOfYear">Sun hours the rule says shading is wanted in.</param>
+        /// <param name="daylightHoursOfYear">Hours the sun was above the horizon (a property of the site).</param>
+        /// <param name="apertureSunHoursOfYear">Daylight hours whose sun is in front of this opening and puts a non-zero beam on its plane.</param>
+        /// <param name="solarDemandHoursOfYear">Aperture-sun hours meeting the solar criterion.</param>
+        /// <param name="temperatureDemandHoursOfYear">Aperture-sun hours meeting the temperature criterion. Empty when it is not in use.</param>
+        /// <param name="windSafeHoursOfYear">Aperture-sun hours the wind constraint permits deployment in.</param>
+        /// <param name="shadeDemandHoursOfYear">Aperture-sun hours the rule says shading is wanted in.</param>
         /// <param name="shadeOnHoursOfYear">Demand hours the wind constraint permits: the deployment schedule.</param>
         /// <param name="highWindHoursOfYear">Demand hours refused by the wind constraint.</param>
         /// <param name="weightByHourOfYear">Desirability weight by 0-based hour of the year.</param>
         /// <param name="evaluatedHours">Hours that could be evaluated at all.</param>
         /// <param name="missingWeatherHours">Hours skipped: no weather hour, a missing raw radiation field, or an unresolvable sun position.</param>
-        /// <param name="missingTemperatureHours">Sun hours with no dry-bulb value, while the temperature criterion was in use.</param>
-        /// <param name="missingWindSpeedHours">Sun hours with no wind speed, while the wind constraint was in use.</param>
-        public SolarControlProfile(Guid apertureGuid, int year, double timeShiftInMinutes, SolarControlSettings settings, IEnumerable<int> sunHoursOfYear, IEnumerable<int> solarDemandHoursOfYear, IEnumerable<int> temperatureDemandHoursOfYear, IEnumerable<int> windSafeHoursOfYear, IEnumerable<int> shadeDemandHoursOfYear, IEnumerable<int> shadeOnHoursOfYear, IEnumerable<int> highWindHoursOfYear, IDictionary<int, double> weightByHourOfYear, int evaluatedHours, int missingWeatherHours, int missingTemperatureHours, int missingWindSpeedHours)
+        /// <param name="missingTemperatureHours">Aperture-sun hours with no dry-bulb value, while the temperature criterion was in use.</param>
+        /// <param name="missingWindSpeedHours">Aperture-sun hours with no wind speed, while the wind constraint was in use.</param>
+        public SolarControlProfile(Guid apertureGuid, int year, double timeShiftInMinutes, SolarControlSettings settings, IEnumerable<int> daylightHoursOfYear, IEnumerable<int> apertureSunHoursOfYear, IEnumerable<int> solarDemandHoursOfYear, IEnumerable<int> temperatureDemandHoursOfYear, IEnumerable<int> windSafeHoursOfYear, IEnumerable<int> shadeDemandHoursOfYear, IEnumerable<int> shadeOnHoursOfYear, IEnumerable<int> highWindHoursOfYear, IDictionary<int, double> weightByHourOfYear, int evaluatedHours, int missingWeatherHours, int missingTemperatureHours, int missingWindSpeedHours)
         {
             this.apertureGuid = apertureGuid;
             this.year = year;
             this.timeShiftInMinutes = timeShiftInMinutes;
             this.settings = settings == null ? null : new SolarControlSettings(settings);
-            this.sunHoursOfYear = Copy(sunHoursOfYear);
+            this.daylightHoursOfYear = Copy(daylightHoursOfYear);
+            this.apertureSunHoursOfYear = Copy(apertureSunHoursOfYear);
             this.solarDemandHoursOfYear = Copy(solarDemandHoursOfYear);
             this.temperatureDemandHoursOfYear = Copy(temperatureDemandHoursOfYear);
             this.windSafeHoursOfYear = Copy(windSafeHoursOfYear);
@@ -108,7 +125,8 @@ namespace SAM.Analytical.SolarCalculator
                 year = solarControlProfile.year;
                 timeShiftInMinutes = solarControlProfile.timeShiftInMinutes;
                 settings = solarControlProfile.settings == null ? null : new SolarControlSettings(solarControlProfile.settings);
-                sunHoursOfYear = Copy(solarControlProfile.sunHoursOfYear);
+                daylightHoursOfYear = Copy(solarControlProfile.daylightHoursOfYear);
+                apertureSunHoursOfYear = Copy(solarControlProfile.apertureSunHoursOfYear);
                 solarDemandHoursOfYear = Copy(solarControlProfile.solarDemandHoursOfYear);
                 temperatureDemandHoursOfYear = Copy(solarControlProfile.temperatureDemandHoursOfYear);
                 windSafeHoursOfYear = Copy(solarControlProfile.windSafeHoursOfYear);
@@ -172,19 +190,37 @@ namespace SAM.Analytical.SolarCalculator
             }
         }
 
-        /// <summary>Hours the sun was above the horizon (0-based). Every other set is a subset of this.</summary>
-        public List<int> SunHoursOfYear
+        /// <summary>
+        /// Hours the sun was above the horizon (0-based). A property of the SITE: every aperture on
+        /// the building has the same set. Every other set here is a subset of it.
+        /// </summary>
+        public List<int> DaylightHoursOfYear
         {
             get
             {
-                return Copy(sunHoursOfYear);
+                return Copy(daylightHoursOfYear);
             }
         }
 
         /// <summary>
-        /// Sun hours whose DIRECT beam on the window plane met the solar threshold — and, when that
-        /// criterion is in use, whose sunlit share met the minimum. Orientation-specific: the same
-        /// hour qualifies at one façade and not at another.
+        /// Hours the sun actually reaches THIS opening: above the horizon, in FRONT of the window,
+        /// and putting a non-zero direct beam on its plane. A property of the WINDOW — this is the
+        /// set to read for "how many hours a year does this façade see sun?".
+        ///
+        /// Every criterion is evaluated on these hours and nowhere else, which is what stops a warm
+        /// hour requesting shading on a façade the sun is behind.
+        /// </summary>
+        public List<int> ApertureSunHoursOfYear
+        {
+            get
+            {
+                return Copy(apertureSunHoursOfYear);
+            }
+        }
+
+        /// <summary>
+        /// Aperture-sun hours whose DIRECT beam on the window plane met the solar threshold.
+        /// Orientation-specific: the same hour qualifies at one façade and not at another.
         /// </summary>
         public List<int> SolarDemandHoursOfYear
         {
@@ -195,8 +231,11 @@ namespace SAM.Analytical.SolarCalculator
         }
 
         /// <summary>
-        /// Sun hours whose outdoor dry-bulb met the temperature threshold. EMPTY when no temperature
-        /// criterion is in use — the criterion is absent, not universally satisfied.
+        /// Aperture-sun hours whose outdoor dry-bulb met the temperature threshold. EMPTY when no
+        /// temperature criterion is in use — the criterion is absent, not universally satisfied.
+        ///
+        /// Note that these are APERTURE-SUN hours: a hot hour on a façade the sun is behind is not
+        /// listed, because nothing a shading device does that hour would change anything.
         /// </summary>
         public List<int> TemperatureDemandHoursOfYear
         {
@@ -207,8 +246,8 @@ namespace SAM.Analytical.SolarCalculator
         }
 
         /// <summary>
-        /// Sun hours the wind constraint permits deployment in. All sun hours when no constraint is
-        /// set. An hour with no recorded wind speed IS included: the criterion could not be
+        /// Aperture-sun hours the wind constraint permits deployment in. All of them when no
+        /// constraint is set. An hour with no recorded wind speed IS included: the criterion could not be
         /// evaluated, which is not the same as being violated, and the number of such hours is on
         /// <see cref="MissingWindSpeedHours"/> so the gap in the weather file stays visible.
         /// </summary>
@@ -221,8 +260,8 @@ namespace SAM.Analytical.SolarCalculator
         }
 
         /// <summary>
-        /// Shading REQUESTED: sun hours the rule judges this window's solar unwanted in. The
-        /// environmental answer, before any hardware limit.
+        /// Shading REQUESTED: aperture-sun hours the rule judges this window's solar unwanted in.
+        /// The environmental answer, before any hardware limit.
         /// </summary>
         public List<int> ShadeDemandHoursOfYear
         {
@@ -261,11 +300,21 @@ namespace SAM.Analytical.SolarCalculator
             }
         }
 
-        public int SunHours
+        /// <summary>How many hours the sun was above the horizon. The same for every aperture on the site.</summary>
+        public int DaylightHours
         {
             get
             {
-                return sunHoursOfYear?.Count ?? 0;
+                return daylightHoursOfYear?.Count ?? 0;
+            }
+        }
+
+        /// <summary>How many hours a year the sun actually reaches this window.</summary>
+        public int ApertureSunHours
+        {
+            get
+            {
+                return apertureSunHoursOfYear?.Count ?? 0;
             }
         }
 
@@ -351,7 +400,7 @@ namespace SAM.Analytical.SolarCalculator
             }
         }
 
-        /// <summary>Sun hours carrying no dry-bulb value while the temperature criterion was in use.</summary>
+        /// <summary>Aperture-sun hours carrying no dry-bulb value while the temperature criterion was in use.</summary>
         public int MissingTemperatureHours
         {
             get
@@ -361,7 +410,7 @@ namespace SAM.Analytical.SolarCalculator
         }
 
         /// <summary>
-        /// Sun hours carrying no wind speed while the wind constraint was in use — hours the limit
+        /// Aperture-sun hours carrying no wind speed while the wind constraint was in use — hours the limit
         /// could not be checked against. They are left OPERABLE (this is an annual design
         /// preprocessor, not a live safety controller) and are never counted as high wind, so this
         /// number is how far the wind side of the answer rests on an incomplete weather file.
@@ -470,7 +519,8 @@ namespace SAM.Analytical.SolarCalculator
 
             settings = jObject.ContainsKey("Settings") ? new SolarControlSettings(jObject["Settings"] as JsonObject) : null;
 
-            sunHoursOfYear = HoursOfYear(jObject, "SunHoursOfYear");
+            daylightHoursOfYear = HoursOfYear(jObject, "DaylightHoursOfYear");
+            apertureSunHoursOfYear = HoursOfYear(jObject, "ApertureSunHoursOfYear");
             solarDemandHoursOfYear = HoursOfYear(jObject, "SolarDemandHoursOfYear");
             temperatureDemandHoursOfYear = HoursOfYear(jObject, "TemperatureDemandHoursOfYear");
             windSafeHoursOfYear = HoursOfYear(jObject, "WindSafeHoursOfYear");
@@ -533,7 +583,8 @@ namespace SAM.Analytical.SolarCalculator
                 jObject.Add("Settings", settings.ToJsonObject());
             }
 
-            Add(jObject, "SunHoursOfYear", sunHoursOfYear);
+            Add(jObject, "DaylightHoursOfYear", daylightHoursOfYear);
+            Add(jObject, "ApertureSunHoursOfYear", apertureSunHoursOfYear);
             Add(jObject, "SolarDemandHoursOfYear", solarDemandHoursOfYear);
             Add(jObject, "TemperatureDemandHoursOfYear", temperatureDemandHoursOfYear);
             Add(jObject, "WindSafeHoursOfYear", windSafeHoursOfYear);
@@ -562,8 +613,8 @@ namespace SAM.Analytical.SolarCalculator
         public override string ToString()
         {
             return string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                "{0} sun hours | {1} hours shading requested | {2} hours deployed{3} | {4}",
-                SunHours,
+                "{0} hours of sun on this window | {1} hours shading requested | {2} hours deployed{3} | {4}",
+                ApertureSunHours,
                 ShadeDemandHours,
                 ShadeOnHours,
                 HighWindHours == 0 ? string.Empty : string.Format(System.Globalization.CultureInfo.InvariantCulture, " | {0} hours refused by wind", HighWindHours),

@@ -23,15 +23,23 @@ namespace SAM.Analytical.SolarCalculator
         ///
         /// THE RULE, exactly as applied:
         ///
-        ///   sun up          = solar elevation &gt; 0. Nothing below is ever a demand hour: a shading
-        ///                     device does nothing at night.
-        ///   solar demand    = sun up AND aperture-plane direct beam &gt;= MinimumApertureIrradiance.
-        ///   temperature     = outdoor dry-bulb &gt;= MinimumOutdoorTemperature, when in use.
-        ///   shade demand    = And: solar demand AND (temperature, when in use)
-        ///                     Or : solar demand OR  (sun up AND temperature), when in use
+        ///   daylight        = solar elevation &gt; 0. A property of the SITE.
+        ///   aperture sun    = daylight AND the sun is in FRONT of this opening AND the beam on its
+        ///                     plane is non-zero. A property of the WINDOW, and the gate on
+        ///                     EVERYTHING below: shading a window the sun is behind achieves
+        ///                     nothing, so no criterion is even evaluated outside these hours.
+        ///   solar demand    = aperture sun AND aperture-plane beam &gt;= MinimumApertureIrradiance.
+        ///   temperature     = aperture sun AND outdoor dry-bulb &gt;= MinimumOutdoorTemperature,
+        ///                     when in use.
+        ///   shade demand    = aperture sun AND, when the temperature criterion is in use,
+        ///                     And: solar threshold met AND temperature threshold met
+        ///                     Or : solar threshold met OR  temperature threshold met
         ///                     With the temperature criterion NOT in use, both reduce to the solar
         ///                     demand — an absent criterion can neither block an AND nor satisfy
         ///                     an OR.
+        ///                     The aperture-sun gate sits OUTSIDE the OR deliberately: without it a
+        ///                     hot summer afternoon would request shading for a façade facing
+        ///                     completely away from the sun.
         ///   wind safe       = no constraint, OR the recorded wind speed &lt;= MaximumWindSpeed, OR
         ///                     the hour carries no wind speed at all (see below).
         ///   shade on        = shade demand AND wind safe.
@@ -108,7 +116,8 @@ namespace SAM.Analytical.SolarCalculator
                 ? (DateTime.IsLeapYear(year) ? 8784 : 8760)
                 : (analysisPeriod.HoursOfYear()?.Count ?? 0);
 
-            List<int> sunHoursOfYear = new List<int>();
+            List<int> daylightHoursOfYear = new List<int>();
+            List<int> apertureSunHoursOfYear = new List<int>();
             List<int> solarDemandHoursOfYear = new List<int>();
             List<int> temperatureDemandHoursOfYear = new List<int>();
             List<int> windSafeHoursOfYear = new List<int>();
@@ -131,7 +140,17 @@ namespace SAM.Analytical.SolarCalculator
                 }
 
                 int hourOfYear = apertureSolarHour.HourOfYear;
-                sunHoursOfYear.Add(hourOfYear);
+                daylightHoursOfYear.Add(hourOfYear);
+
+                // ---- the aperture-sun gate. Daylight belongs to the site; sun ON THIS WINDOW is
+                // what a shading device can act on. Everything below is evaluated only here, so a
+                // hot hour can never request shading for a façade the sun is behind.
+                if (!apertureSolarHour.SunInFrontOfAperture || !(apertureSolarHour.ApertureDirectIrradiance > 0))
+                {
+                    continue;
+                }
+
+                apertureSunHoursOfYear.Add(hourOfYear);
 
                 // ---- solar criterion: the DIRECT beam on this window's own plane.
                 bool solarDemand = apertureSolarHour.ApertureDirectIrradiance >= settings.MinimumApertureIrradiance;
@@ -220,7 +239,7 @@ namespace SAM.Analytical.SolarCalculator
 
             return new SolarControlProfile(
                 target.ApertureGuid, year, timeShiftInMinutes, settings,
-                sunHoursOfYear, solarDemandHoursOfYear, temperatureDemandHoursOfYear, windSafeHoursOfYear,
+                daylightHoursOfYear, apertureSunHoursOfYear, solarDemandHoursOfYear, temperatureDemandHoursOfYear, windSafeHoursOfYear,
                 shadeDemandHoursOfYear, shadeOnHoursOfYear, highWindHoursOfYear, weightByHourOfYear,
                 apertureSolarHours.Count, Math.Max(0, hourCount - apertureSolarHours.Count), missingTemperatureHours, missingWindSpeedHours);
         }
