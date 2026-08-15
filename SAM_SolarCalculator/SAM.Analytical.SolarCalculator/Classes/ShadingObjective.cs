@@ -322,6 +322,60 @@ namespace SAM.Analytical.SolarCalculator
             return double.IsNaN(reference) ? 0.0 : materialFraction * reference;
         }
 
+        /// <summary>The same objective over a complete SCHEME performance.</summary>
+        public double Score(ShadingSchemePerformance performance)
+        {
+            if (performance == null)
+            {
+                return double.NaN;
+            }
+
+            return Benefit(performance) - wantedSolarPenalty * Harm(performance) - materialPenalty * Cost(performance);
+        }
+
+        /// <summary>The admitted energy the scheme material cost is measured against, kWh.</summary>
+        public double ReferenceEnergy(ShadingSchemePerformance performance)
+        {
+            if (performance == null)
+            {
+                return double.NaN;
+            }
+
+            return materialCostReference == MaterialCostReference.AdmittedUnwantedEnergy
+                ? performance.AdmittedUnwantedEnergy
+                : performance.AdmittedDirectEnergy;
+        }
+
+        /// <summary>Benefit: the unwanted beam the scheme intercepts, kWh.</summary>
+        public double Benefit(ShadingSchemePerformance performance)
+        {
+            return performance == null ? double.NaN : performance.UnwantedSolarIntercepted;
+        }
+
+        /// <summary>Harm: the wanted beam the scheme destroys, kWh.</summary>
+        public double Harm(ShadingSchemePerformance performance)
+        {
+            return performance == null ? double.NaN : performance.WantedSolarBlocked;
+        }
+
+        /// <summary>Cost: the scheme material charge priced in kWh.</summary>
+        public double Cost(ShadingSchemePerformance performance)
+        {
+            if (performance == null)
+            {
+                return double.NaN;
+            }
+
+            double materialFraction = performance.MaterialFraction;
+            if (double.IsNaN(materialFraction))
+            {
+                materialFraction = 0.0;
+            }
+
+            double reference = ReferenceEnergy(performance);
+            return double.IsNaN(reference) ? 0.0 : materialFraction * reference;
+        }
+
         public bool FromJsonObject(JsonObject jObject)
         {
             if (jObject == null)
