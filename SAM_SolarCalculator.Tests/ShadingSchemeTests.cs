@@ -216,6 +216,76 @@ namespace SAM.SolarCalculator.Tests
         }
 
         [Fact]
+        public void Grouped_Devices_Stay_Paired_With_Their_Own_Groups_Under_Reversed_Input_Order()
+        {
+            // Two grouped devices over two groups of DIFFERENT widths, supplied with the group list
+            // in the opposite order to the device list. A device rebuilt against another device's
+            // group frame produces the wrong canopy; the pairing must follow GroupGuid, never input
+            // order.
+            Guid a = new Guid("aaaaaaa1-0000-0000-0000-000000000001");
+            Guid b = new Guid("aaaaaaa1-0000-0000-0000-000000000002");
+            Guid c = new Guid("aaaaaaa1-0000-0000-0000-000000000003");
+
+            ApertureSolarTarget targetA = Target(1);
+            ApertureSolarTarget targetB = Target(2);
+            ApertureSolarTarget targetC = Target(3);
+            List<ApertureSolarTarget> targets = new List<ApertureSolarTarget> { targetA, targetB, targetC };
+
+            Guid wideGroupGuid = new Guid("ccccccc1-0000-0000-0000-000000000009"); // sorts LAST
+            Guid narrowGroupGuid = new Guid("ccccccc1-0000-0000-0000-000000000001"); // sorts FIRST
+
+            // The wide group spans A + B (width 2.0); the narrow group spans C alone (width 1.0).
+            ApertureShadingGroup wideGroup = new ApertureShadingGroup(
+                wideGroupGuid, new Guid("bbbbbbb1-0000-0000-0000-000000000001"),
+                new List<ApertureSolarTarget> { targetA, targetB }, targetA.Plane, 0.0, 2.0, 1.0);
+            ApertureShadingGroup narrowGroup = new ApertureShadingGroup(
+                narrowGroupGuid, new Guid("bbbbbbb1-0000-0000-0000-000000000001"),
+                new List<ApertureSolarTarget> { targetC }, targetC.Plane, 0.0, 1.0, 1.0);
+
+            GroupedShadingDevice wideDevice = new GroupedShadingDevice(
+                wideGroupGuid, new Guid("bbbbbbb1-0000-0000-0000-000000000001"), new List<Guid> { a, b }, new RetractableAwning(2.1, 15.0, 0.0, 0.15), AwningSpecification.Dakar);
+            GroupedShadingDevice narrowDevice = new GroupedShadingDevice(
+                narrowGroupGuid, new Guid("bbbbbbb1-0000-0000-0000-000000000001"), new List<Guid> { c }, new RetractableAwning(2.1, 15.0, 0.0, 0.15), AwningSpecification.Dakar);
+
+            // Device list: wide first. Group list: REVERSED (narrow first). Pre-fix, the devices
+            // were sorted by GroupGuid while the groups kept input order, pairing the wide device
+            // with the narrow group's frame.
+            ShadingScheme scheme = new ShadingScheme(
+                "Two Awnings", "RationaliseAwningGroup", new List<Guid> { a, b, c }, new List<Guid> { new Guid("bbbbbbb1-0000-0000-0000-000000000001") },
+                new List<ShadingDevice>(), new List<GroupedShadingDevice> { wideDevice, narrowDevice },
+                new List<ApertureShadingGroup> { narrowGroup, wideGroup },
+                ShadingDesignStatus.Ok, new List<string>(), null, new List<string>());
+
+            Assert.Equal(2, scheme.GroupedDevices.Count);
+            Assert.Equal(2, scheme.Groups.Count);
+
+            // Each device resolves to ITS OWN group, identified by GroupGuid.
+            ApertureShadingGroup resolvedWide = scheme.Group(wideDevice);
+            ApertureShadingGroup resolvedNarrow = scheme.Group(narrowDevice);
+            Assert.Equal(wideGroupGuid, resolvedWide.GroupGuid);
+            Assert.Equal(narrowGroupGuid, resolvedNarrow.GroupGuid);
+            Assert.Equal(2.0, resolvedWide.Width, 9);
+            Assert.Equal(1.0, resolvedNarrow.Width, 9);
+
+            // The built geometry follows the pairing: the wide device's canopy spans the wide
+            // group's extent, the narrow device's canopy the narrow group's extent.
+            List<ShadingElement> elements = scheme.SchemeElements(targets);
+            Assert.Equal(2, elements.Count);
+            ShadingElement wideCanopy = elements.First(x => x.Area > 4.0);
+            ShadingElement narrowCanopy = elements.First(x => x.Area <= 4.0);
+
+            double wideExpected = (2.0 + 2.0 * 0.15) * (2.1 / Math.Cos(15.0 * Math.PI / 180.0));
+            double narrowExpected = (1.0 + 2.0 * 0.15) * (2.1 / Math.Cos(15.0 * Math.PI / 180.0));
+            Assert.Equal(wideExpected, wideCanopy.Area, 6);
+            Assert.Equal(narrowExpected, narrowCanopy.Area, 6);
+
+            // Element owners point at the right placements.
+            Dictionary<Guid, Guid> owners = scheme.ElementOwners(targets);
+            Assert.Contains(wideGroupGuid, owners.Values);
+            Assert.Contains(narrowGroupGuid, owners.Values);
+        }
+
+        [Fact]
         public void Returned_Collections_Are_Copies()
         {
             Guid a = new Guid("aaaaaaa1-0000-0000-0000-000000000001");

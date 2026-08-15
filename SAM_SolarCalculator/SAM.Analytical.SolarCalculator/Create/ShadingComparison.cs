@@ -88,13 +88,31 @@ namespace SAM.Analytical.SolarCalculator
 
             // ------------------------------------------------------------ inputs ----
 
+            // Duplicates are REFUSED, never silently collapsed: an audit-oriented comparison must
+            // not quietly change the supplied set, because a duplicated aperture would double-count
+            // its energy in every scheme equally and a duplicated scheme would compete against
+            // itself.
             List<ApertureSolarTarget> targetList = new List<ApertureSolarTarget>();
+            HashSet<Guid> targetGuids = new HashSet<Guid>();
             foreach (ApertureSolarTarget target in targets ?? new List<ApertureSolarTarget>())
             {
-                if (target != null && !targetList.Exists(x => x.ApertureGuid == target.ApertureGuid))
+                if (target == null)
                 {
-                    targetList.Add(target);
+                    continue;
                 }
+
+                if (!targetGuids.Add(target.ApertureGuid))
+                {
+                    message = string.Format(CultureInfo.InvariantCulture,
+                        "Aperture {0} was supplied more than once. A duplicated aperture would double-count its energy in every scheme equally, which hides rather than cancels the error. Remove the duplicate target.",
+                        target.ApertureGuid);
+                    comparisonResult.Message = message;
+                    comparisonResult.Outcome = ShadingComparisonOutcome.NoComparableOptions;
+                    comparisonResult.RecommendationStatus = ShadingRecommendationStatus.NoDecision;
+                    return comparisonResult;
+                }
+
+                targetList.Add(target);
             }
             targetList.Sort((a, b) => a.ApertureGuid.CompareTo(b.ApertureGuid));
             comparisonResult.Targets = targetList;
@@ -110,12 +128,26 @@ namespace SAM.Analytical.SolarCalculator
             }
 
             List<ShadingScheme> schemeList = new List<ShadingScheme>();
+            HashSet<Guid> schemeGuids = new HashSet<Guid>();
             foreach (ShadingScheme scheme in schemes ?? new List<ShadingScheme>())
             {
-                if (scheme != null && !schemeList.Exists(x => x.SchemeGuid == scheme.SchemeGuid))
+                if (scheme == null)
                 {
-                    schemeList.Add(scheme);
+                    continue;
                 }
+
+                if (!schemeGuids.Add(scheme.SchemeGuid))
+                {
+                    message = string.Format(CultureInfo.InvariantCulture,
+                        "The scheme '{0}' ({1}) was supplied more than once. A duplicated scheme would compete against itself in the ranking. Remove the duplicate.",
+                        scheme.Name, scheme.SchemeGuid);
+                    comparisonResult.Message = message;
+                    comparisonResult.Outcome = ShadingComparisonOutcome.NoComparableOptions;
+                    comparisonResult.RecommendationStatus = ShadingRecommendationStatus.NoDecision;
+                    return comparisonResult;
+                }
+
+                schemeList.Add(scheme);
             }
             schemeList.Sort((a, b) => a.SchemeGuid.CompareTo(b.SchemeGuid));
 
@@ -248,7 +280,8 @@ namespace SAM.Analytical.SolarCalculator
                 ShadingComparisonRow noShadeRow = rankable.Find(x => x.Status == ShadingComparisonStatus.NoShadeBaseline);
                 foreach (ShadingComparisonRow row in rankable)
                 {
-                    row.ScoreDeltaToNoShade = noShadeRow == null ? double.NaN : noShadeRow.ObjectiveScore - row.ObjectiveScore;
+                    // "Score above or below No Shade": positive when the option beats the baseline.
+                    row.ScoreDeltaToNoShade = noShadeRow == null ? double.NaN : row.ObjectiveScore - noShadeRow.ObjectiveScore;
                 }
 
                 foreach (ShadingComparisonRow row in rankable)
@@ -272,7 +305,13 @@ namespace SAM.Analytical.SolarCalculator
             comparisonResult.Rows = ordered;
 
             comparisonResult.RankedCount = rankable.Count;
-            comparisonResult.VerifiedCount = rows.Count - rows.FindAll(x => x.Status == ShadingComparisonStatus.NotEvaluated).Count;
+            // "Verified and comparable" — the audit-line wording — is exactly the rows the ranking
+            // could see: Ranked + NoShadeBaseline + NotRankable. Incomparable rows are verified on
+            // a different basis and must NOT inflate this count, or the audit line would contradict
+            // its own incomparable figure.
+            comparisonResult.VerifiedCount = rows.FindAll(x =>
+                x.Status != ShadingComparisonStatus.NotEvaluated
+                && x.Status != ShadingComparisonStatus.Incomparable).Count;
             comparisonResult.IncomparableCount = rows.FindAll(x => x.Status == ShadingComparisonStatus.Incomparable).Count;
             comparisonResult.NotEvaluatedCount = rows.FindAll(x => x.Status == ShadingComparisonStatus.NotEvaluated).Count;
             comparisonResult.NotRankableCount = rows.FindAll(x => x.Status == ShadingComparisonStatus.NotRankable).Count;
@@ -676,7 +715,12 @@ namespace SAM.Analytical.SolarCalculator
             required.Add("repeat this comparison at a finer grid and confirm the ranking survives");
         }
 
-        private static List<ShadingProjectInput> ProjectInputs(
+        /// <summary>
+        /// The decision-facing input table. Internal so the DEFAULT-vs-PROJECT provenance rule is
+        /// unit-testable directly: "supplied" means the caller actually connected a value, never
+        /// whether the value happens to differ from the library default.
+        /// </summary>
+        internal static List<ShadingProjectInput> ProjectInputs(
             double wantedSolarPenalty,
             double materialPenalty,
             double gridSize,

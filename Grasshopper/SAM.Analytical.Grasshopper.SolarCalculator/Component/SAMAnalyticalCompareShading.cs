@@ -86,7 +86,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 result.Add(new GH_SAMParam(new GooSAMObjectParam() { Name = "topRankedVerifiedScheme", NickName = "topRankedVerifiedScheme", Description = "The verified result of the ANALYTICAL LEADER (arithmetic rank 1)", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new GooSAMObjectParam() { Name = "topRankedScheme", NickName = "topRankedScheme", Description = "The analytical leader scheme", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Brep() { Name = "topRankedGeometry", NickName = "topRankedGeometry", Description = "The analytical leader's geometry, rebuilt from its placements", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
-                result.Add(new GH_SAMParam(new GooSAMObjectParam() { Name = "rankedVerifiedSchemes", NickName = "rankedVerifiedSchemes", Description = "Every verified scheme, in ranked order", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new GooSAMObjectParam() { Name = "rankedVerifiedSchemes", NickName = "rankedVerifiedSchemes", Description = "The verified result of every RANKED scheme, in ranked order. Schemes that could not be ranked are reported in the result and the report, not here", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
 
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Integer() { Name = "ranks", NickName = "ranks", Description = "The rank of each option, in ranked order", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Boolean() { Name = "topRanked", NickName = "topRanked", Description = "True on the analytical leader (rank 1)", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
@@ -131,6 +131,18 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             global::Grasshopper.Kernel.Parameters.Param_Number result = new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = name, NickName = name, Description = description, Access = GH_ParamAccess.item };
             result.SetPersistentData(defaultValue);
             return result;
+        }
+
+        /// <summary>
+        /// Whether an input actually carries data — the only honest reading of "supplied". A value
+        /// equal to the library default (e.g. mu = 0.1) that an engineer explicitly connected is a
+        /// confirmed project value, not a default; the report's provenance block must not label it
+        /// DEFAULT.
+        /// </summary>
+        private bool InputSupplied(IGH_DataAccess dataAccess, string name)
+        {
+            int index = Params.IndexOfInputParam(name);
+            return index != -1 && Params.Input[index] != null && Params.Input[index].SourceCount > 0;
         }
 
         private double Number(IGH_DataAccess dataAccess, string name, double defaultValue)
@@ -376,8 +388,8 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             ShadingComparisonResult result = SolarCreate.ShadingComparison(
                 analyticalModel, targets, schemes, wantedSolarPenalty, materialPenalty, materialCostReference, out string message,
                 weatherData, desirabilityStrategy, unwantedPeriod, wantedPeriod, gridSize, sunAngleStep, recalculate,
-                wantedSolarPenaltySupplied: wantedSolarPenalty != 1.0,
-                materialPenaltySupplied: materialPenalty != 0.1,
+                wantedSolarPenaltySupplied: InputSupplied(dataAccess, "_wantedSolarPenalty_"),
+                materialPenaltySupplied: InputSupplied(dataAccess, "_materialPenalty_"),
                 desirabilitySupplied: strategySupplied || unwantedSupplied || wantedSupplied);
 
             if (result == null || result.Message != null)
@@ -422,10 +434,13 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             index = Params.IndexOfOutputParam("rankedVerifiedSchemes");
             if (index != -1)
             {
+                // The output contract is "every VERIFIED scheme, in RANKED order": rows that could
+                // not be ranked (incomparable, not evaluated, not rankable) are reported elsewhere
+                // and are excluded here so the list matches its name.
                 List<GooSAMObject> verifiedSchemes = new List<GooSAMObject>();
                 foreach (ShadingComparisonRow row in result.Rows)
                 {
-                    if (row.VerifiedResult != null)
+                    if (row.VerifiedResult != null && row.Rank >= 1)
                     {
                         verifiedSchemes.Add(new GooSAMObject(row.VerifiedResult));
                     }

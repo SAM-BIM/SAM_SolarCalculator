@@ -226,6 +226,28 @@ namespace SAM.SolarCalculator.Tests
         }
 
         [Fact]
+        public void Indeterminate_Rank_One_Also_Requires_A_Reason()
+        {
+            List<ApertureSolarTarget> targets = Targets(3);
+            ShadingScheme leader = Scheme("Overhang", targets, new Overhang(0.5));
+            ShadingScheme other = Scheme("VerticalFins", targets, new VerticalFins(0.4, 2));
+            ShadingComparisonResult result = Comparison(leader, other);
+            result.RecommendationStatus = ShadingRecommendationStatus.Indeterminate;
+
+            // An INDETERMINATE comparison has no single analytical recommendation: choosing rank 1
+            // is an explicit engineering decision and must be recorded, exactly like a lower rank.
+            ShadingSelectionDecision refused = result.SelectShadingScheme(leader, null);
+            Assert.False(refused.Successful);
+            Assert.Contains("requires a recorded reason", refused.Message);
+
+            ShadingSelectionDecision accepted = result.SelectShadingScheme(leader, "Confirmed against the winter-solar requirement.");
+            Assert.True(accepted.Successful);
+            Assert.Equal(1, accepted.SelectedRank);
+            Assert.Equal(ShadingSelectionAlignment.LeaderNotDistinguishable, accepted.SelectionAlignment);
+            Assert.Contains("could not be separated", accepted.DecisionSummary);
+        }
+
+        [Fact]
         public void A_Selection_Never_Changes_Scores_Ranks_Or_Robustness()
         {
             List<ApertureSolarTarget> targets = Targets(3);

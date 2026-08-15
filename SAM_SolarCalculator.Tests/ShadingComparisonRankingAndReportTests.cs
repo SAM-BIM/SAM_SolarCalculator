@@ -199,7 +199,7 @@ namespace SAM.SolarCalculator.Tests
             result.WeatherDescription = "Synthetic";
             result.SuppliedCount = rows.Count;
             result.RankedCount = rows.Count(x => x.Rank >= 1);
-            result.VerifiedCount = rows.Count(x => x.Status != ShadingComparisonStatus.NotEvaluated);
+            result.VerifiedCount = rows.Count(x => x.Status != ShadingComparisonStatus.NotEvaluated && x.Status != ShadingComparisonStatus.Incomparable);
             result.IncomparableCount = rows.Count(x => x.Status == ShadingComparisonStatus.Incomparable);
             result.NotEvaluatedCount = rows.Count(x => x.Status == ShadingComparisonStatus.NotEvaluated);
             result.NotRankableCount = rows.Count(x => x.Status == ShadingComparisonStatus.NotRankable);
@@ -245,7 +245,8 @@ namespace SAM.SolarCalculator.Tests
                 {
                     if (row.Rank >= 1)
                     {
-                        row.ScoreDeltaToNoShade = noShade == null ? double.NaN : noShade.ObjectiveScore - row.ObjectiveScore;
+                        // Positive when the option beats the baseline (the production convention).
+                        row.ScoreDeltaToNoShade = noShade == null ? double.NaN : row.ObjectiveScore - noShade.ObjectiveScore;
                     }
                 }
             }
@@ -978,6 +979,119 @@ namespace SAM.SolarCalculator.Tests
             Assert.Contains("PROJECT INPUTS REQUIRING CONFIRMATION", report);
             Assert.Contains("decision-sensitive", report);
             Assert.Contains("DEFAULT", report);
+        }
+
+        [Fact]
+        public void Score_Delta_To_No_Shade_Is_Positive_Zero_And_Negative_By_Sign()
+        {
+            List<ApertureSolarTarget> targets = Targets(3);
+            ShadingObjective objective = new ShadingObjective(1.0, 0.1);
+
+            // 30 - 1*5 - 0.1*10 = 24 above the baseline; 2 - 1*5 - 0.1*1 = -3.1 below it.
+            ShadingComparisonRow above = Row(Scheme("Above", targets, targets.ToDictionary(t => t.ApertureGuid, t => (IShadingTypology)new Overhang(0.5))), targets, objective, 100, 60, 20, 35, 30, 5, 0.6, true);
+            ShadingComparisonRow below = Row(Scheme("Below", targets, targets.ToDictionary(t => t.ApertureGuid, t => (IShadingTypology)new Overhang(0.5))), targets, objective, 100, 60, 20, 7, 2, 5, 0.06, true);
+            ShadingComparisonRow noShade = NoShadeRow("No Shade", targets);
+
+            ShadingComparisonResult result = Ranked(new List<ShadingComparisonRow> { below, above, noShade }, objective);
+
+            ShadingComparisonRow aboveRow = result.Rows.First(x => x.OptionName == "Above");
+            ShadingComparisonRow belowRow = result.Rows.First(x => x.OptionName == "Below");
+            ShadingComparisonRow noShadeRow = result.Rows.First(x => x.OptionName == "No Shade");
+
+            Assert.Equal(aboveRow.ObjectiveScore, aboveRow.ScoreDeltaToNoShade, 9);
+            Assert.True(aboveRow.ScoreDeltaToNoShade > 0);
+            Assert.Equal(0.0, noShadeRow.ScoreDeltaToNoShade, 12);
+            Assert.True(belowRow.ScoreDeltaToNoShade < 0);
+            Assert.Equal(belowRow.ObjectiveScore, belowRow.ScoreDeltaToNoShade, 9);
+        }
+
+        [Fact]
+        public void The_Resolution_Block_Reports_The_Runner_Up_Margin_Not_The_Leaders_Zero_Delta()
+        {
+            // A known non-zero case: the Kołobrzeg numbers. The leader's own delta is 0 by
+            // construction; the report must print the runner-up's 6.383 kWh.
+            List<ApertureSolarTarget> targets = Targets(3);
+            ShadingObjective objective = new ShadingObjective(1.0, 0.1);
+
+            ShadingComparisonRow leader = Row(Scheme("HorizontalLouvres", targets, targets.ToDictionary(t => t.ApertureGuid, t => (IShadingTypology)new HorizontalLouvres(0.3, 3))), targets, objective, 148.970, 53.150, 3.532, 54.911, 51.478, 3.433, 3.612, true);
+            ShadingComparisonRow runnerUp = Row(Scheme("Grouped Dakar Retractable Awning", targets, targets.ToDictionary(t => t.ApertureGuid, t => (IShadingTypology)new RetractableAwning(2.1, 15.0))), targets, objective, 148.970, 53.150, 3.532, 55.751, 52.299, 3.452, 5.790, true);
+            ShadingComparisonRow noShade = NoShadeRow("No Shade", targets);
+
+            ShadingComparisonResult result = Ranked(new List<ShadingComparisonRow> { runnerUp, leader, noShade }, objective);
+
+            // The leader really is the louvres and the margin really is non-zero.
+            Assert.Equal("HorizontalLouvres", result.Rows[0].OptionName);
+            Assert.Equal(0.0, result.Rows[0].ScoreDeltaToTopRanked, 12);
+            Assert.True(result.Rows[1].ScoreDeltaToTopRanked > 1.0, "the fixture must carry a real margin");
+
+            string report = result.MarkdownReport(null);
+            Assert.Contains("Rank 1 to rank 2 margin", report);
+            Assert.DoesNotContain("Rank 1 to rank 2 margin         0.000", report);
+            Assert.Contains(" of the rank-1 score", report);
+
+            // The margin equals the runner-up delta (and the leader's arithmetic block agrees).
+            string margin = result.Rows[1].ScoreDeltaToTopRanked.ToString("0.000", CultureInfo.InvariantCulture);
+            Assert.Contains("margin         " + margin + " kWh", report);
+        }
+
+        [Fact]
+        public void The_Quantisation_Classification_Thresholds_Render()
+        {
+            List<ApertureSolarTarget> targets = Targets(3);
+            ShadingObjective objective = new ShadingObjective(1.0, 0.1);
+            ShadingComparisonRow noShade = NoShadeRow("No Shade", targets);
+
+            ShadingComparisonResult Build(double leaderScore, double margin)
+            {
+                ShadingComparisonRow leader = Row(Scheme("Leader", targets, targets.ToDictionary(t => t.ApertureGuid, t => (IShadingTypology)new Overhang(0.5))), targets, objective, 148.970, 53.150, 3.532, 40, leaderScore, 5, 1.5, true);
+                ShadingComparisonRow runnerUp = Row(Scheme("RunnerUp", targets, targets.ToDictionary(t => t.ApertureGuid, t => (IShadingTypology)new Overhang(0.5))), targets, objective, 148.970, 53.150, 3.532, 40, leaderScore - margin, 5, 1.5, true);
+                ShadingComparisonResult result = Ranked(new List<ShadingComparisonRow> { runnerUp, leader, noShade }, objective);
+                Assert.Equal(3, result.RankedCount);
+                Assert.Equal("Leader", result.Rows[0].OptionName);
+                return result;
+            }
+
+            double indicator = 0.0154; // the documented 2° sun-group MAE
+
+            // 5x the indicator: WELL ABOVE.
+            string wellAbove = Build(100.0, 100.0 * 5.0 * indicator).MarkdownReport(null);
+            Assert.Contains("WELL ABOVE SUN-GROUP QUANTISATION INDICATOR", wellAbove);
+
+            // 2x: COMPARABLE TO.
+            string comparable = Build(100.0, 100.0 * 2.0 * indicator).MarkdownReport(null);
+            Assert.Contains("COMPARABLE TO SUN-GROUP QUANTISATION INDICATOR", comparable);
+
+            // 0.5x: WITHIN.
+            string within = Build(100.0, 100.0 * 0.5 * indicator).MarkdownReport(null);
+            Assert.Contains("WITHIN SUN-GROUP QUANTISATION INDICATOR", within);
+        }
+
+        [Fact]
+        public void Project_Input_Provenance_Distinguishes_Default_From_Explicitly_Supplied()
+        {
+            List<ApertureSolarTarget> targets = Targets(3);
+            ShadingObjective objective = new ShadingObjective(1.0, 0.1);
+
+            // A top/challenger pair whose mu break-even sits exactly on 0.1: mu is decision-
+            // sensitive, and the test exercises the provenance rule for BOTH provenance modes.
+            ShadingComparisonRow top = Row(Scheme("Top", targets, targets.ToDictionary(t => t.ApertureGuid, t => (IShadingTypology)new Overhang(0.5))), targets, objective, 100, 60, 20, 55, 50, 5, 0.6, true);
+            ShadingComparisonRow challenger = Row(Scheme("Challenger", targets, targets.ToDictionary(t => t.ApertureGuid, t => (IShadingTypology)new Overhang(0.5))), targets, objective, 100, 60, 20, 74.8, 60, 14.8, 0.72, true);
+
+            // mu = 0.1 at its default, not supplied: DEFAULT.
+            List<ShadingProjectInput> defaults = SolarCreate.ProjectInputs(
+                1.0, 0.1, 0.5, targets, false, false, false,
+                new List<ShadingComparisonRow> { top, challenger }, top, null);
+            ShadingProjectInput muDefault = defaults.First(x => x.Name == "Material penalty mu");
+            Assert.Equal("DEFAULT", muDefault.Source);
+            Assert.Equal("decision-sensitive", muDefault.Classification);
+
+            // The SAME value 0.1, explicitly supplied by the caller: PROJECT.
+            List<ShadingProjectInput> supplied = SolarCreate.ProjectInputs(
+                1.0, 0.1, 0.5, targets, false, true, false,
+                new List<ShadingComparisonRow> { top, challenger }, top, null);
+            ShadingProjectInput muSupplied = supplied.First(x => x.Name == "Material penalty mu");
+            Assert.Equal("PROJECT", muSupplied.Source);
+            Assert.Equal("decision-sensitive", muSupplied.Classification);
         }
 
         [Fact]

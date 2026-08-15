@@ -715,9 +715,12 @@ namespace SAM.Analytical.SolarCalculator
                 ShadingComparisonRow runnerUp = RunnerUp(result, leader);
                 if (leader != null && runnerUp != null && !double.IsNaN(leader.ObjectiveScore) && Math.Abs(leader.ObjectiveScore) > 1e-12)
                 {
-                    double marginFraction = Math.Abs(leader.ScoreDeltaToTopRanked) / Math.Abs(leader.ObjectiveScore);
+                    // The leader's own delta is 0 by construction; the margin is carried by the
+                    // runner-up.
+                    double margin = runnerUp.ScoreDeltaToTopRanked;
+                    double marginFraction = Math.Abs(margin) / Math.Abs(leader.ObjectiveScore);
                     stringBuilder.AppendLine();
-                    stringBuilder.Append("Rank 1 to rank 2 margin         ").Append(En(leader.ScoreDeltaToTopRanked)).Append(" kWh = ")
+                    stringBuilder.Append("Rank 1 to rank 2 margin         ").Append(En(margin)).Append(" kWh = ")
                         .Append(Pct(marginFraction)).AppendLine(" of the rank-1 score");
                     stringBuilder.Append("Screening result                ");
 

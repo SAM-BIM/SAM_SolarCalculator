@@ -95,11 +95,41 @@ namespace SAM.Analytical.SolarCalculator
             }
             this.groupedDevices.Sort((a, b) => a.GroupGuid.CompareTo(b.GroupGuid));
 
+            // The group list travels WITH its device: each group is paired to the device carrying
+            // the same GroupGuid, and the PAIR is sorted, so later index-based pairing
+            // (SchemeElements, ElementOwners) can never rebuild a device against another device's
+            // frame just because the input order differed. A group whose Guid matches no device is
+            // dead data and is dropped.
+            List<Tuple<GroupedShadingDevice, ApertureShadingGroup>> pairs = new List<Tuple<GroupedShadingDevice, ApertureShadingGroup>>();
+            foreach (GroupedShadingDevice device in this.groupedDevices)
+            {
+                pairs.Add(new Tuple<GroupedShadingDevice, ApertureShadingGroup>(device, null));
+            }
+
             foreach (ApertureShadingGroup group in groups ?? new List<ApertureShadingGroup>())
             {
-                if (group != null)
+                if (group == null)
                 {
-                    this.groups.Add(new ApertureShadingGroup(group));
+                    continue;
+                }
+
+                int index = pairs.FindIndex(x => x.Item1 != null && x.Item1.GroupGuid == group.GroupGuid);
+                if (index != -1)
+                {
+                    pairs[index] = new Tuple<GroupedShadingDevice, ApertureShadingGroup>(pairs[index].Item1, new ApertureShadingGroup(group));
+                }
+            }
+
+            pairs.Sort((a, b) => a.Item1.GroupGuid.CompareTo(b.Item1.GroupGuid));
+
+            this.groupedDevices = new List<GroupedShadingDevice>();
+            this.groups = new List<ApertureShadingGroup>();
+            foreach (Tuple<GroupedShadingDevice, ApertureShadingGroup> pair in pairs)
+            {
+                if (pair.Item1 != null)
+                {
+                    this.groupedDevices.Add(pair.Item1);
+                    this.groups.Add(pair.Item2);
                 }
             }
 

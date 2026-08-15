@@ -82,12 +82,27 @@ namespace SAM.Analytical.SolarCalculator
             }
 
             bool isLeader = row.TopRanked;
+            bool indeterminate = comparisonResult.RecommendationStatus == ShadingRecommendationStatus.Indeterminate;
 
-            if (!isLeader && string.IsNullOrWhiteSpace(selectionReason))
+            // An INDETERMINATE comparison has no single analytical recommendation: choosing either
+            // leading option - rank 1 included - is an explicit engineering decision and needs a
+            // reason, exactly like choosing a lower rank.
+            bool requiresReason = !isLeader || indeterminate;
+            if (requiresReason && string.IsNullOrWhiteSpace(selectionReason))
             {
-                decision.Message = string.Format(CultureInfo.InvariantCulture,
-                    "{0} is ranked {1}, not rank 1. Selecting a lower-ranked option requires a recorded reason, so the report carries an engineering decision rather than only a choice. Supply _selectionReason_.",
-                    row.OptionName, row.Rank);
+                if (!isLeader)
+                {
+                    decision.Message = string.Format(CultureInfo.InvariantCulture,
+                        "{0} is ranked {1}, not rank 1. Selecting a lower-ranked option requires a recorded reason, so the report carries an engineering decision rather than only a choice. Supply _selectionReason_.",
+                        row.OptionName, row.Rank);
+                }
+                else
+                {
+                    decision.Message = string.Format(CultureInfo.InvariantCulture,
+                        "{0} is rank 1, but the comparison could not separate the leading options analytically (INDETERMINATE). Choosing it is therefore an explicit engineering decision and requires a recorded reason. Supply _selectionReason_.",
+                        row.OptionName);
+                }
+
                 return decision;
             }
 
@@ -95,13 +110,13 @@ namespace SAM.Analytical.SolarCalculator
             decision.SelectedRank = row.Rank;
             decision.SelectionReason = string.IsNullOrWhiteSpace(selectionReason) ? null : selectionReason.Trim();
 
-            if (isLeader)
-            {
-                decision.SelectionAlignment = ShadingSelectionAlignment.AgreesWithLeader;
-            }
-            else if (comparisonResult.RecommendationStatus == ShadingRecommendationStatus.Indeterminate)
+            if (indeterminate)
             {
                 decision.SelectionAlignment = ShadingSelectionAlignment.LeaderNotDistinguishable;
+            }
+            else if (isLeader)
+            {
+                decision.SelectionAlignment = ShadingSelectionAlignment.AgreesWithLeader;
             }
             else
             {

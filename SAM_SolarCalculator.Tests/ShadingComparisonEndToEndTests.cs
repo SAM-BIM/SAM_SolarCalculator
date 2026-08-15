@@ -10,6 +10,7 @@ using SAM.Analytical;
 using SAM.Analytical.SolarCalculator;
 using SolarCreate = SAM.Analytical.SolarCalculator.Create;
 using SAM.Core.SolarCalculator;
+using SAM.Geometry.Spatial;
 using SAM.Weather;
 
 namespace SAM.SolarCalculator.Tests
@@ -142,6 +143,39 @@ namespace SAM.SolarCalculator.Tests
             Assert.Equal(first.ReportMarkdown, second.ReportMarkdown);
             Assert.Equal(first.ReportCsv, second.ReportCsv);
             Assert.Equal(first.ToJsonObject().ToJsonString(), second.ToJsonObject().ToJsonString());
+        }
+
+        [Fact]
+        public void Duplicated_Targets_And_Duplicated_Schemes_Are_Refused_Not_Silently_Collapsed()
+        {
+            // The refusal fires during input materialisation, before any solar context is built, so
+            // a null model exercises it.
+            List<ApertureSolarTarget> southTargets = new List<ApertureSolarTarget>();
+            foreach (int ordinal in new int[] { 1, 2 })
+            {
+                SAM.Geometry.Spatial.Face3D face = SyntheticTargets.Face(SyntheticTargets.South, new Point3D(2.0 * ordinal, 0, 5), 1.0, 2.0);
+                southTargets.Add(new ApertureSolarTarget(new Guid("eeeeeee1-0000-0000-0000-00000000000" + ordinal), new Guid("fffffff1-0000-0000-0000-000000000001"), face, Geometry.SolarCalculator.Query.AnalysisCells(face, 0.5)));
+            }
+
+            ShadingScheme scheme = new ShadingScheme("Overhang", "RationaliseShading", southTargets.Select(x => x.ApertureGuid), new List<Guid> { southTargets[0].PanelGuid },
+                southTargets.Select(t => new ShadingDevice(t.ApertureGuid, (IShadingTypology)new Overhang(0.5))),
+                new List<GroupedShadingDevice>(), new List<ApertureShadingGroup>(),
+                ShadingDesignStatus.Ok, new List<string>(), null, new List<string>());
+
+            // Duplicated target.
+            ShadingComparisonResult duplicateTargets = ((AnalyticalModel)null).ShadingComparison(
+                new List<ApertureSolarTarget> { southTargets[0], southTargets[1], southTargets[0] },
+                new List<ShadingScheme> { scheme }, 1.0, 0.1, MaterialCostReference.AdmittedDirectEnergy, out string duplicateTargetMessage,
+                null, null, null, null, GridSize, 2.0, false);
+            Assert.Contains("more than once", duplicateTargetMessage);
+            Assert.Equal(ShadingComparisonOutcome.NoComparableOptions, duplicateTargets.Outcome);
+
+            // Duplicated scheme (same SchemeGuid supplied twice).
+            ShadingComparisonResult duplicateSchemes = ((AnalyticalModel)null).ShadingComparison(
+                southTargets, new List<ShadingScheme> { scheme, new ShadingScheme(scheme) }, 1.0, 0.1, MaterialCostReference.AdmittedDirectEnergy, out string duplicateSchemeMessage,
+                null, null, null, null, GridSize, 2.0, false);
+            Assert.Contains("more than once", duplicateSchemeMessage);
+            Assert.Equal(ShadingComparisonOutcome.NoComparableOptions, duplicateSchemes.Outcome);
         }
 
         [Fact]
