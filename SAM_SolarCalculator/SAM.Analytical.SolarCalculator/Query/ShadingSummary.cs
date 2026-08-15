@@ -201,15 +201,16 @@ namespace SAM.Analytical.SolarCalculator
         }
 
         /// <summary>Parameter values with the units they are actually in, or null when there are none.</summary>
-        private static string ParameterText(List<string> names, Func<string, double> value)
+        public static string ParameterText(IEnumerable<string> names, Func<string, double> value)
         {
-            if (names == null || names.Count == 0)
+            List<string> nameList = names == null ? new List<string>() : new List<string>(names);
+            if (nameList.Count == 0)
             {
                 return null;
             }
 
             StringBuilder stringBuilder = new StringBuilder();
-            foreach (string name in names)
+            foreach (string name in nameList)
             {
                 double parameter = value(name);
                 if (double.IsNaN(parameter))

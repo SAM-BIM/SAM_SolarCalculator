@@ -102,5 +102,61 @@ namespace SAM.Analytical.SolarCalculator
 
             return false;
         }
+
+        /// <summary>
+        /// The typology-level overload: whether a HAND-BUILT or scheme-carried device sits on the
+        /// grid-resolution cap. The cap is recomputed from the typology's declared bounds and the
+        /// Stage 9 search ranges (<see cref="Create.ShadingParameters"/>) instead of reading stored
+        /// bounds — the same two conditions apply: the grid genuinely narrowed the family's maximum
+        /// AND the device sits exactly on that narrowed maximum.
+        /// </summary>
+        public static bool GridResolutionCapReached(this IShadingTypology typology, ApertureSolarTarget target, double gridSize, out string message)
+        {
+            message = null;
+
+            if (typology == null || target == null || double.IsNaN(gridSize) || gridSize <= 0)
+            {
+                return false;
+            }
+
+            List<ShadingParameter> parameters = Create.ShadingParameters(typology, double.NaN, target, gridSize);
+            if (parameters == null || parameters.Count == 0)
+            {
+                return false;
+            }
+
+            foreach (ShadingParameter parameter in parameters)
+            {
+                string name = parameter?.Name;
+                if (name != "Count" && name != "LouvreCount" && name != "FinCount")
+                {
+                    continue;
+                }
+
+                if (!typology.TryGetBounds(name, out double _, out double declaredMaximum) || double.IsNaN(declaredMaximum))
+                {
+                    continue;
+                }
+
+                double cappedMaximum = parameter.Maximum;
+                if (double.IsNaN(cappedMaximum) || cappedMaximum >= declaredMaximum - 1e-9)
+                {
+                    continue;
+                }
+
+                double winner = typology.GetParameter(name);
+                if (double.IsNaN(winner) || Math.Abs(Math.Round(winner) - cappedMaximum) > 1e-9)
+                {
+                    continue;
+                }
+
+                message = string.Format(CultureInfo.InvariantCulture,
+                    "The selected {0} solution reached the analysis-grid resolution limit ({1:0.####} m). The analysis grid may have limited the element count. Refine the grid and compare the result to confirm the recommendation.",
+                    typology.Name, gridSize);
+                return true;
+            }
+
+            return false;
+        }
     }
 }

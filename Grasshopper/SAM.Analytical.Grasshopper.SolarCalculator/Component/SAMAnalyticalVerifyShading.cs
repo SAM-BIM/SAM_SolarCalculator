@@ -35,8 +35,15 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// 61.3 kWh with 46.0 unwanted and 0.0 wanted looked as though 15.3 kWh had gone missing.
         /// admittedNeutralSolar, neutralSolarIntercepted and accountingSummary make both balances
         /// close, and unwantedSolarIntercepted / wantedSolarBlocked are now on their own wires.
+        ///
+        /// 1.1.0 — the SHADING SCHEME path. Connect a complete ShadingScheme (from
+        /// SAMAnalytical.AssembleShadingSchemes) to _shadingDevice together with its targets on the
+        /// new _apertureSolarTargets_ input, and the scheme is verified as a WHOLE: every aperture
+        /// is measured against the complete scheme, so an overhang over one window that also shades
+        /// its neighbour is credited on the neighbour. The existing single-aperture behaviour is
+        /// unchanged.
         /// </summary>
-        public override string LatestComponentVersion => "1.0.2";
+        public override string LatestComponentVersion => "1.1.0";
 
         /// <summary>
         /// Provides an Icon for the component.
@@ -82,6 +89,10 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 run.SetPersistentData(false);
                 result.Add(new GH_SAMParam(run, ParamVisibility.Binding));
 
+                // Appended AFTER every pre-existing input so saved definitions keep their positional
+                // parameter indices (the legacy parameter reader restores parameters by position).
+                result.Add(new GH_SAMParam(new GooApertureSolarTargetParam() { Name = "_apertureSolarTargets_", NickName = "_apertureSolarTargets_", Description = "The scheme's windows. Required only when _shadingDevice carries a ShadingScheme - a scheme covers several windows and is verified against all of them at once", Access = GH_ParamAccess.list, Optional = true }, ParamVisibility.Voluntary));
+
                 return result.ToArray();
             }
         }
@@ -116,6 +127,11 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Brep() { Name = "shadingGeometry", NickName = "shadingGeometry", Description = "The device as surfaces", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Boolean() { Name = "reusedPreviousCalculation", NickName = "reusedPreviousCalculation", Description = "True when no ray casting was needed to set up", Access = GH_ParamAccess.item }, ParamVisibility.Voluntary));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Boolean() { Name = "successful", NickName = "successful", Description = "Successful?", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+
+                // Appended AFTER every pre-existing output so saved definitions keep their positional
+                // parameter indices (the legacy parameter reader restores parameters by position).
+                result.Add(new GH_SAMParam(new GooSAMObjectParam() { Name = "schemeResult", NickName = "schemeResult", Description = "The complete scheme verification, when _shadingDevice carries a ShadingScheme", Access = GH_ParamAccess.item }, ParamVisibility.Voluntary));
+                result.Add(new GH_SAMParam(new GooSAMObjectParam() { Name = "perApertureResults", NickName = "perApertureResults", Description = "The scheme verification per aperture, when _shadingDevice carries a ShadingScheme", Access = GH_ParamAccess.list }, ParamVisibility.Voluntary));
                 return result.ToArray();
             }
         }
@@ -189,14 +205,6 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 return;
             }
 
-            index = Params.IndexOfInputParam("_apertureSolarTarget");
-            ApertureSolarTarget inputTarget = null;
-            if (index == -1 || !dataAccess.GetData(index, ref inputTarget) || inputTarget == null)
-            {
-                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Please supply an aperture solar target from SAMAnalytical.ApertureSolarTargets.");
-                return;
-            }
-
             // ---- the device, and WHICH APERTURE IT WAS DESIGNED FOR.
             //
             // A bare IShadingTypology is a rule, not a design: it will happily be built against any
@@ -206,6 +214,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             IShadingTypology typology = null;
             Guid deviceApertureGuid = Guid.Empty;
             bool identityCarried = false;
+            ShadingScheme scheme = null;
 
             index = Params.IndexOfInputParam("_shadingDevice");
             if (index != -1)
@@ -215,7 +224,11 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 {
                     object @object = Query.Unwrap(objectWrapper);
 
-                    if (@object is ShadingDevice shadingDevice)
+                    if (@object is ShadingScheme shadingScheme)
+                    {
+                        scheme = shadingScheme;
+                    }
+                    else if (@object is ShadingDevice shadingDevice)
                     {
                         typology = shadingDevice.Typology;
                         deviceApertureGuid = shadingDevice.ApertureGuid;
@@ -234,9 +247,23 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 }
             }
 
+            if (scheme != null)
+            {
+                SolveScheme(dataAccess, analyticalModel, scheme);
+                return;
+            }
+
+            index = Params.IndexOfInputParam("_apertureSolarTarget");
+            ApertureSolarTarget inputTarget = null;
+            if (index == -1 || !dataAccess.GetData(index, ref inputTarget) || inputTarget == null)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Please supply an aperture solar target from SAMAnalytical.ApertureSolarTargets.");
+                return;
+            }
+
             if (typology == null)
             {
-                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Please supply a shading device, or an optimised shading result, from SAMAnalytical.RationaliseShading.");
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Please supply a shading device, an optimised shading result, or a shading scheme from SAMAnalytical.RationaliseShading or SAMAnalytical.AssembleShadingSchemes.");
                 return;
             }
 
@@ -481,6 +508,225 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             if (index_Successful != -1)
             {
                 dataAccess.SetData(index_Successful, true);
+            }
+        }
+
+        /// <summary>
+        /// The scheme path: verifies a complete ShadingScheme as a WHOLE — every aperture measured
+        /// against every scheme element, so cross-shading between one window's device and its
+        /// neighbour is credited. The legacy single-aperture path is untouched.
+        /// </summary>
+        private void SolveScheme(IGH_DataAccess dataAccess, AnalyticalModel analyticalModel, ShadingScheme scheme)
+        {
+            int index = Params.IndexOfInputParam("_apertureSolarTargets_");
+            List<ApertureSolarTarget> targets = new List<ApertureSolarTarget>();
+            if (index == -1 || !dataAccess.GetDataList(index, targets) || targets.Count == 0)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "A shading scheme covers several windows. Connect the scheme's targets to _apertureSolarTargets_.");
+                return;
+            }
+
+            WeatherData weatherData = Object<WeatherData>(dataAccess, "_weatherData_", out bool weatherSupplied, out bool weatherWrongType);
+            if (weatherWrongType)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "_weatherData_ is not SAM WeatherData.");
+                return;
+            }
+
+            if (!weatherSupplied && analyticalModel.GetValue<WeatherData>(AnalyticalModelParameter.WeatherData) == null)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "WeatherData is required. Supply WeatherData or attach it to the AnalyticalModel.");
+                return;
+            }
+
+            AnalysisPeriod unwantedPeriod = Object<AnalysisPeriod>(dataAccess, "_unwantedPeriod_", out bool unwantedSupplied, out bool unwantedWrongType);
+            AnalysisPeriod wantedPeriod = Object<AnalysisPeriod>(dataAccess, "_wantedPeriod_", out bool wantedSupplied, out bool wantedWrongType);
+            if (unwantedWrongType || wantedWrongType)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "The unwanted/wanted period must be an AnalysisPeriod. Use SAMAnalytical.AnalysisPeriod to build one.");
+                return;
+            }
+
+            IDesirabilityStrategy desirabilityStrategy = Object<IDesirabilityStrategy>(dataAccess, "_desirability_", out bool strategySupplied, out bool strategyWrongType);
+            if (strategyWrongType)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "_desirability_ is not a desirability strategy.");
+                return;
+            }
+
+            double gridSize = Number(dataAccess, "_gridSize_", 0.5);
+            double sunAngleStep = Number(dataAccess, "_sunAngleStep_", 2.0);
+            bool recalculate = false;
+            index = Params.IndexOfInputParam("_recalculate_");
+            if (index != -1)
+            {
+                dataAccess.GetData(index, ref recalculate);
+            }
+
+            int year = unwantedPeriod?.Year ?? wantedPeriod?.Year ?? SAMAnalyticalApertureIrradiance.DefaultYear(analyticalModel, weatherData);
+
+            VerifiedShadingSchemeResult verified = SolarCreate.VerifiedShadingSchemeResult(
+                analyticalModel, scheme, targets, year, out string message,
+                weatherData, desirabilityStrategy, unwantedPeriod, wantedPeriod, gridSize, sunAngleStep, recalculate);
+
+            if (verified == null)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, message ?? "The scheme could not be verified.");
+                return;
+            }
+
+            foreach (string warning in verified.Warnings)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, warning);
+            }
+
+            ShadingSchemePerformance performance = verified.Performance;
+
+            // The existing single-aperture outputs are populated FROM THE SCHEME TOTALS, with the
+            // aperture GUID empty and the status prefixed SCHEME, so a scheme result can never be
+            // mistaken for a single-window one.
+            ShadingPerformance total = new ShadingPerformance(
+                Guid.Empty, scheme.Name,
+                performance.AdmittedDirectEnergy, performance.AdmittedUnwantedEnergy, performance.AdmittedWantedEnergy,
+                performance.DirectSolarIntercepted, performance.UnwantedSolarIntercepted, performance.WantedSolarBlocked,
+                performance.UnattributedInterceptedEnergy, performance.MaterialFraction,
+                new Dictionary<Guid, double>(), new Dictionary<Guid, string>());
+
+            index = Params.IndexOfOutputParam("shadingPerformance");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, new GooSAMObject(total));
+            }
+
+            index = Params.IndexOfOutputParam("verificationSummary");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, verified.VerificationSummary);
+            }
+
+            index = Params.IndexOfOutputParam("status");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, "SCHEME " + SolarQuery.StatusText(verified.Status));
+            }
+
+            index = Params.IndexOfOutputParam("apertureGuid");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, string.Empty);
+            }
+
+            index = Params.IndexOfOutputParam("azimuth");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, double.NaN);
+            }
+
+            SetNumber(dataAccess, "baselineDirectSolar", total.AdmittedDirectEnergy);
+            SetNumber(dataAccess, "directSolarIntercepted", total.DirectSolarIntercepted);
+            SetNumber(dataAccess, "directShadingEfficiency", Query.Percentage(total.DirectShadingEfficiency));
+            SetNumber(dataAccess, "unwantedSolarBlocked", Query.Percentage(total.UnwantedSolarBlocked));
+            SetNumber(dataAccess, "wantedSolarRetained", Query.Percentage(total.WantedSolarRetained));
+            SetNumber(dataAccess, "admittedUnwantedSolar", total.AdmittedUnwantedEnergy);
+            SetNumber(dataAccess, "admittedWantedSolar", total.AdmittedWantedEnergy);
+            SetNumber(dataAccess, "admittedNeutralSolar", total.AdmittedNeutralEnergy);
+            SetNumber(dataAccess, "unwantedSolarIntercepted", total.UnwantedSolarIntercepted);
+            SetNumber(dataAccess, "wantedSolarBlocked", total.WantedSolarBlocked);
+            SetNumber(dataAccess, "neutralSolarIntercepted", total.NeutralSolarIntercepted);
+            SetNumber(dataAccess, "unattributedEnergy", total.UnattributedInterceptedEnergy);
+
+            index = Params.IndexOfOutputParam("accountingSummary");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, SolarQuery.AccountingSummary(total));
+            }
+
+            SetNumber(dataAccess, "materialFraction", total.MaterialFraction);
+
+            // Element-level outputs follow the scheme's own element order.
+            List<ShadingElement> elements = scheme.SchemeElements(targets);
+            List<Guid> elementGuids = new List<Guid>();
+            List<string> elementNames = new List<string>();
+            List<double> elementEnergy = new List<double>();
+            Dictionary<Guid, double> energyPerElement = performance.EnergyPerElement;
+            foreach (ShadingElement element in elements ?? new List<ShadingElement>())
+            {
+                if (element == null)
+                {
+                    continue;
+                }
+
+                elementGuids.Add(element.Guid);
+                elementNames.Add(element.Name);
+                elementEnergy.Add(energyPerElement.TryGetValue(element.Guid, out double energy) ? energy : double.NaN);
+            }
+
+            index = Params.IndexOfOutputParam("elementNames");
+            if (index != -1)
+            {
+                dataAccess.SetDataList(index, elementNames);
+            }
+
+            index = Params.IndexOfOutputParam("elementGuids");
+            if (index != -1)
+            {
+                dataAccess.SetDataList(index, elementGuids.ConvertAll(x => x.ToString()));
+            }
+
+            index = Params.IndexOfOutputParam("elementEnergy");
+            if (index != -1)
+            {
+                dataAccess.SetDataList(index, elementEnergy);
+            }
+
+            index = Params.IndexOfOutputParam("shadingGeometry");
+            if (index != -1)
+            {
+                List<Rhino.Geometry.Brep> breps = new List<Rhino.Geometry.Brep>();
+                foreach (ShadingElement element in elements ?? new List<ShadingElement>())
+                {
+                    SAM.Geometry.Spatial.Face3D face3D = element?.Face3D;
+                    if (face3D != null)
+                    {
+                        Rhino.Geometry.Brep brep = SAM.Geometry.Rhino.Convert.ToRhino_Brep(face3D);
+                        if (brep != null)
+                        {
+                            breps.Add(brep);
+                        }
+                    }
+                }
+
+                dataAccess.SetDataList(index, breps);
+            }
+
+            index = Params.IndexOfOutputParam("reusedPreviousCalculation");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, verified.ReusedPreviousCalculation);
+            }
+
+            index = Params.IndexOfOutputParam("schemeResult");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, new GooSAMObject(verified));
+            }
+
+            index = Params.IndexOfOutputParam("perApertureResults");
+            if (index != -1)
+            {
+                List<GooSAMObject> perAperture = new List<GooSAMObject>();
+                foreach (ShadingPerformance member in performance.PerAperture)
+                {
+                    perAperture.Add(new GooSAMObject(member));
+                }
+
+                dataAccess.SetDataList(index, perAperture);
+            }
+
+            index = Params.IndexOfOutputParam("successful");
+            if (index != -1)
+            {
+                dataAccess.SetData(index, true);
             }
         }
 
