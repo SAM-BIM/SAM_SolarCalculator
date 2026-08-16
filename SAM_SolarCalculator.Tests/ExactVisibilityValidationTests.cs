@@ -47,6 +47,11 @@ namespace SAM.SolarCalculator.Tests
     ///       real models; the sampled path (same front/back test and cell grid as the cache) is used
     ///       for the real-model angular study instead.
     ///
+    ///   Because of F1, A and C are evaluated on front-facing daylight hours only, while B is evaluated
+    ///   over all daylight hours (sampled and cache share the front-facing semantics); the three MAE
+    ///   values are therefore each independently useful but are NOT strictly commensurable over an
+    ///   identical hour population.
+    ///
     /// No solar physics, shading optimisation, control-profile behaviour or cache algorithm is
     /// changed here — this is a measurement harness only.
     /// </summary>
@@ -485,8 +490,14 @@ namespace SAM.SolarCalculator.Tests
         // FAST — 3. finding F1: the exact path omits the front-facing test.
         // ---------------------------------------------------------------------------------------
 
+        /// <summary>
+        /// CHARACTERIZATION TEST for known defect F1. The exact polygon path omits the front-facing
+        /// orientation test that the sampled and cache paths apply, so a back-facing target is
+        /// reported lit. This pins EXISTING behaviour only — it is not a statement of desired solver
+        /// semantics — and must be updated/removed when the future exact-engine fix is implemented.
+        /// </summary>
         [Fact]
-        public void Exact_Path_Omits_FrontFacing_Test_BackFacing_Hours_Are_Reported_Lit()
+        public void KnownDefect_F1_ExactPath_Omits_FrontFacing_Test_BackFacing_Hours_Are_Reported_Lit()
         {
             Location location = TestHelpers.London();
             const int year = 2018;
@@ -686,6 +697,11 @@ namespace SAM.SolarCalculator.Tests
 
                     Dictionary<int, double> cacheLit = LitAreaViaCache(cache, cells, location, year, validHours, 0.0, out long evalMs);
 
+                    // Angular MAE is computed inside the cell-size loop on purpose: both sides share
+                    // the same grid, but the number of shadow-boundary cells (and so the discretisation
+                    // of the direction change) still varies slightly with cell size, so the 2 deg
+                    // angular MAE drifts a little between rows (e.g. 0.0154 at 0.50 m vs 0.0155 at
+                    // 0.25 m). Each (cell, bin) row is therefore its own measurement, not a repeat.
                     ErrorSummary angular = ComputeError(sampledLit, cacheLit, cellAreaTotal, weights);
                     ErrorSummary combined = ComputeError(FilterHours(exactLit, frontFacing), FilterHours(cacheLit, frontFacing), faceArea, weights);
 
@@ -694,9 +710,15 @@ namespace SAM.SolarCalculator.Tests
                         "synthetic | {0:0.00} | {1:0} | {2:0.0000} | {3:0.0000} | {4:0.0000} | {5:0.0000} | {6:0.0000} | {7:0.0000} | {8:0.0000}  (bins={9} cells={10} sampledMs={11} buildMs={12} evalMs={13})",
                         cellSize, binSize, spatial.Mae, angular.Mae, combined.Mae, combined.Rmse, combined.P95Abs, combined.MaxAbs, combined.WeightedMae, cache.BinCount, cells.Count, sampledMs, buildMs, evalMs));
 
-                    Assert.InRange(combined.Mae, 0.0, 1.0);
-                    Assert.InRange(angular.Mae, 0.0, 1.0);
-                    Assert.InRange(spatial.Mae, 0.0, 1.0);
+                    // Regression ceilings (not physical gates). Each MAE is a normalised coverage
+                    // fraction in [0, 1] by construction, so a plain [0, 1] range assertion would be
+                    // tautological and let a cache that ignored geometry pass. These ceilings sit well
+                    // above the measured values on this benchmark (spatial 0.0073-0.0458, angular
+                    // 0.0123-0.0293, combined 0.0192-0.0620 across the grids/bins) but well below a
+                    // broken engine (~0.4-1.0), so they fail only on a genuine regression.
+                    Assert.True(spatial.Mae < 0.10, $"spatial MAE {spatial.Mae:0.0000} exceeds the 0.10 regression ceiling");
+                    Assert.True(angular.Mae < 0.05, $"angular MAE {angular.Mae:0.0000} exceeds the 0.05 regression ceiling");
+                    Assert.True(combined.Mae < 0.15, $"combined MAE {combined.Mae:0.0000} exceeds the 0.15 regression ceiling");
 
                     // The released 2 deg angular gate (comparison B only) must hold.
                     if (Math.Abs(binSize - 2.0) < 1e-9)
@@ -705,6 +727,11 @@ namespace SAM.SolarCalculator.Tests
                     }
                 }
 
+                // Empirical benchmark invariant, not a general theorem: on this synthetic geometry the
+                // sampled path (which applies the front-facing test) never over-lights the exact
+                // reference (which, per F1, additionally reports back-facing hours as lit), so the
+                // sampled area-hours never exceed the exact area-hours beyond floating-point noise.
+                // It characterises this benchmark only and is not a constraint on any production solver.
                 Assert.True(sampledLit.Values.Sum() <= exactLit.Values.Sum() * (1.0 + 1e-9));
             }
         }
@@ -746,7 +773,7 @@ namespace SAM.SolarCalculator.Tests
             // The exact/sampled paths re-run the per-hour projection machinery and are ~two orders of
             // magnitude slower than the cache on a real building context (measured ~70 ms/hour sampled,
             // ~140 ms/hour exact). The real-model comparison therefore runs on a deterministic stratified
-            // subset of the annual daylight timeline (every 12th hour).
+            // subset of the annual daylight timeline (every 24th daylight-list entry).
             List<int> stratifiedHours = validHours.Where((h, i) => i % 24 == 0).ToList();
 
             DateTime yearStart = new DateTime(year, 1, 1);
@@ -756,8 +783,10 @@ namespace SAM.SolarCalculator.Tests
                 representativeHours.Add((int)(new DateTime(year, 6, 21, clock, 0, 0) - yearStart).TotalHours);
             }
 
-            // F2: the panel-oriented exact path merges the aperture into its coplanar host facade and
-            // reports ~0 coverage all day (it is not an aperture-level reference for real models).
+            // CHARACTERIZATION TEST for known defect F2: the panel-oriented exact path merges the
+            // aperture into its coplanar host facade and reports ~0 coverage all day (it is not an
+            // aperture-level reference for real models). This pins EXISTING behaviour, not desired
+            // semantics, and the assertion below must be updated/removed when the exact engine is fixed.
             Dictionary<int, double> exactLit = LitAreaViaSimulateCoverage(targetFace, occluders, location, year, representativeHours, shiftMinutes, double.NaN, out long exactMs);
 
             // The sampled path (sampleSize = grid) ALSO goes through the panel-oriented merge, so it too
@@ -799,8 +828,9 @@ namespace SAM.SolarCalculator.Tests
             Assert.Equal(stratifiedHours.Count, cacheLit.Count);
             Assert.InRange(panelVsApertureGap.Mae, 0.0, 1.0);
 
-            // F2 documented: the exact polygon path reports the aperture as ~fully shaded even on
-            // front-facing afternoon hours, because the coplanar host facade absorbs the target.
+            // F2 characterization assertion: the exact polygon path reports the aperture as ~fully
+            // shaded even on front-facing afternoon hours, because the coplanar host facade absorbs
+            // the target. Pins EXISTING behaviour; update/remove with the future exact-engine fix.
             foreach (int hour in representativeHours)
             {
                 if (!exactLit.TryGetValue(hour, out double exactArea))
