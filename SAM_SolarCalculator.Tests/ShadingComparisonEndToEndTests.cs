@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json.Nodes;
 using Xunit;
 using SAM.Analytical;
 using SAM.Analytical.SolarCalculator;
@@ -232,6 +233,40 @@ namespace SAM.SolarCalculator.Tests
                 null, null, null, null, GridSize, 2.0, false);
             Assert.Contains("more than once", duplicateSchemeMessage);
             Assert.Equal(ShadingComparisonOutcome.NoComparableOptions, duplicateSchemes.Outcome);
+        }
+
+        [Fact]
+        public void A_Scheme_With_Empty_Identity_Is_Refused_Not_Ranked_As_No_Shade()
+        {
+            // A scheme reconstructed from corrupted JSON is inert (empty SchemeGuid). The comparison
+            // boundary must refuse it with an actionable message, never classify it as the No Shade
+            // baseline.
+            List<ApertureSolarTarget> southTargets = new List<ApertureSolarTarget>();
+            foreach (int ordinal in new int[] { 1, 2 })
+            {
+                SAM.Geometry.Spatial.Face3D face = SyntheticTargets.Face(SyntheticTargets.South, new Point3D(2.0 * ordinal, 0, 5), 1.0, 2.0);
+                southTargets.Add(new ApertureSolarTarget(new Guid("eeeeeee1-0000-0000-0000-00000000000" + ordinal), new Guid("fffffff1-0000-0000-0000-000000000001"), face, Geometry.SolarCalculator.Query.AnalysisCells(face, 0.5)));
+            }
+
+            ShadingScheme scheme = new ShadingScheme("Overhang", "RationaliseShading", southTargets.Select(x => x.ApertureGuid), new List<Guid> { southTargets[0].PanelGuid },
+                southTargets.Select(t => new ShadingDevice(t.ApertureGuid, (IShadingTypology)new Overhang(0.5))),
+                new List<GroupedShadingDevice>(), new List<ApertureShadingGroup>(),
+                ShadingDesignStatus.Ok, new List<string>(), null, new List<string>());
+
+            JsonObject json = scheme.ToJsonObject();
+            ((JsonArray)json["Devices"])[0] = new JsonObject { ["_type"] = "Not.A.ShadingDevice" };
+
+            ShadingScheme corrupted = SAM.Core.Create.IJSAMObject<ShadingScheme>(json);
+            Assert.NotNull(corrupted);
+            Assert.Equal(Guid.Empty, corrupted.SchemeGuid);
+
+            ShadingComparisonResult result = ((AnalyticalModel)null).ShadingComparison(
+                southTargets, new List<ShadingScheme> { corrupted }, 1.0, 0.1, MaterialCostReference.AdmittedDirectEnergy, out string message,
+                null, null, null, null, GridSize, 2.0, false);
+
+            Assert.Contains("no resolved identity", message);
+            Assert.Equal(ShadingComparisonOutcome.NoComparableOptions, result.Outcome);
+            Assert.Equal(ShadingRecommendationStatus.NoDecision, result.RecommendationStatus);
         }
 
         [Fact]

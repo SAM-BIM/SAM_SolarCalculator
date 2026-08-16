@@ -408,6 +408,56 @@ namespace SAM.SolarCalculator.Tests
             Assert.False(target.FromJsonObject(json));
         }
 
+        [Fact]
+        public void Corrupted_Json_Through_Standard_Loader_Is_Inert()
+        {
+            // The real production loading path (Core.Create.IJSAMObject<T>) constructs via the
+            // ShadingScheme(JsonObject) constructor, which cannot propagate FromJsonObject's bool.
+            // A failed reconstruction must therefore leave the object completely inert rather than a
+            // plausible "Overhang" with no devices and an empty identity.
+            Guid a = new Guid("aaaaaaa1-0000-0000-0000-000000000001");
+            ShadingScheme scheme = OverhangScheme(new List<Guid> { a }, 0.5);
+
+            JsonObject json = scheme.ToJsonObject();
+            ((JsonArray)json["Devices"])[0] = new JsonObject { ["_type"] = "Not.A.ShadingDevice" };
+
+            ShadingScheme loaded = SAM.Core.Create.IJSAMObject<ShadingScheme>(json);
+
+            Assert.NotNull(loaded);
+            Assert.Equal(Guid.Empty, loaded.SchemeGuid);
+            Assert.Null(loaded.Name);
+            Assert.Empty(loaded.Devices);
+            Assert.Empty(loaded.GroupedDevices);
+            Assert.Empty(loaded.Groups);
+            Assert.Empty(loaded.ApertureGuids);
+            Assert.Empty(loaded.PanelGuids);
+        }
+
+        [Fact]
+        public void Failed_ReRead_Clears_Stale_Identity()
+        {
+            Guid a = new Guid("aaaaaaa1-0000-0000-0000-000000000001");
+            ShadingScheme scheme = OverhangScheme(new List<Guid> { a }, 0.5);
+
+            Guid originalGuid = scheme.SchemeGuid;
+            Assert.NotEqual(Guid.Empty, originalGuid);
+
+            JsonObject json = scheme.ToJsonObject();
+            ((JsonArray)json["Devices"])[0] = new JsonObject { ["_type"] = "Not.A.ShadingDevice" };
+
+            bool result = scheme.FromJsonObject(json);
+
+            Assert.False(result);
+            Assert.Equal(Guid.Empty, scheme.SchemeGuid);
+            Assert.NotEqual(originalGuid, scheme.SchemeGuid);
+            Assert.Null(scheme.Name);
+            Assert.Empty(scheme.Devices);
+            Assert.Empty(scheme.GroupedDevices);
+            Assert.Empty(scheme.Groups);
+            Assert.Empty(scheme.ApertureGuids);
+            Assert.Empty(scheme.PanelGuids);
+        }
+
         private static void ReverseJsonArray(JsonObject json, string name)
         {
             if (!(json[name] is JsonArray array))

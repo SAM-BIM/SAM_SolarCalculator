@@ -458,6 +458,35 @@ namespace SAM.Analytical.SolarCalculator
         }
 
         /// <summary>
+        /// Restores every field to the inert state of a freshly constructed, unusable scheme. Called
+        /// before a JSON reconstruction (so a re-read can never inherit stale state) and again on
+        /// every reconstruction failure (so a failed read can never leave partial or stale identity
+        /// behind). A scheme in this state has no name, no devices, no scope and an empty
+        /// <see cref="SchemeGuid"/>, so it can never masquerade as a valid comparison option.
+        /// </summary>
+        private void Reset()
+        {
+            name = null;
+            designMethod = null;
+            apertureGuids = new List<Guid>();
+            panelGuids = new List<Guid>();
+            devices = new List<ShadingDevice>();
+            groupedDevices = new List<GroupedShadingDevice>();
+            groups = new List<ApertureShadingGroup>();
+            status = ShadingDesignStatus.Undefined;
+            warnings = new List<string>();
+            designObjective = null;
+            designDiagnostics = new List<string>();
+            designTimeScore = double.NaN;
+            designTimeBenefit = double.NaN;
+            designTimeHarm = double.NaN;
+            designTimeCost = double.NaN;
+            designEvaluations = 0;
+            designTermination = ShadingOptimisationTermination.Undefined;
+            schemeGuid = Guid.Empty;
+        }
+
+        /// <summary>
         /// The ONE canonical ordering a scheme ever carries, applied by both the constructor and the
         /// JSON reader so two representations of the same logical scheme reconstruct the same
         /// <see cref="SchemeGuid"/> whatever their input order was:
@@ -627,6 +656,10 @@ namespace SAM.Analytical.SolarCalculator
 
         public bool FromJsonObject(JsonObject jObject)
         {
+            // Start from the inert state so a re-read of a live object can never inherit the old
+            // identity, scope or devices behind a later failure.
+            Reset();
+
             if (jObject == null)
             {
                 return false;
@@ -645,12 +678,14 @@ namespace SAM.Analytical.SolarCalculator
                 {
                     if (!(node is JsonObject deviceObject))
                     {
+                        Reset();
                         return false;
                     }
 
                     ShadingDevice device = Core.Create.IJSAMObject<ShadingDevice>(deviceObject);
                     if (device == null)
                     {
+                        Reset();
                         return false;
                     }
 
@@ -665,12 +700,14 @@ namespace SAM.Analytical.SolarCalculator
                 {
                     if (!(node is JsonObject deviceObject))
                     {
+                        Reset();
                         return false;
                     }
 
                     GroupedShadingDevice device = Core.Create.IJSAMObject<GroupedShadingDevice>(deviceObject);
                     if (device == null)
                     {
+                        Reset();
                         return false;
                     }
 
@@ -693,12 +730,14 @@ namespace SAM.Analytical.SolarCalculator
 
                     if (!(node is JsonObject groupObject))
                     {
+                        Reset();
                         return false;
                     }
 
                     ApertureShadingGroup group = Core.Create.IJSAMObject<ApertureShadingGroup>(groupObject);
                     if (group == null)
                     {
+                        Reset();
                         return false;
                     }
 
