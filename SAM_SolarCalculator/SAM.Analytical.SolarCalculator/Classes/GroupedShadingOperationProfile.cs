@@ -350,7 +350,7 @@ namespace SAM.Analytical.SolarCalculator
             }
         }
 
-        /// <summary>First-hit energy credited to the shared canopy across all members while deployed, kWh.</summary>
+        /// <summary>Full-year direct-beam energy attributed to the shared canopy as the first element hit, summed over the members, kWh. Not limited to deployed hours.</summary>
         public double CanopyAttributedEnergy
         {
             get
@@ -359,7 +359,7 @@ namespace SAM.Analytical.SolarCalculator
             }
         }
 
-        /// <summary>First-hit energy credited to the shared valance across all members while deployed, kWh. Not "marginal" — see ShadingOperationProfile.ValanceAttributedEnergy.</summary>
+        /// <summary>Full-year direct-beam energy attributed to the shared valance as the first element hit, summed over the members, kWh. Not limited to deployed hours. Not "marginal" — see ShadingOperationProfile.ValanceAttributedEnergy.</summary>
         public double ValanceAttributedEnergy
         {
             get
@@ -368,7 +368,7 @@ namespace SAM.Analytical.SolarCalculator
             }
         }
 
-        /// <summary>Sum over members of the deployed direct beam the device stopped, kWh.</summary>
+        /// <summary>Sum over members of the full-year direct-beam interception of the device geometry, kWh. Not weighted by the deployment schedule.</summary>
         public double ControlledDirectSolarIntercepted
         {
             get
@@ -377,7 +377,7 @@ namespace SAM.Analytical.SolarCalculator
             }
         }
 
-        /// <summary>Sum over members of the unwanted part of that, kWh.</summary>
+        /// <summary>Sum over members of the unwanted part of the intercepted beam, weighted by the deployed hours, kWh — the actual operation.</summary>
         public double ControlledUnwantedSolarIntercepted
         {
             get
@@ -412,7 +412,7 @@ namespace SAM.Analytical.SolarCalculator
             }
         }
 
-        /// <summary>Per-element intercepted energy aggregated over every member, kWh, from the grouped accounting.</summary>
+        /// <summary>Full-year first-hit direct-beam energy by element Guid, aggregated over every member, kWh — the geometric attribution, not weighted by the deployment schedule.</summary>
         public Dictionary<Guid, double> EnergyPerElement
         {
             get

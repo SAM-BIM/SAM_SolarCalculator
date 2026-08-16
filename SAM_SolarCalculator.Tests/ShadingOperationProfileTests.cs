@@ -212,6 +212,59 @@ namespace SAM.SolarCalculator.Tests
             output.WriteLine($"controlled {operation.ControlledUnwantedSolarIntercepted:0.###} kWh vs always-deployed {operation.UncontrolledUnwantedSolarIntercepted:0.###} kWh, shade use {100.0 * operation.ShadeUseFraction:0.#} %");
         }
 
+        [Fact]
+        public void A_Wind_Limit_Changes_Only_The_Unwanted_Channel_Not_The_Geometric_Attribution()
+        {
+            // F1 regression pin. The direct channel and the per-element/attribution energies are
+            // FULL-YEAR geometric quantities: ShadingPerformance accumulates them from the UNWEIGHTED
+            // direct beam, so the deployment schedule never gates them. For identical geometry and
+            // weather, changing the wind limit (and with it the deployed hours) must therefore leave
+            // ControlledDirectSolarIntercepted, CanopyAttributedEnergy, ValanceAttributedEnergy and
+            // EnergyPerElement unchanged, while the unwanted channel — the only operation-weighted
+            // figure — shrinks. This is asserted against the same implementation twice, not against
+            // a hard-coded number, so it pins the RELATIONSHIP, not a value.
+            ApertureSolarTarget target = Target(SyntheticTargets.West, GridSize);
+            WeatherData weatherData = Gales();
+            SolarVisibilityCache cache = Cache(target);
+
+            SolarControlProfile noLimit = target.SolarControlProfile(weatherData, new SolarControlSettings(200.0), Year);
+            SolarControlProfile bitingLimit = target.SolarControlProfile(weatherData, new SolarControlSettings(200.0, double.NaN, 10.0), Year);
+
+            ShadingOperationProfile a = Analytical.SolarCalculator.Create.ShadingOperationProfile(
+                target, noLimit, cache, new List<LinkedFace3D>(), WithValance, weatherData);
+            ShadingOperationProfile b = Analytical.SolarCalculator.Create.ShadingOperationProfile(
+                target, bitingLimit, cache, new List<LinkedFace3D>(), WithValance, weatherData);
+
+            Assert.NotNull(a);
+            Assert.NotNull(b);
+
+            // The wind limit must actually bite: fewer deployed hours, more wind-retracted hours.
+            Assert.True(b.DeployedHours < a.DeployedHours);
+            Assert.True(b.WindRetractedHours > a.WindRetractedHours);
+
+            // Operation-weighted: retracting hours reduces the unwanted energy the control achieves.
+            Assert.True(b.ControlledUnwantedSolarIntercepted < a.ControlledUnwantedSolarIntercepted);
+
+            // Geometric / full-year: identical geometry and weather give identical direct interception
+            // and identical first-hit attribution, independent of the deployment schedule.
+            Assert.Equal(a.ControlledDirectSolarIntercepted, b.ControlledDirectSolarIntercepted, 9);
+            Assert.Equal(a.CanopyAttributedEnergy, b.CanopyAttributedEnergy, 9);
+
+            // The west-facade valance is real (see the valance test below), so the equality is a
+            // statement about a live element, not two absent ones.
+            Assert.True(a.ValanceAttributedEnergy > 0);
+            Assert.Equal(a.ValanceAttributedEnergy, b.ValanceAttributedEnergy, 9);
+
+            Assert.Equal(a.EnergyPerElement.Keys.OrderBy(x => x), b.EnergyPerElement.Keys.OrderBy(x => x));
+            foreach (Guid guid in a.EnergyPerElement.Keys)
+            {
+                Assert.Equal(a.EnergyPerElement[guid], b.EnergyPerElement[guid], 9);
+            }
+
+            output.WriteLine($"no limit: deployed {a.DeployedHours} h, unwanted {a.ControlledUnwantedSolarIntercepted:0.###} kWh, canopy {a.CanopyAttributedEnergy:0.###} kWh, valance {a.ValanceAttributedEnergy:0.###} kWh");
+            output.WriteLine($"10 m/s  : deployed {b.DeployedHours} h, unwanted {b.ControlledUnwantedSolarIntercepted:0.###} kWh, canopy {b.CanopyAttributedEnergy:0.###} kWh, valance {b.ValanceAttributedEnergy:0.###} kWh");
+        }
+
         // ------------------------------------------------------------ canopy and valance ----------
 
         private static readonly RetractableAwning NoValance = new RetractableAwning(1.6, 28.0, 0.0, 0.0, 0.0);

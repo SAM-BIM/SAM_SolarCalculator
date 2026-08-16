@@ -12,7 +12,7 @@ namespace SAM.Analytical.SolarCalculator
     /// <summary>
     /// What ONE retractable device actually DID over the weather year at ONE aperture: the deployed
     /// schedule (passed through from <see cref="SolarControlProfile"/>, never recomputed), the hours
-    /// each physical element was effective in, and the energy the device intercepted while deployed.
+    /// each physical element was effective in, and the energy the device intercepted.
     ///
     /// THE RESULT CARRIES THE DESIGN IT WAS MEASURED FOR. The aperture Guid, the typology name, the
     /// device parameters and the <see cref="SolarControlSettings"/> are all stored, so a profile can
@@ -36,6 +36,27 @@ namespace SAM.Analytical.SolarCalculator
     /// <see cref="ValanceAttributedEnergy"/> is what the first-hit accounting credits the valance
     /// in the CURRENT geometry. It is deliberately NOT called marginal: it proves nothing about the
     /// same device with the valance removed — that comparison is a later, separate analysis.
+    ///
+    /// THREE KINDS OF ENERGY, KEPT APART:
+    ///
+    ///   GEOMETRIC / FULL-YEAR — the device geometry intercepts this beam regardless of when it was
+    ///   actually out; the deployed schedule does NOT gate these:
+    ///     <see cref="ControlledDirectSolarIntercepted"/> — full-year direct-beam interception;
+    ///     <see cref="CanopyAttributedEnergy"/> — full-year direct beam on the canopy first hit;
+    ///     <see cref="ValanceAttributedEnergy"/> — full-year direct beam on the valance first hit;
+    ///     <see cref="EnergyPerElement"/> — the same full-year direct beam, per element Guid.
+    ///
+    ///   OPERATION-WEIGHTED — weighted by the DEPLOYED hours (the actual annual operation):
+    ///     <see cref="ControlledUnwantedSolarIntercepted"/>.
+    ///
+    ///   REFERENCE / DEMAND-WEIGHTED — weighted by the REQUESTED hours:
+    ///     <see cref="UncontrolledUnwantedSolarIntercepted"/>.
+    ///
+    /// The direct channel is deliberately unweighted: it is the neutral-beam accounting the existing
+    /// ShadingPerformance pipeline owns, and only the unwanted channel carries the deployment weight.
+    /// To quantify what the wind retraction costs, compare
+    /// <see cref="ControlledUnwantedSolarIntercepted"/> against
+    /// <see cref="UncontrolledUnwantedSolarIntercepted"/> — never the direct/element figures.
     ///
     /// NaN MEANS "NOT RECORDED / NOT APPLICABLE": zero deployed hours make ValanceEffectiveFraction
     /// NaN, a device without a valance reports no valance Guid and no valance energy, and JSON omits
@@ -74,12 +95,12 @@ namespace SAM.Analytical.SolarCalculator
         /// <param name="canopyGuid">The canopy element Guid; Guid.Empty when the device has none.</param>
         /// <param name="valanceGuid">The valance element Guid; Guid.Empty when the device has none.</param>
         /// <param name="effectiveHoursOfYearPerElement">Deployed hours each element first-hit at least one lit cell in, by element Guid.</param>
-        /// <param name="canopyAttributedEnergy">First-hit energy credited to the canopy while deployed, kWh.</param>
-        /// <param name="valanceAttributedEnergy">First-hit energy credited to the valance while deployed, kWh. NaN when there is no valance.</param>
-        /// <param name="controlledDirectSolarIntercepted">Direct beam the deployed device stopped, kWh.</param>
-        /// <param name="controlledUnwantedSolarIntercepted">Unwanted part of that, kWh.</param>
+        /// <param name="canopyAttributedEnergy">Full-year direct-beam energy attributed to the canopy as the first element hit, kWh. Not limited to deployed hours.</param>
+        /// <param name="valanceAttributedEnergy">Full-year direct-beam energy attributed to the valance as the first element hit, kWh. NaN when there is no valance. Not limited to deployed hours.</param>
+        /// <param name="controlledDirectSolarIntercepted">Full-year direct-beam interception of the device geometry, kWh. Not weighted by the deployment schedule.</param>
+        /// <param name="controlledUnwantedSolarIntercepted">Unwanted part of the intercepted beam, weighted by the deployed hours, kWh — the actual operation.</param>
         /// <param name="uncontrolledUnwantedSolarIntercepted">What the SAME device would have intercepted if always deployed on demand, kWh — the reference the control is measured against.</param>
-        /// <param name="energyPerElement">First-hit intercepted energy by element, kWh.</param>
+        /// <param name="energyPerElement">Full-year first-hit direct-beam energy by element Guid, kWh. Not weighted by the deployment schedule.</param>
         public ShadingOperationProfile(Guid apertureGuid, string typologyName, IDictionary<string, double> deviceParameters, SolarControlSettings settings, int year, double timeShiftInMinutes, IEnumerable<int> deployedHoursOfYear, IEnumerable<int> windRetractedHoursOfYear, double shadeUseFraction, Guid canopyGuid, Guid valanceGuid, IDictionary<Guid, List<int>> effectiveHoursOfYearPerElement, double canopyAttributedEnergy, double valanceAttributedEnergy, double controlledDirectSolarIntercepted, double controlledUnwantedSolarIntercepted, double uncontrolledUnwantedSolarIntercepted, IDictionary<Guid, double> energyPerElement)
         {
             this.apertureGuid = apertureGuid;
@@ -290,8 +311,10 @@ namespace SAM.Analytical.SolarCalculator
         }
 
         /// <summary>
-        /// First-hit energy credited to the CANOPY while deployed, kWh — what the deployed device's
-        /// canopy actually intercepted over the year.
+        /// Full-year direct-beam energy attributed to the CANOPY as the first shading element hit,
+        /// kWh. A geometric attribution metric: it is not limited to deployed hours, so a wind
+        /// retraction does not move it. See <see cref="ControlledUnwantedSolarIntercepted"/> for the
+        /// deployed-hour operational effect.
         /// </summary>
         public double CanopyAttributedEnergy
         {
@@ -302,8 +325,9 @@ namespace SAM.Analytical.SolarCalculator
         }
 
         /// <summary>
-        /// First-hit energy credited to the VALANCE while deployed, kWh — the energy the valance
-        /// receives attribution for in the CURRENT geometry. NaN when there is no valance.
+        /// Full-year direct-beam energy attributed to the VALANCE as the first shading element hit,
+        /// kWh. A geometric attribution metric: it is not limited to deployed hours. NaN when there
+        /// is no valance.
         ///
         /// Deliberately NOT "marginal": FirstHitGuid == valance proves attribution in this geometry,
         /// not what happens to the ray with the valance physically removed.
@@ -316,7 +340,12 @@ namespace SAM.Analytical.SolarCalculator
             }
         }
 
-        /// <summary>Direct beam the deployed device stopped, kWh — credited only for hours it was actually out.</summary>
+        /// <summary>
+        /// Full-year direct-beam interception for the device geometry, kWh. This direct channel is
+        /// NOT weighted by the deployment schedule; use
+        /// <see cref="ControlledUnwantedSolarIntercepted"/> to quantify the deployed-hour operational
+        /// effect.
+        /// </summary>
         public double ControlledDirectSolarIntercepted
         {
             get
@@ -325,7 +354,7 @@ namespace SAM.Analytical.SolarCalculator
             }
         }
 
-        /// <summary>Unwanted part of the intercepted beam, kWh — the benefit of the control.</summary>
+        /// <summary>Unwanted part of the intercepted beam, weighted by the DEPLOYED hours, kWh — the actual operation and the benefit of the control.</summary>
         public double ControlledUnwantedSolarIntercepted
         {
             get
@@ -347,7 +376,7 @@ namespace SAM.Analytical.SolarCalculator
             }
         }
 
-        /// <summary>First-hit intercepted energy by element Guid, kWh, from the controlled measurement. Defensive copy.</summary>
+        /// <summary>Full-year first-hit direct-beam energy by element Guid, kWh — the geometric attribution, not weighted by the deployment schedule. Defensive copy.</summary>
         public Dictionary<Guid, double> EnergyPerElement
         {
             get
