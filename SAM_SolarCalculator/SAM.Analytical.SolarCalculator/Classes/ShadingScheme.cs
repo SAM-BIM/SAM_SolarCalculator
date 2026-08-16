@@ -74,64 +74,12 @@ namespace SAM.Analytical.SolarCalculator
         {
             this.name = name;
             this.designMethod = designMethod;
-            this.apertureGuids = Sorted(apertureGuids);
-            this.panelGuids = Sorted(panelGuids);
-
-            foreach (ShadingDevice device in devices ?? new List<ShadingDevice>())
-            {
-                if (device != null)
-                {
-                    this.devices.Add(new ShadingDevice(device));
-                }
-            }
-            this.devices.Sort((a, b) => a.ApertureGuid.CompareTo(b.ApertureGuid));
-
-            foreach (GroupedShadingDevice device in groupedDevices ?? new List<GroupedShadingDevice>())
-            {
-                if (device != null)
-                {
-                    this.groupedDevices.Add(new GroupedShadingDevice(device));
-                }
-            }
-            this.groupedDevices.Sort((a, b) => a.GroupGuid.CompareTo(b.GroupGuid));
-
-            // The group list travels WITH its device: each group is paired to the device carrying
-            // the same GroupGuid, and the PAIR is sorted, so later index-based pairing
-            // (SchemeElements, ElementOwners) can never rebuild a device against another device's
-            // frame just because the input order differed. A group whose Guid matches no device is
-            // dead data and is dropped.
-            List<Tuple<GroupedShadingDevice, ApertureShadingGroup>> pairs = new List<Tuple<GroupedShadingDevice, ApertureShadingGroup>>();
-            foreach (GroupedShadingDevice device in this.groupedDevices)
-            {
-                pairs.Add(new Tuple<GroupedShadingDevice, ApertureShadingGroup>(device, null));
-            }
-
-            foreach (ApertureShadingGroup group in groups ?? new List<ApertureShadingGroup>())
-            {
-                if (group == null)
-                {
-                    continue;
-                }
-
-                int index = pairs.FindIndex(x => x.Item1 != null && x.Item1.GroupGuid == group.GroupGuid);
-                if (index != -1)
-                {
-                    pairs[index] = new Tuple<GroupedShadingDevice, ApertureShadingGroup>(pairs[index].Item1, new ApertureShadingGroup(group));
-                }
-            }
-
-            pairs.Sort((a, b) => a.Item1.GroupGuid.CompareTo(b.Item1.GroupGuid));
-
-            this.groupedDevices = new List<GroupedShadingDevice>();
-            this.groups = new List<ApertureShadingGroup>();
-            foreach (Tuple<GroupedShadingDevice, ApertureShadingGroup> pair in pairs)
-            {
-                if (pair.Item1 != null)
-                {
-                    this.groupedDevices.Add(pair.Item1);
-                    this.groups.Add(pair.Item2);
-                }
-            }
+            this.apertureGuids = new List<Guid>(apertureGuids ?? new List<Guid>());
+            this.panelGuids = new List<Guid>(panelGuids ?? new List<Guid>());
+            this.devices = new List<ShadingDevice>(devices ?? new List<ShadingDevice>());
+            this.groupedDevices = new List<GroupedShadingDevice>(groupedDevices ?? new List<GroupedShadingDevice>());
+            this.groups = new List<ApertureShadingGroup>(groups ?? new List<ApertureShadingGroup>());
+            Canonicalise();
 
             this.status = status;
             this.warnings = new List<string>(warnings ?? new List<string>());
@@ -509,6 +457,110 @@ namespace SAM.Analytical.SolarCalculator
             return result;
         }
 
+        /// <summary>
+        /// Restores every field to the inert state of a freshly constructed, unusable scheme. Called
+        /// before a JSON reconstruction (so a re-read can never inherit stale state) and again on
+        /// every reconstruction failure (so a failed read can never leave partial or stale identity
+        /// behind). A scheme in this state has no name, no devices, no scope and an empty
+        /// <see cref="SchemeGuid"/>, so it can never masquerade as a valid comparison option.
+        /// </summary>
+        private void Reset()
+        {
+            name = null;
+            designMethod = null;
+            apertureGuids = new List<Guid>();
+            panelGuids = new List<Guid>();
+            devices = new List<ShadingDevice>();
+            groupedDevices = new List<GroupedShadingDevice>();
+            groups = new List<ApertureShadingGroup>();
+            status = ShadingDesignStatus.Undefined;
+            warnings = new List<string>();
+            designObjective = null;
+            designDiagnostics = new List<string>();
+            designTimeScore = double.NaN;
+            designTimeBenefit = double.NaN;
+            designTimeHarm = double.NaN;
+            designTimeCost = double.NaN;
+            designEvaluations = 0;
+            designTermination = ShadingOptimisationTermination.Undefined;
+            schemeGuid = Guid.Empty;
+        }
+
+        /// <summary>
+        /// The ONE canonical ordering a scheme ever carries, applied by both the constructor and the
+        /// JSON reader so two representations of the same logical scheme reconstruct the same
+        /// <see cref="SchemeGuid"/> whatever their input order was:
+        ///   - aperture and panel scopes sorted ordinal ascending;
+        ///   - per-aperture devices deep-copied and sorted by <see cref="ShadingDevice.ApertureGuid"/>;
+        ///   - grouped devices deep-copied and sorted by <see cref="GroupedShadingDevice.GroupGuid"/>;
+        ///   - each group paired to the grouped device carrying the SAME GroupGuid, the PAIR sorted,
+        ///     so later index-based pairing (SchemeElements, ElementOwners) can never rebuild a device
+        ///     against another device's frame. A group whose Guid matches no device is dropped.
+        /// Null devices are skipped, never carried into a collection that assumes a valid device.
+        /// </summary>
+        private void Canonicalise()
+        {
+            apertureGuids = Sorted(apertureGuids);
+            panelGuids = Sorted(panelGuids);
+
+            List<ShadingDevice> canonicalDevices = new List<ShadingDevice>();
+            foreach (ShadingDevice device in devices)
+            {
+                if (device != null)
+                {
+                    canonicalDevices.Add(new ShadingDevice(device));
+                }
+            }
+            canonicalDevices.Sort((a, b) => a.ApertureGuid.CompareTo(b.ApertureGuid));
+            devices = canonicalDevices;
+
+            List<GroupedShadingDevice> canonicalGrouped = new List<GroupedShadingDevice>();
+            foreach (GroupedShadingDevice device in groupedDevices)
+            {
+                if (device != null)
+                {
+                    canonicalGrouped.Add(new GroupedShadingDevice(device));
+                }
+            }
+            canonicalGrouped.Sort((a, b) => a.GroupGuid.CompareTo(b.GroupGuid));
+
+            List<Tuple<GroupedShadingDevice, ApertureShadingGroup>> pairs = new List<Tuple<GroupedShadingDevice, ApertureShadingGroup>>();
+            foreach (GroupedShadingDevice device in canonicalGrouped)
+            {
+                pairs.Add(new Tuple<GroupedShadingDevice, ApertureShadingGroup>(device, null));
+            }
+
+            foreach (ApertureShadingGroup group in groups)
+            {
+                if (group == null)
+                {
+                    continue;
+                }
+
+                int index = pairs.FindIndex(x => x.Item1 != null && x.Item1.GroupGuid == group.GroupGuid);
+                if (index != -1)
+                {
+                    pairs[index] = new Tuple<GroupedShadingDevice, ApertureShadingGroup>(pairs[index].Item1, new ApertureShadingGroup(group));
+                }
+            }
+
+            pairs.Sort((a, b) => a.Item1.GroupGuid.CompareTo(b.Item1.GroupGuid));
+
+            List<GroupedShadingDevice> finalGrouped = new List<GroupedShadingDevice>();
+            List<ApertureShadingGroup> finalGroups = new List<ApertureShadingGroup>();
+            foreach (Tuple<GroupedShadingDevice, ApertureShadingGroup> pair in pairs)
+            {
+                if (pair.Item1 != null)
+                {
+                    finalGrouped.Add(pair.Item1);
+                    finalGroups.Add(pair.Item2);
+                }
+            }
+
+            groupedDevices = finalGrouped;
+            groups = finalGroups;
+        }
+
         // --------------------------------------------------------------- identity ----
 
         /// <summary>
@@ -604,6 +656,10 @@ namespace SAM.Analytical.SolarCalculator
 
         public bool FromJsonObject(JsonObject jObject)
         {
+            // Start from the inert state so a re-read of a live object can never inherit the old
+            // identity, scope or devices behind a later failure.
+            Reset();
+
             if (jObject == null)
             {
                 return false;
@@ -620,10 +676,20 @@ namespace SAM.Analytical.SolarCalculator
             {
                 foreach (JsonNode node in devicesArray)
                 {
-                    if (node is JsonObject deviceObject)
+                    if (!(node is JsonObject deviceObject))
                     {
-                        devices.Add(Core.Create.IJSAMObject<ShadingDevice>(deviceObject));
+                        Reset();
+                        return false;
                     }
+
+                    ShadingDevice device = Core.Create.IJSAMObject<ShadingDevice>(deviceObject);
+                    if (device == null)
+                    {
+                        Reset();
+                        return false;
+                    }
+
+                    devices.Add(device);
                 }
             }
 
@@ -632,10 +698,20 @@ namespace SAM.Analytical.SolarCalculator
             {
                 foreach (JsonNode node in groupedArray)
                 {
-                    if (node is JsonObject deviceObject)
+                    if (!(node is JsonObject deviceObject))
                     {
-                        groupedDevices.Add(Core.Create.IJSAMObject<GroupedShadingDevice>(deviceObject));
+                        Reset();
+                        return false;
                     }
+
+                    GroupedShadingDevice device = Core.Create.IJSAMObject<GroupedShadingDevice>(deviceObject);
+                    if (device == null)
+                    {
+                        Reset();
+                        return false;
+                    }
+
+                    groupedDevices.Add(device);
                 }
             }
 
@@ -644,10 +720,28 @@ namespace SAM.Analytical.SolarCalculator
             {
                 foreach (JsonNode node in groupsArray)
                 {
-                    if (node is JsonObject groupObject)
+                    // A null group is a legitimate aligned entry: a grouped device without a group
+                    // travels with a null group, index-aligned with GroupedDevices.
+                    if (node == null || (node is JsonValue jsonValue && jsonValue.GetValueKind() == System.Text.Json.JsonValueKind.Null))
                     {
-                        groups.Add(Core.Create.IJSAMObject<ApertureShadingGroup>(groupObject));
+                        groups.Add(null);
+                        continue;
                     }
+
+                    if (!(node is JsonObject groupObject))
+                    {
+                        Reset();
+                        return false;
+                    }
+
+                    ApertureShadingGroup group = Core.Create.IJSAMObject<ApertureShadingGroup>(groupObject);
+                    if (group == null)
+                    {
+                        Reset();
+                        return false;
+                    }
+
+                    groups.Add(group);
                 }
             }
 
@@ -681,7 +775,10 @@ namespace SAM.Analytical.SolarCalculator
             if (jObject.ContainsKey("DesignTermination")) { Enum.TryParse(jObject["DesignTermination"]?.GetValue<string>(), out designTermination); }
 
             // The stored Guid is carried for reference, but the identity is always RE-DERIVED so a
-            // tampered or re-imported object cannot disagree with its own contents.
+            // tampered or re-imported object cannot disagree with its own contents. The lists are
+            // canonicalised to the SAME ordering the constructor enforces, so two documents with the
+            // same logical scheme but different array orders reconstruct the same identity.
+            Canonicalise();
             schemeGuid = ComputeSchemeGuid();
             return true;
         }
@@ -784,3 +881,4 @@ namespace SAM.Analytical.SolarCalculator
         }
     }
 }
+

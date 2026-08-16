@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json.Nodes;
 using Xunit;
 using SAM.Analytical;
 using SAM.Analytical.SolarCalculator;
@@ -107,6 +108,62 @@ namespace SAM.SolarCalculator.Tests
         }
 
         [Fact]
+        public void A_Single_Grid_Comparison_Is_Provisional_Not_Ready()
+        {
+            // READY is reserved for a comparison whose convergence checks have been confirmed. A
+            // single-grid run never confirms convergence, so a non-No-Shade leader must stay
+            // PROVISIONAL, never READY. Pinned end-to-end through the production entry point.
+            AnalyticalModel model = Load();
+            WeatherData weatherData = model.GetValue<WeatherData>(AnalyticalModelParameter.WeatherData);
+
+            List<ApertureSolarTarget> southTargets = model.ApertureSolarTargets(null, GridSize)
+                .Where(x => Math.Abs(x.Azimuth - 180.0) < 1.0)
+                .Take(2)
+                .ToList();
+
+            ShadingScheme Shade(string name, IShadingTypology typology)
+            {
+                return new ShadingScheme(name, "RationaliseShading", southTargets.Select(x => x.ApertureGuid), new List<Guid> { southTargets[0].PanelGuid },
+                    southTargets.Select(t => new ShadingDevice(t.ApertureGuid, typology)),
+                    new List<GroupedShadingDevice>(), new List<ApertureShadingGroup>(),
+                    ShadingDesignStatus.Ok, new List<string>(), null, new List<string>());
+            }
+
+            List<ShadingScheme> schemes = new List<ShadingScheme>
+            {
+                new ShadingScheme("No Shade", "Baseline", southTargets.Select(x => x.ApertureGuid), new List<Guid> { southTargets[0].PanelGuid },
+                    new List<ShadingDevice>(), new List<GroupedShadingDevice>(), new List<ApertureShadingGroup>(),
+                    ShadingDesignStatus.NoShading, new List<string>(), null, new List<string>()),
+                Shade("Overhang", new Overhang(1.0)),
+                Shade("VerticalFins", new VerticalFins(0.5, 2)),
+            };
+
+            ShadingComparisonResult result = SolarCreate.ShadingComparison(
+                model, southTargets, schemes, 1.0, 0.1, MaterialCostReference.AdmittedDirectEnergy, out string message,
+                weatherData, null, null, null, GridSize, SunAngleStep, false);
+
+            Assert.Null(message);
+
+            // Convergence is never confirmed by a single-grid run, so READY is unreachable.
+            Assert.False(result.GridConvergenceConfirmed);
+            Assert.NotEqual(ShadingRecommendationStatus.Ready, result.RecommendationStatus);
+
+            // A non-No-Shade, non-indeterminate leader is PROVISIONAL, with the convergence check as
+            // the reason.
+            if (result.TopRankedRow != null
+                && result.TopRankedRow.Status != ShadingComparisonStatus.NoShadeBaseline
+                && result.RecommendationStatus != ShadingRecommendationStatus.Indeterminate)
+            {
+                Assert.Equal(ShadingRecommendationStatus.Provisional, result.RecommendationStatus);
+                Assert.Contains("grid convergence has not been demonstrated", result.OpenChecks);
+            }
+
+            Assert.Contains("GRID CONVERGENCE: NOT CONFIRMED", result.ReportMarkdown);
+            Assert.Contains("READY is reserved for a comparison where the required convergence checks have", result.ReportMarkdown);
+            Assert.Contains("A single-grid comparison without such confirmation remains", result.ReportMarkdown);
+        }
+
+        [Fact]
         public void The_Full_Comparison_Is_Deterministic()
         {
             AnalyticalModel model = Load();
@@ -176,6 +233,40 @@ namespace SAM.SolarCalculator.Tests
                 null, null, null, null, GridSize, 2.0, false);
             Assert.Contains("more than once", duplicateSchemeMessage);
             Assert.Equal(ShadingComparisonOutcome.NoComparableOptions, duplicateSchemes.Outcome);
+        }
+
+        [Fact]
+        public void A_Scheme_With_Empty_Identity_Is_Refused_Not_Ranked_As_No_Shade()
+        {
+            // A scheme reconstructed from corrupted JSON is inert (empty SchemeGuid). The comparison
+            // boundary must refuse it with an actionable message, never classify it as the No Shade
+            // baseline.
+            List<ApertureSolarTarget> southTargets = new List<ApertureSolarTarget>();
+            foreach (int ordinal in new int[] { 1, 2 })
+            {
+                SAM.Geometry.Spatial.Face3D face = SyntheticTargets.Face(SyntheticTargets.South, new Point3D(2.0 * ordinal, 0, 5), 1.0, 2.0);
+                southTargets.Add(new ApertureSolarTarget(new Guid("eeeeeee1-0000-0000-0000-00000000000" + ordinal), new Guid("fffffff1-0000-0000-0000-000000000001"), face, Geometry.SolarCalculator.Query.AnalysisCells(face, 0.5)));
+            }
+
+            ShadingScheme scheme = new ShadingScheme("Overhang", "RationaliseShading", southTargets.Select(x => x.ApertureGuid), new List<Guid> { southTargets[0].PanelGuid },
+                southTargets.Select(t => new ShadingDevice(t.ApertureGuid, (IShadingTypology)new Overhang(0.5))),
+                new List<GroupedShadingDevice>(), new List<ApertureShadingGroup>(),
+                ShadingDesignStatus.Ok, new List<string>(), null, new List<string>());
+
+            JsonObject json = scheme.ToJsonObject();
+            ((JsonArray)json["Devices"])[0] = new JsonObject { ["_type"] = "Not.A.ShadingDevice" };
+
+            ShadingScheme corrupted = SAM.Core.Create.IJSAMObject<ShadingScheme>(json);
+            Assert.NotNull(corrupted);
+            Assert.Equal(Guid.Empty, corrupted.SchemeGuid);
+
+            ShadingComparisonResult result = ((AnalyticalModel)null).ShadingComparison(
+                southTargets, new List<ShadingScheme> { corrupted }, 1.0, 0.1, MaterialCostReference.AdmittedDirectEnergy, out string message,
+                null, null, null, null, GridSize, 2.0, false);
+
+            Assert.Contains("no resolved identity", message);
+            Assert.Equal(ShadingComparisonOutcome.NoComparableOptions, result.Outcome);
+            Assert.Equal(ShadingRecommendationStatus.NoDecision, result.RecommendationStatus);
         }
 
         [Fact]

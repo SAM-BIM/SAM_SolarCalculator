@@ -136,6 +136,20 @@ namespace SAM.Analytical.SolarCalculator
                     continue;
                 }
 
+                // A scheme whose identity failed to resolve (e.g. reconstructed from corrupted JSON)
+                // must be refused here, never silently ranked. It must never pass as the No Shade
+                // baseline, which is a real zero-device scheme with its own deterministic identity.
+                if (scheme.SchemeGuid == Guid.Empty)
+                {
+                    message = string.Format(CultureInfo.InvariantCulture,
+                        "The scheme '{0}' has no resolved identity (its SchemeGuid is empty), so it cannot be ranked. It was not reconstructed from valid data — recreate it from its source inputs, or reload it from intact JSON.",
+                        scheme.Name ?? "(unnamed)");
+                    comparisonResult.Message = message;
+                    comparisonResult.Outcome = ShadingComparisonOutcome.NoComparableOptions;
+                    comparisonResult.RecommendationStatus = ShadingRecommendationStatus.NoDecision;
+                    return comparisonResult;
+                }
+
                 if (!schemeGuids.Add(scheme.SchemeGuid))
                 {
                     message = string.Format(CultureInfo.InvariantCulture,

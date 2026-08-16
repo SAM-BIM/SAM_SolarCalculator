@@ -101,36 +101,28 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 return;
             }
 
-            List<OptimisedShadingResult> optimisedShadingResults = new List<OptimisedShadingResult>();
-            index = Params.IndexOfInputParam("_optimisedShadingResults_");
-            if (index != -1)
+            List<OptimisedShadingResult> optimisedShadingResults = OptionalList<OptimisedShadingResult>(
+                dataAccess, "_optimisedShadingResults_", out int optimisedSupplied, out int optimisedRecognised);
+            if (optimisedSupplied > 0 && optimisedRecognised == 0)
             {
-                List<GH_ObjectWrapper> wrappers = new List<GH_ObjectWrapper>();
-                dataAccess.GetDataList(index, wrappers);
-                foreach (GH_ObjectWrapper wrapper in wrappers)
-                {
-                    OptimisedShadingResult result = Query.Value<OptimisedShadingResult>(wrapper);
-                    if (result != null)
-                    {
-                        optimisedShadingResults.Add(result);
-                    }
-                }
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "None of the entries on _optimisedShadingResults_ is an optimised shading result, so no conventional family scheme can be built from them. Connect the optimisedShadingResults output of SAMAnalytical.RationaliseShading, or leave the input empty to compare only the No Shade baseline and any grouped awnings.");
+                return;
+            }
+            if (optimisedRecognised > 0 && optimisedRecognised < optimisedSupplied)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, string.Format("{0} of the {1} entries on _optimisedShadingResults_ are not optimised shading results and were ignored.", optimisedSupplied - optimisedRecognised, optimisedSupplied));
             }
 
-            List<GroupedAwningResult> groupedAwningResults = new List<GroupedAwningResult>();
-            index = Params.IndexOfInputParam("_groupedAwningResults_");
-            if (index != -1)
+            List<GroupedAwningResult> groupedAwningResults = OptionalList<GroupedAwningResult>(
+                dataAccess, "_groupedAwningResults_", out int groupedSupplied, out int groupedRecognised);
+            if (groupedSupplied > 0 && groupedRecognised == 0)
             {
-                List<GH_ObjectWrapper> wrappers = new List<GH_ObjectWrapper>();
-                dataAccess.GetDataList(index, wrappers);
-                foreach (GH_ObjectWrapper wrapper in wrappers)
-                {
-                    GroupedAwningResult result = Query.Value<GroupedAwningResult>(wrapper);
-                    if (result != null)
-                    {
-                        groupedAwningResults.Add(result);
-                    }
-                }
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "None of the entries on _groupedAwningResults_ is a grouped awning result, so no grouped awning scheme can be built from them. Connect the groupedAwningResults output of SAMAnalytical.RationaliseAwningGroup, or leave the input empty.");
+                return;
+            }
+            if (groupedRecognised > 0 && groupedRecognised < groupedSupplied)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, string.Format("{0} of the {1} entries on _groupedAwningResults_ are not grouped awning results and were ignored.", groupedSupplied - groupedRecognised, groupedSupplied));
             }
 
             bool includeNoShade = true;
@@ -209,6 +201,44 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             {
                 dataAccess.SetData(index_Successful, true);
             }
+        }
+
+        /// <summary>
+        /// Reads an optional list of wrappers and returns the entries that are the expected type,
+        /// together with how many entries were supplied and how many were recognised. A wire with no
+        /// data is treated as "nothing supplied" on purpose: a deliberately empty optional input must
+        /// not be rejected — only a wire that carried data of the wrong kind is an error.
+        /// </summary>
+        private List<T> OptionalList<T>(IGH_DataAccess dataAccess, string name, out int suppliedCount, out int recognisedCount) where T : class
+        {
+            suppliedCount = 0;
+            recognisedCount = 0;
+            List<T> result = new List<T>();
+
+            int index = Params.IndexOfInputParam(name);
+            if (index == -1)
+            {
+                return result;
+            }
+
+            List<GH_ObjectWrapper> wrappers = new List<GH_ObjectWrapper>();
+            if (!dataAccess.GetDataList(index, wrappers))
+            {
+                return result;
+            }
+
+            suppliedCount = wrappers.Count;
+            foreach (GH_ObjectWrapper wrapper in wrappers)
+            {
+                T value = Query.Value<T>(wrapper);
+                if (value != null)
+                {
+                    recognisedCount++;
+                    result.Add(value);
+                }
+            }
+
+            return result;
         }
     }
 }

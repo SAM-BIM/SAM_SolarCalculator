@@ -95,9 +95,24 @@ namespace SAM.SolarCalculator.Tests
         public void Existing_Public_Entry_Points_Keep_Their_Arities()
         {
             // The frozen arities of the entry points PR #17 pinned, extended to the new API: no
-            // public method gained a parameter in this PR.
-            Assert.Equal(22, typeof(SolarCreate).GetMethods().Single(m => m.Name == "AwningGroupResults" && m.GetParameters().Length == 22).GetParameters().Length);
-            Assert.Equal(23, typeof(SolarCreate).GetMethods().Single(m => m.Name == "AwningGroupResults" && m.GetParameters().Length == 23).GetParameters().Length);
+            // public method gained a parameter in this PR. The two overloads are identified by their
+            // trailing parameter TYPE — the original twenty-two-parameter signature ends in the int
+            // evaluation budget, the mounting-offset overload ends in the double offset — and the
+            // arity is asserted independently, so a signature change is caught rather than silently
+            // re-selected by its own parameter count.
+            MethodInfo[] overloads = typeof(SolarCreate)
+                .GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .Where(method => method.Name == "AwningGroupResults")
+                .ToArray();
+
+            MethodInfo original = overloads.SingleOrDefault(method => method.GetParameters().Last().ParameterType == typeof(int));
+            MethodInfo mountingOffset = overloads.SingleOrDefault(method => method.GetParameters().Last().ParameterType == typeof(double));
+
+            Assert.NotNull(original);
+            Assert.NotNull(mountingOffset);
+
+            Assert.Equal(22, original.GetParameters().Length);
+            Assert.Equal(23, mountingOffset.GetParameters().Length);
         }
     }
 }
