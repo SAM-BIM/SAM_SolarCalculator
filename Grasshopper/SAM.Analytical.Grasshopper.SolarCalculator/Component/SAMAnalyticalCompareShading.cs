@@ -110,7 +110,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "scoreDeltaToTopRanked", NickName = "scoreDeltaToTopRanked", Description = "Score below the analytical leader per option [kWh]", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_Number() { Name = "scoreDeltaToNoShade", NickName = "scoreDeltaToNoShade", Description = "Score above or below No Shade per option [kWh]", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
 
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "recommendationStatus", NickName = "recommendationStatus", Description = "READY / PROVISIONAL / INDETERMINATE / NO SHADING RECOMMENDED / NO DECISION - whether an engineer should ACT on rank 1", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "recommendationStatus", NickName = "recommendationStatus", Description = "READY / PROVISIONAL / INDETERMINATE / NO SHADING RECOMMENDED / NO DECISION - whether an engineer should ACT on rank 1. READY is reserved for a comparison where the required convergence checks have been confirmed; a single-grid comparison without such confirmation remains PROVISIONAL.", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "recommendationSummary", NickName = "recommendationSummary", Description = "The Engineering Recommendation block of the report", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "openChecks", NickName = "openChecks", Description = "One line per unresolved condition", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_String() { Name = "requiredBeforeFreeze", NickName = "requiredBeforeFreeze", Description = "The actionable inverse of openChecks", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
@@ -258,6 +258,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 return;
             }
 
+            int schemeSupplied = schemeWrappers.Count;
             foreach (GH_ObjectWrapper wrapper in schemeWrappers)
             {
                 ShadingScheme scheme = Query.Value<ShadingScheme>(wrapper);
@@ -269,8 +270,15 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
 
             if (schemes.Count == 0)
             {
-                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "No shading schemes were recognised on _shadingSchemes. Connect the output of SAMAnalytical.AssembleShadingSchemes.");
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, schemeSupplied == 0
+                    ? "Please supply shading schemes from SAMAnalytical.AssembleShadingSchemes."
+                    : "None of the entries on _shadingSchemes is a shading scheme, so the comparison has nothing to rank. Connect the shadingSchemes output of SAMAnalytical.AssembleShadingSchemes.");
                 return;
+            }
+
+            if (schemes.Count < schemeSupplied)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, string.Format("{0} of the {1} entries on _shadingSchemes are not shading schemes and were ignored.", schemeSupplied - schemes.Count, schemeSupplied));
             }
 
             double wantedSolarPenalty = Number(dataAccess, "_wantedSolarPenalty_", 1.0);

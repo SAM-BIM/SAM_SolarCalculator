@@ -107,6 +107,62 @@ namespace SAM.SolarCalculator.Tests
         }
 
         [Fact]
+        public void A_Single_Grid_Comparison_Is_Provisional_Not_Ready()
+        {
+            // READY is reserved for a comparison whose convergence checks have been confirmed. A
+            // single-grid run never confirms convergence, so a non-No-Shade leader must stay
+            // PROVISIONAL, never READY. Pinned end-to-end through the production entry point.
+            AnalyticalModel model = Load();
+            WeatherData weatherData = model.GetValue<WeatherData>(AnalyticalModelParameter.WeatherData);
+
+            List<ApertureSolarTarget> southTargets = model.ApertureSolarTargets(null, GridSize)
+                .Where(x => Math.Abs(x.Azimuth - 180.0) < 1.0)
+                .Take(2)
+                .ToList();
+
+            ShadingScheme Shade(string name, IShadingTypology typology)
+            {
+                return new ShadingScheme(name, "RationaliseShading", southTargets.Select(x => x.ApertureGuid), new List<Guid> { southTargets[0].PanelGuid },
+                    southTargets.Select(t => new ShadingDevice(t.ApertureGuid, typology)),
+                    new List<GroupedShadingDevice>(), new List<ApertureShadingGroup>(),
+                    ShadingDesignStatus.Ok, new List<string>(), null, new List<string>());
+            }
+
+            List<ShadingScheme> schemes = new List<ShadingScheme>
+            {
+                new ShadingScheme("No Shade", "Baseline", southTargets.Select(x => x.ApertureGuid), new List<Guid> { southTargets[0].PanelGuid },
+                    new List<ShadingDevice>(), new List<GroupedShadingDevice>(), new List<ApertureShadingGroup>(),
+                    ShadingDesignStatus.NoShading, new List<string>(), null, new List<string>()),
+                Shade("Overhang", new Overhang(1.0)),
+                Shade("VerticalFins", new VerticalFins(0.5, 2)),
+            };
+
+            ShadingComparisonResult result = SolarCreate.ShadingComparison(
+                model, southTargets, schemes, 1.0, 0.1, MaterialCostReference.AdmittedDirectEnergy, out string message,
+                weatherData, null, null, null, GridSize, SunAngleStep, false);
+
+            Assert.Null(message);
+
+            // Convergence is never confirmed by a single-grid run, so READY is unreachable.
+            Assert.False(result.GridConvergenceConfirmed);
+            Assert.NotEqual(ShadingRecommendationStatus.Ready, result.RecommendationStatus);
+
+            // A non-No-Shade, non-indeterminate leader is PROVISIONAL, with the convergence check as
+            // the reason.
+            if (result.TopRankedRow != null
+                && result.TopRankedRow.Status != ShadingComparisonStatus.NoShadeBaseline
+                && result.RecommendationStatus != ShadingRecommendationStatus.Indeterminate)
+            {
+                Assert.Equal(ShadingRecommendationStatus.Provisional, result.RecommendationStatus);
+                Assert.Contains("grid convergence has not been demonstrated", result.OpenChecks);
+            }
+
+            Assert.Contains("GRID CONVERGENCE: NOT CONFIRMED", result.ReportMarkdown);
+            Assert.Contains("READY is reserved for a comparison where the required convergence checks have", result.ReportMarkdown);
+            Assert.Contains("A single-grid comparison without such confirmation remains", result.ReportMarkdown);
+        }
+
+        [Fact]
         public void The_Full_Comparison_Is_Deterministic()
         {
             AnalyticalModel model = Load();

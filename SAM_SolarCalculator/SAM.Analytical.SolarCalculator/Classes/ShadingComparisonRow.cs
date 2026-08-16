@@ -54,7 +54,11 @@ namespace SAM.Analytical.SolarCalculator
     {
         Undefined,
 
-        /// <summary>Rank 1 is suitable to take forward on the evidence modelled.</summary>
+        /// <summary>
+        /// Rank 1 is suitable to take forward on the evidence modelled. Reserved for a comparison
+        /// where the required convergence checks have been confirmed; a single-grid comparison
+        /// without such confirmation remains <see cref="Provisional"/>.
+        /// </summary>
         Ready,
 
         /// <summary>Rank 1 stands, but one or more material checks remain open.</summary>

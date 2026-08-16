@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json.Nodes;
 using Xunit;
 using SAM.Analytical.SolarCalculator;
 using SAM.Geometry.SolarCalculator;
@@ -300,6 +301,134 @@ namespace SAM.SolarCalculator.Tests
             Assert.Single(scheme.Devices);
             Assert.Empty(scheme.Warnings);
             Assert.Equal(new List<string> { "Overhang" }, scheme.TypologyNames);
+        }
+
+        // -------------------------------------------------------------- JSON canonical ----
+
+        [Fact]
+        public void Reordering_Json_Arrays_Does_Not_Change_SchemeGuid()
+        {
+            Guid a = new Guid("aaaaaaa1-0000-0000-0000-000000000001");
+            Guid b = new Guid("aaaaaaa1-0000-0000-0000-000000000002");
+            Guid c = new Guid("aaaaaaa1-0000-0000-0000-000000000003");
+
+            ShadingScheme scheme = new ShadingScheme(
+                "Mixed", "RationaliseShading", new List<Guid> { a, b, c }, new List<Guid> { new Guid("bbbbbbb1-0000-0000-0000-000000000001") },
+                new List<ShadingDevice> { new ShadingDevice(a, new Overhang(0.5)), new ShadingDevice(b, new NoShading()) },
+                new List<GroupedShadingDevice>
+                {
+                    new GroupedShadingDevice(new Guid("ccccccc1-0000-0000-0000-000000000001"), new Guid("bbbbbbb1-0000-0000-0000-000000000001"), new List<Guid> { a, b, c }, new RetractableAwning(2.1, 15.0, 0.0, 0.15), AwningSpecification.Dakar),
+                },
+                new List<ApertureShadingGroup>(), ShadingDesignStatus.Warning,
+                new List<string> { "warning one" }, null, new List<string> { "diagnostic" });
+
+            JsonObject json = scheme.ToJsonObject();
+            ReverseJsonArray(json, "ApertureGuids");
+            ReverseJsonArray(json, "PanelGuids");
+            ReverseJsonArray(json, "Devices");
+            ReverseJsonArray(json, "GroupedDevices");
+            ReverseJsonArray(json, "Groups");
+
+            ShadingScheme reordered = new ShadingScheme(json);
+            Assert.Equal(scheme.SchemeGuid, reordered.SchemeGuid);
+            Assert.Equal(scheme.ApertureGuids, reordered.ApertureGuids);
+            Assert.Equal(scheme.TypologyNames, reordered.TypologyNames);
+            Assert.Equal(scheme.PhysicalDeviceCount, reordered.PhysicalDeviceCount);
+        }
+
+        [Fact]
+        public void Grouped_Device_Group_Alignment_Survives_Json_Reordering()
+        {
+            // Two grouped devices over two groups of DIFFERENT widths, with the JSON arrays reversed
+            // after serialisation. The pairing must follow GroupGuid, never the array order, so a
+            // device can never be rebuilt against another device's frame.
+            Guid a = new Guid("aaaaaaa1-0000-0000-0000-000000000001");
+            Guid b = new Guid("aaaaaaa1-0000-0000-0000-000000000002");
+            Guid c = new Guid("aaaaaaa1-0000-0000-0000-000000000003");
+
+            ApertureSolarTarget targetA = Target(1);
+            ApertureSolarTarget targetB = Target(2);
+            ApertureSolarTarget targetC = Target(3);
+            List<ApertureSolarTarget> targets = new List<ApertureSolarTarget> { targetA, targetB, targetC };
+
+            Guid wideGroupGuid = new Guid("ccccccc1-0000-0000-0000-000000000009");
+            Guid narrowGroupGuid = new Guid("ccccccc1-0000-0000-0000-000000000001");
+
+            ApertureShadingGroup wideGroup = new ApertureShadingGroup(
+                wideGroupGuid, new Guid("bbbbbbb1-0000-0000-0000-000000000001"),
+                new List<ApertureSolarTarget> { targetA, targetB }, targetA.Plane, 0.0, 2.0, 1.0);
+            ApertureShadingGroup narrowGroup = new ApertureShadingGroup(
+                narrowGroupGuid, new Guid("bbbbbbb1-0000-0000-0000-000000000001"),
+                new List<ApertureSolarTarget> { targetC }, targetC.Plane, 0.0, 1.0, 1.0);
+
+            GroupedShadingDevice wideDevice = new GroupedShadingDevice(
+                wideGroupGuid, new Guid("bbbbbbb1-0000-0000-0000-000000000001"), new List<Guid> { a, b }, new RetractableAwning(2.1, 15.0, 0.0, 0.15), AwningSpecification.Dakar);
+            GroupedShadingDevice narrowDevice = new GroupedShadingDevice(
+                narrowGroupGuid, new Guid("bbbbbbb1-0000-0000-0000-000000000001"), new List<Guid> { c }, new RetractableAwning(2.1, 15.0, 0.0, 0.15), AwningSpecification.Dakar);
+
+            ShadingScheme scheme = new ShadingScheme(
+                "Two Awnings", "RationaliseAwningGroup", new List<Guid> { a, b, c }, new List<Guid> { new Guid("bbbbbbb1-0000-0000-0000-000000000001") },
+                new List<ShadingDevice>(), new List<GroupedShadingDevice> { wideDevice, narrowDevice },
+                new List<ApertureShadingGroup> { narrowGroup, wideGroup },
+                ShadingDesignStatus.Ok, new List<string>(), null, new List<string>());
+
+            JsonObject json = scheme.ToJsonObject();
+            ReverseJsonArray(json, "GroupedDevices");
+            ReverseJsonArray(json, "Groups");
+
+            ShadingScheme reordered = new ShadingScheme(json);
+            Assert.Equal(scheme.SchemeGuid, reordered.SchemeGuid);
+
+            ApertureShadingGroup resolvedWide = reordered.Group(reordered.GroupedDevices.First(x => x.GroupGuid == wideGroupGuid));
+            ApertureShadingGroup resolvedNarrow = reordered.Group(reordered.GroupedDevices.First(x => x.GroupGuid == narrowGroupGuid));
+            Assert.Equal(wideGroupGuid, resolvedWide.GroupGuid);
+            Assert.Equal(narrowGroupGuid, resolvedNarrow.GroupGuid);
+            Assert.Equal(2.0, resolvedWide.Width, 9);
+            Assert.Equal(1.0, resolvedNarrow.Width, 9);
+
+            List<ShadingElement> elements = reordered.SchemeElements(targets);
+            Assert.Equal(2, elements.Count);
+            Assert.True(elements.Any(x => x.Area > 4.0));
+            Assert.True(elements.Any(x => x.Area <= 4.0));
+        }
+
+        [Fact]
+        public void Malformed_Device_Entry_Is_Refused_Without_Null_Reference_Exception()
+        {
+            Guid a = new Guid("aaaaaaa1-0000-0000-0000-000000000001");
+            ShadingScheme scheme = OverhangScheme(new List<Guid> { a }, 0.5);
+
+            JsonObject json = scheme.ToJsonObject();
+            JsonArray devices = json["Devices"] as JsonArray;
+            devices[0] = new JsonObject { ["_type"] = "Not.A.ShadingDevice" };
+
+            // A malformed declared device must fail the read explicitly, never leave a null entry in
+            // a collection that assumes a valid device (which ComputeSchemeGuid would dereference).
+            ShadingScheme target = new ShadingScheme(new JsonObject());
+            Assert.False(target.FromJsonObject(json));
+        }
+
+        private static void ReverseJsonArray(JsonObject json, string name)
+        {
+            if (!(json[name] is JsonArray array))
+            {
+                return;
+            }
+
+            List<JsonNode> items = new List<JsonNode>();
+            foreach (JsonNode node in array)
+            {
+                items.Add(node?.DeepClone());
+            }
+            items.Reverse();
+
+            JsonArray reversed = new JsonArray();
+            foreach (JsonNode node in items)
+            {
+                reversed.Add(node);
+            }
+
+            json[name] = reversed;
         }
     }
 }

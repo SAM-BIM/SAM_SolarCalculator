@@ -982,6 +982,40 @@ namespace SAM.SolarCalculator.Tests
         }
 
         [Fact]
+        public void An_Explicitly_Supplied_Default_Lambda_And_Mu_Are_Project_Not_Default()
+        {
+            // lambda = 1.0 and mu = 0.1 are the library defaults, but an engineer who explicitly
+            // wired them confirmed them as project values. The provenance rule keys off the supplied
+            // flag, never the value, so they must be PROJECT when supplied and DEFAULT when not.
+            List<ApertureSolarTarget> targets = Targets(3);
+
+            ShadingComparisonRow top = new ShadingComparisonRow();
+            top.Benefit = 60.0;
+            top.Harm = 30.0;
+            top.Cost = 10.0;
+
+            ShadingComparisonRow challenger = new ShadingComparisonRow();
+            challenger.Benefit = 62.0;
+            challenger.Harm = 30.5;
+            challenger.Cost = 20.0;
+
+            List<ShadingComparisonRow> rankable = new List<ShadingComparisonRow> { top, challenger };
+
+            List<ShadingProjectInput> supplied = SolarCreate.ProjectInputs(1.0, 0.1, 0.5, targets, true, true, false, rankable, top, null);
+            ShadingProjectInput lambda = supplied.Single(x => x.Name == "Wanted solar penalty lambda");
+            ShadingProjectInput mu = supplied.Single(x => x.Name == "Material penalty mu");
+            Assert.Equal("PROJECT", lambda.Source);
+            Assert.Equal("decision-sensitive", lambda.Classification);
+            Assert.Equal("PROJECT", mu.Source);
+
+            List<ShadingProjectInput> defaulted = SolarCreate.ProjectInputs(1.0, 0.1, 0.5, targets, false, false, false, rankable, top, null);
+            ShadingProjectInput defaultLambda = defaulted.Single(x => x.Name == "Wanted solar penalty lambda");
+            ShadingProjectInput defaultMu = defaulted.Single(x => x.Name == "Material penalty mu");
+            Assert.Equal("DEFAULT", defaultLambda.Source);
+            Assert.Equal("DEFAULT", defaultMu.Source);
+        }
+
+        [Fact]
         public void Score_Delta_To_No_Shade_Is_Positive_Zero_And_Negative_By_Sign()
         {
             List<ApertureSolarTarget> targets = Targets(3);

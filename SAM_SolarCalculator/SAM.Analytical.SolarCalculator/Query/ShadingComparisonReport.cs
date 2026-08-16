@@ -764,6 +764,10 @@ namespace SAM.Analytical.SolarCalculator
             stringBuilder.AppendLine("GRID CONVERGENCE: NOT CONFIRMED");
             stringBuilder.AppendLine("  This comparison was run at one grid. Convergence can only be demonstrated by");
             stringBuilder.AppendLine("  repeating it at a finer grid and checking that the ranking survives.");
+            stringBuilder.AppendLine();
+            stringBuilder.AppendLine("  READY is reserved for a comparison where the required convergence checks have");
+            stringBuilder.AppendLine("  been confirmed. A single-grid comparison without such confirmation remains");
+            stringBuilder.AppendLine("  PROVISIONAL.");
             stringBuilder.AppendLine("```");
             stringBuilder.AppendLine();
         }
