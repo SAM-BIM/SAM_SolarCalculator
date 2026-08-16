@@ -10,6 +10,7 @@ using SAM.Analytical;
 using SAM.Analytical.SolarCalculator;
 using SAM.Core.SolarCalculator;
 using SAM.Geometry.Spatial;
+using SAM.Weather;
 
 namespace SAM.SolarCalculator.Tests
 {
@@ -330,8 +331,221 @@ namespace SAM.SolarCalculator.Tests
             output.WriteLine(first.DesignSummary);
         }
 
-        // ------------------------------------- C. old positional call compatibility ----
+        // --------------------------------- D. the operation profile validation table ----
 
+        /// <summary>
+        /// The full-year operation of the studied device, printed as the validation table this PR
+        /// set out to produce. Everything except the two PR-#19 sanity anchors (site daylight,
+        /// sun on the tall aperture) is COMPUTED by the test from the fixture — nothing is quoted.
+        ///
+        /// THE WIND LIMIT AND ITS PROVENANCE. 10.6 m/s = 38 km/h. SELT's Declaration of Performance
+        /// puts a Dakar of width up to 4.10 m and projection up to 3.10 m in wind resistance
+        /// Class 2 (84 Pa), which SELT describes as resistance up to 38 km/h
+        /// (https://www.selt.com/dakar-en). The Kołobrzeg unit — 3.0 m wide, 1.6 m projection —
+        /// falls in that row.
+        ///
+        /// THIS VALUE IS FOR THE VALIDATION FIXTURE ONLY. MaximumWindSpeed stays a fully
+        /// configurable input everywhere else and is never hard-coded into production code, defaults
+        /// or the Grasshopper component. It is an ANNUAL WEATHER-BASED OPERATIONAL ASSUMPTION derived
+        /// from a declared wind class — not a certified sensor retraction setpoint, not a local gust
+        /// verification, and not a structural check.
+        ///
+        /// AT THIS LIMIT THE DEVICE IS NEVER RETRACTED. The 2018 Kołobrzeg demand hours carry
+        /// recorded wind between 1 and 6 m/s, so none of them exceed 10.6 m/s. This test asserts
+        /// DeviceWindRetractedHours == 0 explicitly, so a reader does not mistake this scenario for
+        /// one that exercised wind retraction; the retraction pathway is exercised by the dedicated
+        /// validation-threshold scenario next to this one.
+        /// </summary>
+        [Fact]
+        [Trait("Category", "LongRunning")]
+        public void Kolobrzeg_Operation_Profile_Reports_The_Device_Year_At_Ten_Point_Six_Metres_Per_Second()
+        {
+            const double windLimit = 10.6;
+
+            AnalyticalModel analyticalModel = KolobrzegFixture.Model();
+            int year = KolobrzegFixture.Year(analyticalModel);
+            WeatherData weatherData = analyticalModel.GetValue<WeatherData>(AnalyticalModelParameter.WeatherData);
+            Assert.NotNull(weatherData);
+
+            List<ApertureSolarTarget> targets = StudiedTargets();
+
+            // One 3.00 m Dakar (0.15 m side extension), fully deployed position, standard valance.
+            ApertureShadingGroup group = targets.ApertureShadingGroups(AwningSpecification.Dakar, Extension).Single();
+            Assert.Equal(3.00, group.Width + 2.0 * Extension, 6);
+
+            SolarControlSettings settings = new SolarControlSettings(200.0, double.NaN, windLimit);
+
+            List<SolarControlProfile> profiles = new List<SolarControlProfile>();
+            foreach (ApertureSolarTarget target in group.Targets)
+            {
+                profiles.Add(target.SolarControlProfile(weatherData, settings, year));
+            }
+
+            ApertureSolarContext context = Analytical.SolarCalculator.Create.ApertureSolarContext(
+                analyticalModel, year, weatherData, StudiedGuids(), KolobrzegFixture.HistoricalGridSize, 2.0);
+            Assert.NotNull(context);
+
+            List<int> offsets = new List<int>();
+            foreach (Guid guid in group.ApertureGuids)
+            {
+                offsets.Add(context.CellIndexOffset(guid));
+            }
+
+            GroupedShadingOperationProfile device = Analytical.SolarCalculator.Create.GroupedShadingOperationProfile(
+                group, profiles, context.SolarVisibilityCache, context.ContextOccluders,
+                new RetractableAwning(1.6, 28.0, 0.0, Extension, 0.21), weatherData, out string message, offsets);
+
+            Assert.NotNull(device);
+            Assert.Null(message);
+
+            // PR #19 sanity anchors, reproduced from the fixture: the site's daylight and the sun
+            // on the tall aperture.
+            Assert.Equal(4391, profiles[0].DaylightHours);
+            Assert.Equal(1784, profiles.Single(x => x.ApertureGuid == KolobrzegFixture.TallApertureGuid).ApertureSunHours);
+
+            // The device headline is the union of the member schedules, and the partition holds.
+            List<int> demand = new List<int>();
+            List<int> deployed = new List<int>();
+            List<int> windRetracted = new List<int>();
+            foreach (SolarControlProfile profile in profiles)
+            {
+                demand.AddRange(profile.ShadeDemandHoursOfYear);
+                deployed.AddRange(profile.ShadeOnHoursOfYear);
+                windRetracted.AddRange(profile.HighWindHoursOfYear);
+            }
+
+            Assert.Equal(new HashSet<int>(demand), new HashSet<int>(device.DeviceDemandHoursOfYear));
+            Assert.Equal(new HashSet<int>(deployed), new HashSet<int>(device.DeviceDeployedHoursOfYear));
+            Assert.Equal(new HashSet<int>(windRetracted), new HashSet<int>(device.DeviceWindRetractedHoursOfYear));
+            Assert.Equal(device.DeviceDemandHours, device.DeviceDeployedHours + device.DeviceWindRetractedHours);
+            Assert.Empty(device.DeviceDeployedHoursOfYear.Intersect(device.DeviceWindRetractedHoursOfYear));
+
+            // At the Dakar 10.6 m/s fixture assumption the 2018 Kołobrzeg demand hours never exceed
+            // the operational wind limit (recorded demand-hour wind is 1-6 m/s): nothing is retracted.
+            // Asserted, not assumed, so a reader cannot mistake this for a retraction exercise.
+            Assert.Equal(0, device.DeviceWindRetractedHours);
+
+            // The controlled interception can never exceed the always-deployed reference.
+            Assert.True(device.ControlledUnwantedSolarIntercepted <= device.UncontrolledUnwantedSolarIntercepted + 1e-9);
+
+            // The valance is real on this WSW façade: effective hours and first-hit energy.
+            Assert.True(device.ValanceEffectiveHours > 0, "the valance must be effective on the WSW façade");
+            Assert.True(device.ValanceAttributedEnergy > 0, "the valance must intercept energy in the current geometry");
+
+            output.WriteLine("257.5 deg | Dakar Retractable Awning");
+            output.WriteLine("3.0 m wide | 1.6 m projection | 28 deg tilt | 0.21 m valance");
+            output.WriteLine(string.Empty);
+            output.WriteLine($"Site daylight                     {profiles[0].DaylightHours} h");
+            output.WriteLine($"Sun on member apertures           {string.Join(" / ", profiles.Select(x => x.ApertureSunHours))} h");
+            output.WriteLine($"Device shading requested          {device.DeviceDemandHours} h");
+            output.WriteLine($"Device deployed                   {device.DeviceDeployedHours} h");
+            output.WriteLine($"Wind-retracted @ 10.6 m/s         {device.DeviceWindRetractedHours} h");
+            output.WriteLine($"Shade use                         {100.0 * device.DeviceShadeUseFraction:0.#} %");
+            output.WriteLine(string.Empty);
+            output.WriteLine($"Canopy effective                  {device.CanopyEffectiveHours} h");
+            output.WriteLine($"Valance effective                 {device.ValanceEffectiveHours} h");
+            output.WriteLine($"Valance attributed energy         {device.ValanceAttributedEnergy:0.##} kWh");
+            output.WriteLine(string.Empty);
+            output.WriteLine($"Controlled unwanted intercepted   {device.ControlledUnwantedSolarIntercepted:0.##} kWh");
+            output.WriteLine($"Always-deployed unwanted          {device.UncontrolledUnwantedSolarIntercepted:0.##} kWh");
+            output.WriteLine(device.ToString());
+        }
+
+        /// <summary>
+        /// The SAME Kołobrzeg device under a validation-only wind threshold chosen to make the wind
+        /// pathway actually bite, so the retraction accounting is proven on the real project weather
+        /// rather than only on synthetic weather.
+        ///
+        /// THE THRESHOLD IS VALIDATION-ONLY. 5.0 m/s is NOT a Dakar (or any other) product rating. It
+        /// was picked from the fixture itself: the 137 demand hours carry recorded wind between 1 and
+        /// 6 m/s, and 5.0 m/s sits inside that range so it retracts a real minority of the demand
+        /// (9 hours) while leaving most of it deployed. It exists solely to exercise the retraction
+        /// pathway on real weather, and must never become a production default.
+        /// </summary>
+        [Fact]
+        [Trait("Category", "LongRunning")]
+        public void Kolobrzeg_Operation_Profile_Retracts_Under_A_Validation_Only_Wind_Threshold()
+        {
+            const double validationWindLimit = 5.0;
+
+            AnalyticalModel analyticalModel = KolobrzegFixture.Model();
+            int year = KolobrzegFixture.Year(analyticalModel);
+            WeatherData weatherData = analyticalModel.GetValue<WeatherData>(AnalyticalModelParameter.WeatherData);
+
+            List<ApertureSolarTarget> targets = StudiedTargets();
+            ApertureShadingGroup group = targets.ApertureShadingGroups(AwningSpecification.Dakar, Extension).Single();
+
+            // One shared solar context and one device geometry serve both scenarios; only the control
+            // rule (the wind limit) differs, so the two measurements are otherwise identical.
+            ApertureSolarContext context = Analytical.SolarCalculator.Create.ApertureSolarContext(
+                analyticalModel, year, weatherData, StudiedGuids(), KolobrzegFixture.HistoricalGridSize, 2.0);
+
+            List<int> offsets = new List<int>();
+            foreach (Guid guid in group.ApertureGuids)
+            {
+                offsets.Add(context.CellIndexOffset(guid));
+            }
+
+            RetractableAwning awning = new RetractableAwning(1.6, 28.0, 0.0, Extension, 0.21);
+
+            GroupedShadingOperationProfile noBite = GroupedDevice(group, weatherData, context, offsets, awning, 10.6, year);
+            GroupedShadingOperationProfile bite = GroupedDevice(group, weatherData, context, offsets, awning, validationWindLimit, year);
+
+            // The threshold must bite, but not retract everything.
+            Assert.True(bite.DeviceWindRetractedHours > 0, "the validation threshold must retract the device");
+            Assert.True(bite.DeviceDeployedHours > 0, "the device must still be deployed in some hours");
+            Assert.True(bite.DeviceWindRetractedHours < bite.DeviceDemandHours, "retraction must be a minority of the request");
+            Assert.True(bite.DeviceDeployedHours < noBite.DeviceDeployedHours, "retraction must cut the deployed hours versus the non-biting scenario");
+
+            // The partition identity holds on real weather: requested = deployed + wind-retracted, disjointly.
+            Assert.Empty(bite.DeviceDeployedHoursOfYear.Intersect(bite.DeviceWindRetractedHoursOfYear));
+            Assert.Equal(bite.DeviceDemandHours, bite.DeviceDeployedHours + bite.DeviceWindRetractedHours);
+
+            // Retraction must reduce the unwanted energy the control actually achieves versus the
+            // always-deployed reference — the whole point of the wind pathway.
+            Assert.True(bite.ControlledUnwantedSolarIntercepted < bite.UncontrolledUnwantedSolarIntercepted,
+                "retracted hours must reduce the unwanted solar the control intercepts");
+
+            // F1 semantics on real weather: the full-year direct/element attribution channels are
+            // geometric and must NOT move with the wind limit, for identical geometry and weather.
+            Assert.Equal(noBite.ControlledDirectSolarIntercepted, bite.ControlledDirectSolarIntercepted, 6);
+            Assert.Equal(noBite.CanopyAttributedEnergy, bite.CanopyAttributedEnergy, 6);
+            Assert.Equal(noBite.ValanceAttributedEnergy, bite.ValanceAttributedEnergy, 6);
+            Assert.Equal(noBite.EnergyPerElement.Keys.OrderBy(x => x), bite.EnergyPerElement.Keys.OrderBy(x => x));
+            foreach (Guid guid in noBite.EnergyPerElement.Keys)
+            {
+                Assert.Equal(noBite.EnergyPerElement[guid], bite.EnergyPerElement[guid], 6);
+            }
+
+            output.WriteLine($"validation threshold {validationWindLimit} m/s: requested {bite.DeviceDemandHours} h, deployed {bite.DeviceDeployedHours} h, wind-retracted {bite.DeviceWindRetractedHours} h");
+            output.WriteLine($"controlled unwanted {bite.ControlledUnwantedSolarIntercepted:0.##} kWh vs always-deployed {bite.UncontrolledUnwantedSolarIntercepted:0.##} kWh");
+        }
+
+        private static GroupedShadingOperationProfile GroupedDevice(
+            ApertureShadingGroup group,
+            WeatherData weatherData,
+            ApertureSolarContext context,
+            List<int> offsets,
+            RetractableAwning awning,
+            double windLimit,
+            int year)
+        {
+            List<SolarControlProfile> profiles = new List<SolarControlProfile>();
+            foreach (ApertureSolarTarget target in group.Targets)
+            {
+                profiles.Add(target.SolarControlProfile(weatherData, new SolarControlSettings(200.0, double.NaN, windLimit), year));
+            }
+
+            GroupedShadingOperationProfile device = Analytical.SolarCalculator.Create.GroupedShadingOperationProfile(
+                group, profiles, context.SolarVisibilityCache, context.ContextOccluders,
+                awning, weatherData, out string message, offsets);
+
+            Assert.NotNull(device);
+            Assert.Null(message);
+            return device;
+        }
+
+        // ------------------------------------- C. old positional call compatibility ----
         [Fact]
         [Trait("Category", "LongRunning")]
         public void Kolobrzeg_Old_Positional_Call_Maps_The_Trailing_Integer_To_MaximumEvaluations()

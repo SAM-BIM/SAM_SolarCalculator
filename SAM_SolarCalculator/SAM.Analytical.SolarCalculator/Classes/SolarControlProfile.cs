@@ -490,6 +490,38 @@ namespace SAM.Analytical.SolarCalculator
             return new ExternalDesirability(year, weightByHourOfYear);
         }
 
+        /// <summary>
+        /// This schedule as a desirability strategy weighted on the DEPLOYMENT instead of the
+        /// demand: exactly +1 on each <see cref="ShadeOnHoursOfYear"/> hour, neutral everywhere
+        /// else.
+        ///
+        /// It is the sibling of <see cref="ExternalDesirability"/>, not an overload of it — an
+        /// optional-parameter overload would be call-ambiguous. The two answer different questions:
+        ///
+        ///   <see cref="ExternalDesirability"/>    what the WINDOW wanted (the request), which is
+        ///                                         what the optimiser sizes geometry against;
+        ///   <see cref="DeployedDesirability"/>    what the DEVICE actually got to act on (request
+        ///                                         AND wind-safe), which is what the operation
+        ///                                         profile credits the device for.
+        ///
+        /// Run the same ShadingPerformance accounting against both and the difference is what the
+        /// wind constraint costs: deployed energy is a subset of demand energy, never more.
+        /// Wind still never enters the weights themselves — a refused hour is simply not weighted.
+        /// </summary>
+        public ExternalDesirability DeployedDesirability()
+        {
+            Dictionary<int, double> deployedWeights = new Dictionary<int, double>();
+            if (shadeOnHoursOfYear != null)
+            {
+                foreach (int hourOfYear in shadeOnHoursOfYear)
+                {
+                    deployedWeights[hourOfYear] = 1.0;
+                }
+            }
+
+            return new ExternalDesirability(year, deployedWeights);
+        }
+
         public bool FromJsonObject(JsonObject jObject)
         {
             if (jObject == null)
