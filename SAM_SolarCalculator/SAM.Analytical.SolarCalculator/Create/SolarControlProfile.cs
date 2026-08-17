@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using SAM.Core.SolarCalculator;
 using SAM.Weather;
+using SAM.Weather.SolarCalculator;
 
 namespace SAM.Analytical.SolarCalculator
 {
@@ -65,6 +66,50 @@ namespace SAM.Analytical.SolarCalculator
         /// <param name="sunTimeConvention">Timestamp convention of the weather timeline. IntervalStart (+30 min) is the SAM/EPW convention and the default everywhere else in this library.</param>
         public static SolarControlProfile SolarControlProfile(this ApertureSolarTarget target, WeatherData weatherData, SolarControlSettings solarControlSettings = null, int year = -1, AnalysisPeriod analysisPeriod = null, SunTimeConvention sunTimeConvention = SunTimeConvention.IntervalStart)
         {
+            // No context visibility: the historical weather-only behaviour, preserved exactly. A null
+            // cache leaves the aperture-sun gate as pure geometry (sun in front + non-zero beam), so
+            // nothing about the existing public contract changes.
+            return SolarControlProfile(target, weatherData, solarControlSettings, null, 0, year, analysisPeriod, sunTimeConvention);
+        }
+
+        /// <summary>
+        /// The hourly shading control schedule with CONTEXT VISIBILITY: the same rule as the
+        /// weather-only overload, but the aperture-sun gate additionally requires direct sun to
+        /// actually reach the aperture through the surroundings, read from an already-built
+        /// <see cref="SolarVisibilityCache"/>.
+        ///
+        /// The cache is the SAME one the aperture-irradiance and shading workflows use, built once
+        /// over the production aperture cells (<see cref="ApertureSolarTarget.AnalysisCells"/>) and the
+        /// context occluders. Nothing is rebuilt here: the aperture's per-bin visibility is precomputed
+        /// once from the cache's lit bits and each hour is then a single bin lookup.
+        ///
+        /// THE CONTEXT GATE. An hour whose sun is in front of the opening and carries a non-zero beam
+        /// still does NOT count as an aperture-sun hour unless at least one analysis cell is lit for
+        /// that hour's sun bin. Context-shaded solar is therefore never treated as available direct
+        /// solar, and every criterion downstream (solar, temperature, wind, shade demand, shade on) is
+        /// gated on the same aperture-sun hours — exactly as in the weather-only path.
+        ///
+        /// SEMANTICS ARE OTHERWISE UNCHANGED. The full-year geometric vs operation-weighted
+        /// distinction of the shading-operation profile is untouched; wind still never enters the
+        /// weights; the year, hour-of-year numbering, weather-interval convention, sun-position shift,
+        /// timezone and minimum horizon angle are read from the cache and must match the profile's own
+        /// timeline. A cache whose year or sun-position shift disagrees with the resolved timeline is
+        /// refused (null), never approximated.
+        ///
+        /// With <paramref name="solarVisibilityCache"/> null this is EXACTLY the weather-only
+        /// behaviour: no visibility gating is applied and every hour the sun is in front of the
+        /// opening is an aperture-sun hour.
+        /// </summary>
+        /// <param name="target">The aperture. Its outward normal and analysis cells drive the result.</param>
+        /// <param name="weatherData">Hourly weather; its Location drives the sun position.</param>
+        /// <param name="solarControlSettings">The control rule. Null = the default rule (solar threshold only).</param>
+        /// <param name="solarVisibilityCache">Visibility with context, built for the same aperture cells, timeline and year. Null = no context (full visibility).</param>
+        /// <param name="cellIndexOffset">This target's first cell index within the cache's shared cell space. 0 when the cache covers only this aperture.</param>
+        /// <param name="year">Weather year. Values not present in the weather fall back to its first year.</param>
+        /// <param name="analysisPeriod">Optional restriction to part of the year. Null = the whole year.</param>
+        /// <param name="sunTimeConvention">Timestamp convention of the weather timeline. IntervalStart (+30 min) is the SAM/EPW convention.</param>
+        public static SolarControlProfile SolarControlProfile(this ApertureSolarTarget target, WeatherData weatherData, SolarControlSettings solarControlSettings, SolarVisibilityCache solarVisibilityCache, int cellIndexOffset = 0, int year = -1, AnalysisPeriod analysisPeriod = null, SunTimeConvention sunTimeConvention = SunTimeConvention.IntervalStart)
+        {
             if (weatherData == null)
             {
                 return null;
@@ -90,10 +135,44 @@ namespace SAM.Analytical.SolarCalculator
                 year = weatherYear.Year;
             }
 
-            return SolarControlProfile(target, weatherData, solarControlSettings, year, timeShiftInMinutes, analysisPeriod);
+            return SolarControlProfile(target, weatherData, solarControlSettings, year, timeShiftInMinutes, analysisPeriod, solarVisibilityCache, cellIndexOffset);
         }
 
-        private static SolarControlProfile SolarControlProfile(ApertureSolarTarget target, WeatherData weatherData, SolarControlSettings solarControlSettings, int year, double timeShiftInMinutes, AnalysisPeriod analysisPeriod)
+        /// <summary>
+        /// The context-aware control schedule for one aperture, reusing a production
+        /// <see cref="ApertureSolarContext"/>: the target, its analysis cells, the
+        /// <see cref="SolarVisibilityCache"/>, the cell-space offset, the weather, the year and the
+        /// timeline shift all come from the context, so the profile is guaranteed to sit on the SAME
+        /// visibility representation the aperture-irradiance and shading workflows use — no geometry
+        /// is reconstructed and the cache is not rebuilt.
+        /// </summary>
+        /// <param name="context">The resolved aperture solar context (targets + cells + visibility cache).</param>
+        /// <param name="apertureGuid">The aperture within the context to produce the schedule for.</param>
+        /// <param name="solarControlSettings">The control rule. Null = the default rule (solar threshold only).</param>
+        /// <param name="analysisPeriod">Optional restriction to part of the year. Null = the whole year.</param>
+        public static SolarControlProfile SolarControlProfile(this ApertureSolarContext context, Guid apertureGuid, SolarControlSettings solarControlSettings = null, AnalysisPeriod analysisPeriod = null)
+        {
+            if (context == null)
+            {
+                return null;
+            }
+
+            ApertureSolarTarget target = context.Target(apertureGuid);
+            if (target == null)
+            {
+                return null;
+            }
+
+            int cellIndexOffset = context.CellIndexOffset(apertureGuid);
+            if (cellIndexOffset < 0)
+            {
+                return null;
+            }
+
+            return SolarControlProfile(target, context.WeatherData, solarControlSettings, context.Year, context.TimeShiftInMinutes, analysisPeriod, context.SolarVisibilityCache, cellIndexOffset);
+        }
+
+        private static SolarControlProfile SolarControlProfile(ApertureSolarTarget target, WeatherData weatherData, SolarControlSettings solarControlSettings, int year, double timeShiftInMinutes, AnalysisPeriod analysisPeriod, SolarVisibilityCache solarVisibilityCache, int cellIndexOffset)
         {
             if (target == null || weatherData == null || double.IsNaN(timeShiftInMinutes))
             {
@@ -104,6 +183,28 @@ namespace SAM.Analytical.SolarCalculator
             if (!settings.IsValid(out string _))
             {
                 return null;
+            }
+
+            // Context visibility: when a cache is supplied, the schedule and the cache must describe
+            // the same window and the same timeline, otherwise the answer would be about a different
+            // sun. A mismatch is refused, never approximated.
+            bool contextInUse = solarVisibilityCache != null;
+            bool[] apertureVisibleByBin = null;
+            if (contextInUse)
+            {
+                if (solarVisibilityCache.Year != year
+                    || Math.Abs(solarVisibilityCache.SunPositionShiftInMinutes - timeShiftInMinutes) > 1e-6
+                    || cellIndexOffset < 0
+                    || cellIndexOffset + target.CellCount > solarVisibilityCache.CellCount)
+                {
+                    return null;
+                }
+
+                apertureVisibleByBin = ApertureVisibilityByBin(solarVisibilityCache, target.CellCount, cellIndexOffset);
+                if (apertureVisibleByBin == null)
+                {
+                    return null;
+                }
             }
 
             List<ApertureSolarHour> apertureSolarHours = target.ApertureSolarHours(weatherData, year, timeShiftInMinutes, analysisPeriod);
@@ -148,6 +249,18 @@ namespace SAM.Analytical.SolarCalculator
                 if (!apertureSolarHour.SunInFrontOfAperture || !(apertureSolarHour.ApertureDirectIrradiance > 0))
                 {
                     continue;
+                }
+
+                // ---- context visibility: the sun is in front and carries beam, but it must also
+                // actually reach the aperture through the surroundings. A fully context-shaded
+                // aperture is not "sun on the window", so every criterion below is gated on it too.
+                if (contextInUse)
+                {
+                    int binIndex = solarVisibilityCache.FindBin(apertureSolarHour.SolarElevation, apertureSolarHour.SolarAzimuth);
+                    if (binIndex < 0 || !apertureVisibleByBin[binIndex])
+                    {
+                        continue;
+                    }
                 }
 
                 apertureSunHoursOfYear.Add(hourOfYear);
@@ -242,6 +355,35 @@ namespace SAM.Analytical.SolarCalculator
                 daylightHoursOfYear, apertureSunHoursOfYear, solarDemandHoursOfYear, temperatureDemandHoursOfYear, windSafeHoursOfYear,
                 shadeDemandHoursOfYear, shadeOnHoursOfYear, highWindHoursOfYear, weightByHourOfYear,
                 apertureSolarHours.Count, Math.Max(0, hourCount - apertureSolarHours.Count), missingTemperatureHours, missingWindSpeedHours);
+        }
+
+        /// <summary>
+        /// One flag per sun bin: true when at least one of this aperture's analysis cells is lit by
+        /// direct beam in that bin. Precomputed once so the hourly loop is a single bin lookup — the
+        /// lit bits are never scanned per hour and the cache is never rebuilt.
+        /// </summary>
+        private static bool[] ApertureVisibilityByBin(SolarVisibilityCache solarVisibilityCache, int cellCount, int cellIndexOffset)
+        {
+            List<SunBin> bins = solarVisibilityCache.Bins;
+            if (bins == null)
+            {
+                return null;
+            }
+
+            bool[] result = new bool[bins.Count];
+            for (int b = 0; b < bins.Count; b++)
+            {
+                for (int c = 0; c < cellCount; c++)
+                {
+                    if (solarVisibilityCache.IsLit(b, cellIndexOffset + c))
+                    {
+                        result[b] = true;
+                        break;
+                    }
+                }
+            }
+
+            return result;
         }
     }
 }
