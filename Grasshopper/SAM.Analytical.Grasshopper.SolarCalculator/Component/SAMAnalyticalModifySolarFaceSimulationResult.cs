@@ -34,7 +34,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// </summary>
         public SAMAnalyticalModifySolarFaceSimulationResult()
           : base("SAMAnalytical.ModifySolarFaceSimulationResult", "SAMAnalytical.ModifySolarFaceSimulationResult",
-              "This node modify Shading data for Panel\n\nEXAMPLE\nAnalysisPeriod.HOYs → ModifySolarFaceSimulationResult._hoursOfYear and SunDirectionByHourOfYear.vectors → ._sunVectors (same hours, same _year), one Panel → _panel, _run = true. The analyticalModel output carries the panel's updated shading data.",
+              "This node modifies Shading data for Panel\n\nEXAMPLE\nAnalysisPeriod.HOYs → ModifySolarFaceSimulationResult._hoursOfYear and SunDirectionByHourOfYear.vectors → ModifySolarFaceSimulationResult._sunVectors (same hours, same _year), one Panel → _panel, _run = true. The analyticalModel output carries the panel's updated shading data.",
               "SAM", "Solar")
         {
         }
