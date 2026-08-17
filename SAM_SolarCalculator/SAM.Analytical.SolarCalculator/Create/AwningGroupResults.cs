@@ -63,8 +63,8 @@ namespace SAM.Analytical.SolarCalculator
             double riseAboveHead = 0.0,
             double extensionBeyondJambs = 0.15,
             double? valanceDepth = 0.0,
-            double maximumGap = 0.20,
-            double headTolerance = 0.02,
+            double maximumGap = GroupedShadingDevice.DefaultMaximumGap,
+            double headTolerance = GroupedShadingDevice.DefaultHeadTolerance,
             double gridSize = 0.5,
             double sunAngleStep = 2.0,
             bool recalculate = false,
@@ -221,7 +221,8 @@ namespace SAM.Analytical.SolarCalculator
                 GroupedAwningResult groupResult = Optimise.RetractableAwningGroup(
                     group, context.SolarVisibilityCache, desirabilities, context.ContextOccluders,
                     objective, specification, projection, tiltDegrees, riseAboveHead, extensionBeyondJambs,
-                    valanceDepth, maximumEvaluations: maximumEvaluations, mountingOffset: mountingOffset);
+                    valanceDepth, maximumEvaluations: maximumEvaluations, mountingOffset: mountingOffset,
+                    maximumGap: maximumGap, headTolerance: headTolerance);
 
                 if (groupResult == null)
                 {

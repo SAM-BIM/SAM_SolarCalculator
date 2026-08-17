@@ -86,7 +86,10 @@ namespace SAM.Analytical.SolarCalculator
 
         /// <summary>
         /// The mounting-offset overload. The original twelve-parameter signature above is retained
-        /// exactly for binary compatibility and forwards here with MountingOffset = 0.0.
+        /// exactly for binary compatibility and forwards here with MountingOffset = 0.0; this
+        /// thirteen-parameter signature is likewise retained and forwards to the grouping-criteria
+        /// overload with the algorithm defaults — the only honest claim a criteria-less call can
+        /// make about how its group was formed.
         /// </summary>
         /// <param name="group">The group, members ordered left-to-right.</param>
         /// <param name="baseVisibilityCache">Visibility with CONTEXT ONLY, shared by every member.</param>
@@ -115,6 +118,50 @@ namespace SAM.Analytical.SolarCalculator
             double? valanceDepth,
             int maximumEvaluations,
             double mountingOffset)
+        {
+            return RetractableAwningGroup(
+                group, baseVisibilityCache, desirabilities, contextOccluders,
+                objective, specification, projection, tiltDegrees, riseAboveHead, extensionBeyondJambs,
+                valanceDepth, maximumEvaluations, mountingOffset,
+                GroupedShadingDevice.DefaultMaximumGap, GroupedShadingDevice.DefaultHeadTolerance);
+        }
+
+        /// <summary>
+        /// The grouping-criteria overload. The device records the criteria its group was formed
+        /// under, so a downstream node can re-establish the EXACT original physical group rather
+        /// than re-group the members under the algorithm defaults.
+        /// </summary>
+        /// <param name="group">The group, members ordered left-to-right.</param>
+        /// <param name="baseVisibilityCache">Visibility with CONTEXT ONLY, shared by every member.</param>
+        /// <param name="desirabilities">Per-member desirability, aligned to the group's member order.</param>
+        /// <param name="contextOccluders">Existing context (takes effect through baseVisibilityCache).</param>
+        /// <param name="objective">The objective. Null for the Stage 9 default.</param>
+        /// <param name="specification">Product preset. Null = Dakar.</param>
+        /// <param name="projection">Fixed projection [m], or null to search the valid preset projections.</param>
+        /// <param name="tiltDegrees">Fixed deployment tilt [°], or null to select it by analysis.</param>
+        /// <param name="riseAboveHead">Fixed rise above the head line [m].</param>
+        /// <param name="extensionBeyondJambs">Fixed symmetric side extension [m].</param>
+        /// <param name="valanceDepth">Fixed valance depth [m] (0 or the preset standard); null enables valance optimisation.</param>
+        /// <param name="maximumEvaluations">Hard budget on distinct candidate evaluations for this group.</param>
+        /// <param name="mountingOffset">Fixed horizontal outward distance from the aperture plane to the awning mounting line [m].</param>
+        /// <param name="maximumGap">The largest horizontal gap between consecutive apertures that still shares one awning [m] — the criterion the group was formed under.</param>
+        /// <param name="headTolerance">The largest head-level spread within one group [m] — the criterion the group was formed under.</param>
+        public static GroupedAwningResult RetractableAwningGroup(
+            this ApertureShadingGroup group,
+            SolarVisibilityCache baseVisibilityCache,
+            List<ApertureDesirability> desirabilities,
+            List<LinkedFace3D> contextOccluders,
+            ShadingObjective objective,
+            AwningSpecification specification,
+            double? projection,
+            double? tiltDegrees,
+            double riseAboveHead,
+            double extensionBeyondJambs,
+            double? valanceDepth,
+            int maximumEvaluations,
+            double mountingOffset,
+            double maximumGap,
+            double headTolerance)
         {
             specification = specification ?? AwningSpecification.Dakar;
             objective = objective ?? new ShadingObjective();
@@ -218,7 +265,7 @@ namespace SAM.Analytical.SolarCalculator
                     specification.Name, specification.MinimumTiltDegrees, specification.MaximumTiltDegrees, familyTiltMinimum, familyTiltMaximum, tiltMinimum, tiltMaximum));
             }
 
-            AwningEvaluator evaluator = new AwningEvaluator(group, targets, offsets, baseVisibilityCache, desirabilityMap, contextOccluders, objective, specification, riseAboveHead, extensionBeyondJambs, mountingOffset, latticeWarnings);
+            AwningEvaluator evaluator = new AwningEvaluator(group, targets, offsets, baseVisibilityCache, desirabilityMap, contextOccluders, objective, specification, riseAboveHead, extensionBeyondJambs, mountingOffset, maximumGap, headTolerance, latticeWarnings);
 
             // The null device first: measured like every other candidate, and the zero the rest must beat.
             AwningCandidate nullDevice = evaluator.Evaluate(null, double.NaN, 0.0);
@@ -733,11 +780,13 @@ namespace SAM.Analytical.SolarCalculator
             private readonly double riseAboveHead;
             private readonly double extensionBeyondJambs;
             private readonly double mountingOffset;
+            private readonly double maximumGap;
+            private readonly double headTolerance;
             private readonly List<string> latticeWarnings;
             private readonly Dictionary<string, AwningCandidate> cache = new Dictionary<string, AwningCandidate>();
             private readonly List<AwningCandidate> allEvaluated = new List<AwningCandidate>();
 
-            public AwningEvaluator(ApertureShadingGroup group, List<ApertureSolarTarget> targets, List<int> offsets, SolarVisibilityCache baseVisibilityCache, Dictionary<Guid, ApertureDesirability> desirabilityMap, List<LinkedFace3D> contextOccluders, ShadingObjective objective, AwningSpecification specification, double riseAboveHead, double extensionBeyondJambs, double mountingOffset, List<string> latticeWarnings = null)
+            public AwningEvaluator(ApertureShadingGroup group, List<ApertureSolarTarget> targets, List<int> offsets, SolarVisibilityCache baseVisibilityCache, Dictionary<Guid, ApertureDesirability> desirabilityMap, List<LinkedFace3D> contextOccluders, ShadingObjective objective, AwningSpecification specification, double riseAboveHead, double extensionBeyondJambs, double mountingOffset, double maximumGap, double headTolerance, List<string> latticeWarnings = null)
             {
                 this.latticeWarnings = latticeWarnings ?? new List<string>();
                 this.group = group;
@@ -751,13 +800,15 @@ namespace SAM.Analytical.SolarCalculator
                 this.riseAboveHead = riseAboveHead;
                 this.extensionBeyondJambs = extensionBeyondJambs;
                 this.mountingOffset = mountingOffset;
+                this.maximumGap = maximumGap;
+                this.headTolerance = headTolerance;
             }
 
             public int Evaluations { get { return cache.Count; } }
 
             public GroupedShadingDevice NullDevice()
             {
-                return new GroupedShadingDevice(group.GroupGuid, group.PanelGuid, group.ApertureGuids, new NoShading(), specification);
+                return new GroupedShadingDevice(group.GroupGuid, group.PanelGuid, group.ApertureGuids, new NoShading(), specification, maximumGap, headTolerance);
             }
 
             public GroupedShadingDevice Device(AwningCandidate candidate)
@@ -768,7 +819,7 @@ namespace SAM.Analytical.SolarCalculator
                 }
 
                 RetractableAwning awning = new RetractableAwning(candidate.Projection, candidate.TiltDegrees, riseAboveHead, extensionBeyondJambs, candidate.ValanceDepth, mountingOffset);
-                return new GroupedShadingDevice(group.GroupGuid, group.PanelGuid, group.ApertureGuids, awning, specification);
+                return new GroupedShadingDevice(group.GroupGuid, group.PanelGuid, group.ApertureGuids, awning, specification, maximumGap, headTolerance);
             }
 
             /// <summary>

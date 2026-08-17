@@ -39,12 +39,29 @@ namespace SAM.Analytical.SolarCalculator
         /// <param name="apertureSolarTargets">The apertures to group. Order is irrelevant by contract.</param>
         /// <param name="specification">Product limits that decide the width split. Null = Dakar.</param>
         /// <param name="extensionBeyondJambs">Symmetric side extension [m] beyond the outermost jambs, included in the width check.</param>
-        /// <param name="maximumGap">Largest horizontal gap between consecutive apertures that still shares one awning [m].</param>
-        /// <param name="headTolerance">Largest head-level spread within one group [m].</param>
+        /// <param name="maximumGap">Largest horizontal gap between consecutive apertures that still shares one awning [m]. NaN reads as the default — it is normalised BEFORE grouping, never carried into a comparison.</param>
+        /// <param name="headTolerance">Largest head-level spread within one group [m]. NaN reads as the default, exactly as maximumGap.</param>
         /// <returns>Groups sorted deterministically (by group GUID), never null.</returns>
-        public static List<ApertureShadingGroup> ApertureShadingGroups(this IEnumerable<ApertureSolarTarget> apertureSolarTargets, AwningSpecification specification = null, double extensionBeyondJambs = 0.0, double maximumGap = 0.20, double headTolerance = 0.02)
+        public static List<ApertureShadingGroup> ApertureShadingGroups(this IEnumerable<ApertureSolarTarget> apertureSolarTargets, AwningSpecification specification = null, double extensionBeyondJambs = 0.0, double maximumGap = GroupedShadingDevice.DefaultMaximumGap, double headTolerance = GroupedShadingDevice.DefaultHeadTolerance)
         {
             specification = specification ?? AwningSpecification.Dakar;
+
+            // NaN IS NOT A CRITERION and is normalised here, before a single comparison runs.
+            // Every ">" test against NaN is false, so grouping under NaN would never split on
+            // that criterion — while GroupedShadingDevice records the DEFAULT for a NaN, and the
+            // ShadingOperation hand-off would then re-establish a different group and refuse a
+            // device this algorithm itself produced. Normalising in both places to the SAME
+            // constants keeps the criterion the group was formed under and the criterion the
+            // device carries identical by construction.
+            if (double.IsNaN(maximumGap))
+            {
+                maximumGap = GroupedShadingDevice.DefaultMaximumGap;
+            }
+
+            if (double.IsNaN(headTolerance))
+            {
+                headTolerance = GroupedShadingDevice.DefaultHeadTolerance;
+            }
 
             List<ApertureSolarTarget> targets = new List<ApertureSolarTarget>();
             foreach (ApertureSolarTarget target in apertureSolarTargets ?? new List<ApertureSolarTarget>())
