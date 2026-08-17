@@ -31,7 +31,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// </summary>
         public SAMAnalyticalSunDirectionByHourOfYear()
           : base("SAMAnalytical.SunDirectionByHourOfYear", "SAMAnalytical.SunDirectionByHourOfYear",
-              "Sun Direction by hour of year for AnalyticalModel",
+              "Sun Direction by hour of year for AnalyticalModel\n\nEXAMPLE\nAnalyticalModel → SunDirectionByHourOfYear (_year = 2018, _hoursOfYear from AnalysisPeriod.HOYs) → vectors: one sun direction per hour, into SAMGeometry.ShadingBySunDirection._sunDirection or SAMGeometry.SunAnalysisBySunDirection._sunDirection. The same vectors and hours feed ModifySolarFaceSimulationResult._sunVectors and ._hoursOfYear.",
               "SAM", "Solar")
         {
         }

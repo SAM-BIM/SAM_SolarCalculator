@@ -31,7 +31,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         /// </summary>
         public SAMAnalyticalSunDirectionByTime()
           : base("SAMAnalytical.SunDirectionByTime", "SAMAnalytical.SunDirectionByTime",
-              "Sun Direction by Time for AnalyticalModel",
+              "Sun Direction by Time for AnalyticalModel\n\nEXAMPLE\nAnalyticalModel → SunDirectionByTime (_times as a list) → vectors: one sun direction per time, into SAMGeometry.ShadingBySunDirection._sunDirection or SAMGeometry.SunAnalysisBySunDirection._sunDirection.",
               "SAM", "Solar")
         {
         }

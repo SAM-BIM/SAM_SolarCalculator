@@ -33,7 +33,7 @@ namespace SAM.Geometry.Grasshopper.SolarCalculator
         /// </summary>
         public SAMGeometrySunAnalysisBySunDirection()
           : base("SAMGeometry.SunAnalysisBySunDirection", "SAMGeometry.SunAnalysisBySunDirection",
-              "Sun Analysis by Sun Direction",
+              "Sun Analysis by Sun Direction\n\nEXAMPLE\nBuilding geometry as SAM geometry → SunAnalysisBySunDirection._geometries, and SunDirectionByTime.vectors → ._sunDirection (_run = true); read shaded and exposedToSun for the two face sets at that sun position.",
               "SAM", "Solar")
         {
         }

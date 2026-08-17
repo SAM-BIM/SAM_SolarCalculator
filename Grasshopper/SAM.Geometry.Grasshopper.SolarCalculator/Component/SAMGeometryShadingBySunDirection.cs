@@ -33,7 +33,7 @@ namespace SAM.Geometry.Grasshopper.SolarCalculator
         /// </summary>
         public SAMGeometryShadingBySunDirection()
           : base("SAMGeometry.ShadingBySunDirection", "SAMGeometry.ShadingBySunDirection",
-              "Gets Shading Geometry for given Geometry and sun direction",
+              "Gets Shading Geometry for given Geometry and sun direction\n\nEXAMPLE\nShading surfaces as SAM geometry → ShadingBySunDirection._geometries, and SunDirectionByTime.vectors → ._sunDirection; shadings are the faces hidden from that sun direction.",
               "SAM", "Solar")
         {
         }
