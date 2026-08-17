@@ -24,8 +24,17 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
 
         /// <summary>
         /// The latest version of this component.
+        ///
+        /// 1.1.0 — the GROUPED DEVICE hand-off: _shadingDevice now also accepts a
+        /// GroupedShadingDevice from SAMAnalytical.RationaliseAwningGroup.groupedShadingDevices.
+        /// The device fixes the member scope: the wired targets must be exactly its member
+        /// apertures (matched by aperture Guid, in any order), and the group the device was
+        /// designed for is re-established under the device's OWN recorded grouping criteria
+        /// (maximum gap and head tolerance included) and checked against the device's GroupGuid —
+        /// never re-guessed from the wired targets. A shading scheme is still refused, now with a
+        /// message saying where it DOES go (SAMAnalytical.VerifyShading).
         /// </summary>
-        public override string LatestComponentVersion => "1.0.0";
+        public override string LatestComponentVersion => "1.1.0";
 
         /// <summary>
         /// Provides an Icon for the component.
@@ -36,7 +45,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
 
         public SAMAnalyticalShadingOperation()
           : base("SAMAnalytical.ShadingOperation", "SAMAnalytical.ShadingOperation",
-              "SUMMARY\nReports what a RETRACTABLE shading device actually does over one weather year: the hours shading was REQUESTED, the hours the device was actually DEPLOYED, the hours the wind RETRACTED it, and the energy it intercepted.\n\nTHREE DISTINCT THINGS, KEPT APART:\n  REQUESTED - the control rule (from SAMAnalytical.SolarControlProfile) says this window's solar is unwanted.\n  DEPLOYED - the device was actually out: requested AND under the wind limit.\n  WIND RETRACTED - requested but refused, because the recorded wind speed exceeded the limit.\nSite daylight and sun on the window are different numbers too - the control profile already separates them; this component measures the DEVICE.\n\nTWO KINDS OF ENERGY, KEPT APART:\n  controlledUnwantedSolarIntercepted - unwanted beam the device stopped WHILE DEPLOYED. This is the operational answer and it responds to the wind limit.\n  controlledDirectSolarIntercepted / canopyAttributedEnergy / valanceAttributedEnergy - the FULL-YEAR direct-beam interception and first-hit attribution of the device geometry. These do NOT change with the wind limit; they describe the geometry, not the deployment schedule.\n\nTHE WIND SPEED IS THE WEATHER FILE'S OWN HOURLY VALUE. This is an ANNUAL DESIGN PROFILE - an operating assumption for sizing and estimating, NOT a live safety controller and NOT a structural verification. The limit (set on the control profile) is fully configurable; no value is hard-coded here.\n\nONE DEVICE, SEVERAL WINDOWS. Wire several targets and their control profiles to measure ONE awning spanning them: the device headline is the UNION of the member schedules (the motor moved because ANY window asked), and each member's own schedule is kept on memberProfiles. Every member profile must share the same year, sun-position shift and control rule - a disagreement is refused, never averaged.\n\nINPUTS\n  _analyticalModel - the SAM Analytical Model.\n  _apertureSolarTargets - the windows, from SAMAnalytical.ApertureSolarTargets. Several targets form one shared device when they make a valid group.\n  _controlProfiles - one SAMAnalytical.SolarControlProfile per target, from SAMAnalytical.SolarControlProfile.\n  _shadingDevice - the device, from a shading node (a ShadingDevice or a typology such as RetractableAwning).\n  _gridSize_ - the analysis grid size [m]. Keep it the same as the targets.\n  _sunAngleStep_ - how finely similar sun positions are grouped [°].\n  _run - nothing is calculated until this is true.",
+              "SUMMARY\nReports what a RETRACTABLE shading device actually does over one weather year: the hours shading was REQUESTED, the hours the device was actually DEPLOYED, the hours the wind RETRACTED it, and the energy it intercepted.\n\nTHREE DISTINCT THINGS, KEPT APART:\n  REQUESTED - the control rule (from SAMAnalytical.SolarControlProfile) says this window's solar is unwanted.\n  DEPLOYED - the device was actually out: requested AND under the wind limit.\n  WIND RETRACTED - requested but refused, because the recorded wind speed exceeded the limit.\nSite daylight and sun on the window are different numbers too - the control profile already separates them; this component measures the DEVICE.\n\nTWO KINDS OF ENERGY, KEPT APART:\n  controlledUnwantedSolarIntercepted - unwanted beam the device stopped WHILE DEPLOYED. This is the operational answer and it responds to the wind limit.\n  controlledDirectSolarIntercepted / canopyAttributedEnergy / valanceAttributedEnergy - the FULL-YEAR direct-beam interception and first-hit attribution of the device geometry. These do NOT change with the wind limit; they describe the geometry, not the deployment schedule.\n\nTHE WIND SPEED IS THE WEATHER FILE'S OWN HOURLY VALUE. This is an ANNUAL DESIGN PROFILE - an operating assumption for sizing and estimating, NOT a live safety controller and NOT a structural verification. The limit (set on the control profile) is fully configurable; no value is hard-coded here.\n\nONE DEVICE, SEVERAL WINDOWS. Wire several targets and their control profiles to measure ONE awning spanning them: the device headline is the UNION of the member schedules (the motor moved because ANY window asked), and each member's own schedule is kept on memberProfiles. Every member profile must share the same year, sun-position shift and control rule - a disagreement is refused, never averaged.\n\nINPUTS\n  _analyticalModel - the SAM Analytical Model.\n  _apertureSolarTargets - the windows, from SAMAnalytical.ApertureSolarTargets. Several targets form one shared device when they make a valid group.\n  _controlProfiles - one SAMAnalytical.SolarControlProfile per target, from SAMAnalytical.SolarControlProfile.\n  _shadingDevice - the device, from a shading node: a ShadingDevice from RationaliseShading, a GroupedShadingDevice from RationaliseAwningGroup, or a typology such as RetractableAwning.\n  _gridSize_ - the analysis grid size [m]. Keep it the same as the targets.\n  _sunAngleStep_ - how finely similar sun positions are grouped [°].\n  _run - nothing is calculated until this is true.\n\nEXAMPLE\nApertureSolarTargets.apertureSolarTargets → ShadingOperation._apertureSolarTargets and SolarControlProfile.controlProfile → ShadingOperation._controlProfiles - one of each per window; several windows forming one valid group are measured as ONE shared awning.\nRationaliseShading.shadingDevice → ShadingOperation._shadingDevice - the retractable device, e.g. the Retractable Awning family winner for the window.\nOR RationaliseAwningGroup.groupedShadingDevices → ShadingOperation._shadingDevice - the grouped awning designed for those SAME windows: the device fixes the member group, so the wired targets must be exactly its member windows, matched by aperture in any order.\nDo not wire a scheme from AssembleShadingSchemes or SelectShadingScheme into _shadingDevice: a scheme is a whole-scope proposal, not one device, and it is refused.",
               "SAM", "Solar")
         {
         }
@@ -49,7 +58,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 result.Add(new GH_SAMParam(new GooAnalyticalModelParam() { Name = "_analyticalModel", NickName = "_analyticalModel", Description = "SAM Analytical Model", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new GooApertureSolarTargetParam() { Name = "_apertureSolarTargets", NickName = "_apertureSolarTargets", Description = "The windows, from SAMAnalytical.ApertureSolarTargets.\nOne device may span several adjacent windows when they form a valid group", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_GenericObject() { Name = "_controlProfiles", NickName = "_controlProfiles", Description = "One SAMAnalytical.SolarControlProfile per window, from SAMAnalytical.SolarControlProfile.\nIts shadeOn hours ARE the deployment schedule", Access = GH_ParamAccess.list }, ParamVisibility.Binding));
-                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_GenericObject() { Name = "_shadingDevice", NickName = "_shadingDevice", Description = "The device, from a shading node: a ShadingDevice or a shading typology such as RetractableAwning", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
+                result.Add(new GH_SAMParam(new global::Grasshopper.Kernel.Parameters.Param_GenericObject() { Name = "_shadingDevice", NickName = "_shadingDevice", Description = "The device, from a shading node: a ShadingDevice (SAMAnalytical.RationaliseShading), a GroupedShadingDevice (SAMAnalytical.RationaliseAwningGroup.groupedShadingDevices) or a shading typology such as RetractableAwning.\nA GroupedShadingDevice fixes the member group: the wired targets must be exactly its member windows, matched by aperture in any order.\nA shading scheme is refused - verify a scheme with SAMAnalytical.VerifyShading", Access = GH_ParamAccess.item }, ParamVisibility.Binding));
 
                 result.Add(new GH_SAMParam(Number("_gridSize_", "The analysis grid size [m]. Keep it the same as the targets.\nDefault 0.5 m", 0.5), ParamVisibility.Binding));
                 result.Add(new GH_SAMParam(Number("_sunAngleStep_", "How finely similar sun positions are grouped [°].\nDefault 2°", 2.0), ParamVisibility.Voluntary));
@@ -177,23 +186,38 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             IShadingTypology typology = null;
             if (index == -1 || !dataAccess.GetData(index, ref deviceWrapper) || deviceWrapper?.Value == null)
             {
-                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Please supply a shading device: a ShadingDevice or a shading typology such as RetractableAwning.");
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Please supply a shading device: a ShadingDevice, a GroupedShadingDevice from SAMAnalytical.RationaliseAwningGroup, or a shading typology such as RetractableAwning.");
                 return;
             }
 
             ShadingDevice shadingDevice = Query.Value<ShadingDevice>(deviceWrapper);
+            GroupedShadingDevice groupedShadingDevice = null;
             if (shadingDevice != null)
             {
                 typology = shadingDevice.Typology;
             }
             else
             {
-                typology = Query.Value<IShadingTypology>(deviceWrapper);
+                groupedShadingDevice = Query.Value<GroupedShadingDevice>(deviceWrapper);
+                if (groupedShadingDevice != null)
+                {
+                    typology = groupedShadingDevice.Typology;
+                }
+                else
+                {
+                    typology = Query.Value<IShadingTypology>(deviceWrapper);
+                }
             }
 
-            if (typology == null)
+            if (typology == null && groupedShadingDevice == null)
             {
-                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "_shadingDevice was not recognised. Supply a ShadingDevice or a shading typology such as RetractableAwning.");
+                if (Query.Value<ShadingScheme>(deviceWrapper) != null)
+                {
+                    AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "_shadingDevice carries a shading scheme. ShadingOperation measures ONE physical device and a scheme is a whole-scope proposal, not one device: verify a scheme with SAMAnalytical.VerifyShading instead, or wire one grouped device from SAMAnalytical.RationaliseAwningGroup.groupedShadingDevices.");
+                    return;
+                }
+
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "_shadingDevice was not recognised. Supply a ShadingDevice, a GroupedShadingDevice from SAMAnalytical.RationaliseAwningGroup, or a shading typology such as RetractableAwning.");
                 return;
             }
 
@@ -218,7 +242,16 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
                 }
             }
 
-            ApertureSolarContext context = SolarCreate.ApertureSolarContext(analyticalModel, year, weatherData, apertureGuids, gridSize, sunAngleStep);
+            // A grouped device fixes its own member scope: the solar calculation runs over the
+            // device's members, and the wired targets are validated against that scope by the
+            // grouped path itself — never the other way round.
+            List<Guid> contextScope = apertureGuids;
+            if (groupedShadingDevice != null && groupedShadingDevice.ApertureGuids.Count != 0)
+            {
+                contextScope = groupedShadingDevice.ApertureGuids;
+            }
+
+            ApertureSolarContext context = SolarCreate.ApertureSolarContext(analyticalModel, year, weatherData, contextScope, gridSize, sunAngleStep);
             if (context == null)
             {
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "The solar calculation could not be set up for this model: no analysable apertures, no weather, or an unresolvable site.");
@@ -242,7 +275,26 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
             ShadingOperationProfile single = null;
             string description = null;
 
-            if (apertureGuids.Count == 1)
+            if (groupedShadingDevice != null)
+            {
+                // The grouped device hands over its own member group: the wired targets are
+                // scope-checked against the device's members (by Guid, any order), the group is
+                // re-established and identity-checked against the device's GroupGuid, and the
+                // measurement runs through the existing grouped operation. Nothing is re-guessed
+                // from the wired targets.
+                device = SolarCreate.GroupedShadingOperationProfile(
+                    groupedShadingDevice, targets, profiles, context, out string groupedMessage);
+
+                if (device == null)
+                {
+                    AddRuntimeMessage(GH_RuntimeMessageLevel.Error, groupedMessage ?? "The grouped operation could not be measured.");
+                    return;
+                }
+
+                memberProfiles = device.Members;
+                description = device.ToString();
+            }
+            else if (apertureGuids.Count == 1)
             {
                 ApertureSolarTarget target = context.Target(apertureGuids[0]);
                 if (target == null)

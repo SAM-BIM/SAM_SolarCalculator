@@ -221,7 +221,8 @@ namespace SAM.Analytical.SolarCalculator
                 GroupedAwningResult groupResult = Optimise.RetractableAwningGroup(
                     group, context.SolarVisibilityCache, desirabilities, context.ContextOccluders,
                     objective, specification, projection, tiltDegrees, riseAboveHead, extensionBeyondJambs,
-                    valanceDepth, maximumEvaluations: maximumEvaluations, mountingOffset: mountingOffset);
+                    valanceDepth, maximumEvaluations: maximumEvaluations, mountingOffset: mountingOffset,
+                    maximumGap: maximumGap, headTolerance: headTolerance);
 
                 if (groupResult == null)
                 {

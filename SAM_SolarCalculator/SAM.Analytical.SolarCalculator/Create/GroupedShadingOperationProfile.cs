@@ -232,6 +232,164 @@ namespace SAM.Analytical.SolarCalculator
         }
 
         /// <summary>
+        /// The per-DEVICE operation profile of a GROUPED SHADING DEVICE — the Grasshopper hand-off
+        /// SAMAnalytical.RationaliseAwningGroup.groupedShadingDevices → SAMAnalytical.ShadingOperation._shadingDevice.
+        ///
+        /// THE DEVICE DEFINES THE GROUP. The member scope, the member order and the group identity
+        /// are taken from the device, never re-derived from whatever targets happen to be wired:
+        ///
+        ///   1. The supplied targets must BE the device's member apertures — the same set, matched
+        ///      by aperture Guid, in any order. A missing, an additional or an unrelated aperture is
+        ///      refused with the differing Guids named.
+        ///   2. The group frame is re-established from the device's members through the one
+        ///      deterministic grouping algorithm, under the device's OWN recorded grouping
+        ///      criteria (product preset, side extension, maximum gap and head tolerance), and
+        ///      the re-established group's deterministic Guid must EQUAL the device's GroupGuid.
+        ///      A device whose group can no longer be re-established — the model changed — is
+        ///      refused with the reason, never silently re-grouped into a different physical unit.
+        ///
+        /// Everything after the gate is the EXISTING grouped operation: one shared canopy built
+        /// once from the group frame, one control profile per member (same year, sun-position
+        /// shift and control rule — a disagreement is refused, never averaged), the device headline
+        /// the union of the member schedules, and the energy summed through the existing grouped
+        /// accounting. The device's typology is used as supplied; a non-awning typology keeps the
+        /// existing refusal of the group-level path.
+        /// </summary>
+        /// <param name="groupedShadingDevice">One physical device spanning a deterministic aperture group, from the grouped awning analysis.</param>
+        /// <param name="apertureSolarTargets">The targets as SUPPLIED (wired). Scope-checked against the device's member apertures; the measurement itself uses the context's own targets.</param>
+        /// <param name="solarControlProfiles">One control profile per member aperture. Their ShadeOn hours ARE the deployment; the unions are computed from them.</param>
+        /// <param name="context">The prepared solar context. Its weather, visibility cache, cell space and per-aperture offsets are used.</param>
+        /// <param name="message">Null on success; an actionable sentence otherwise.</param>
+        public static GroupedShadingOperationProfile GroupedShadingOperationProfile(
+            this GroupedShadingDevice groupedShadingDevice,
+            IEnumerable<ApertureSolarTarget> apertureSolarTargets,
+            IEnumerable<SolarControlProfile> solarControlProfiles,
+            ApertureSolarContext context,
+            out string message)
+        {
+            message = null;
+
+            if (groupedShadingDevice == null || context == null)
+            {
+                message = "The grouped shading device and the solar context are required.";
+                return null;
+            }
+
+            if (groupedShadingDevice.Typology == null)
+            {
+                message = "The grouped shading device carries no typology.";
+                return null;
+            }
+
+            List<Guid> memberGuids = groupedShadingDevice.ApertureGuids;
+            if (memberGuids.Count == 0)
+            {
+                message = "The grouped shading device carries no member apertures.";
+                return null;
+            }
+
+            // ---- the scope gate: the wired targets must BE the device's member group. ----------
+            List<Guid> supplied = new List<Guid>();
+            foreach (ApertureSolarTarget target in apertureSolarTargets ?? new List<ApertureSolarTarget>())
+            {
+                if (target == null)
+                {
+                    continue;
+                }
+
+                if (supplied.Contains(target.ApertureGuid))
+                {
+                    message = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                        "Aperture {0} was supplied twice. One physical device is measured against each of its windows exactly once.",
+                        target.ApertureGuid);
+                    return null;
+                }
+
+                supplied.Add(target.ApertureGuid);
+            }
+
+            List<Guid> missing = memberGuids.FindAll(x => !supplied.Contains(x));
+            List<Guid> additional = supplied.FindAll(x => !memberGuids.Contains(x));
+            if (missing.Count != 0 || additional.Count != 0)
+            {
+                message = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "The supplied targets do not match the grouped device's member apertures. Not supplied but in the device: {0}. Supplied but not in the device: {1}. A grouped device is measured only against its own member group — wire exactly the windows SAMAnalytical.RationaliseAwningGroup grouped, in any order.",
+                    GuidsText(missing), GuidsText(additional));
+                return null;
+            }
+
+            // ---- every member must be analysable in this model. --------------------------------
+            List<ApertureSolarTarget> members = new List<ApertureSolarTarget>();
+            foreach (Guid guid in memberGuids)
+            {
+                ApertureSolarTarget member = context.Target(guid);
+                if (member == null)
+                {
+                    message = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                        "Aperture {0} is not one of the sun-exposed external apertures of this model.", guid);
+                    return null;
+                }
+
+                members.Add(member);
+            }
+
+            // ---- re-establish the device's own group, under the criteria it records; never
+            // ---- guess a different one.
+            double extensionBeyondJambs = groupedShadingDevice.Typology is RetractableAwning awning ? awning.GetParameter("ExtensionBeyondJambs") : 0.0;
+
+            List<ApertureShadingGroup> groups = members.ApertureShadingGroups(
+                groupedShadingDevice.Specification, extensionBeyondJambs,
+                groupedShadingDevice.MaximumGap, groupedShadingDevice.HeadTolerance);
+            if (groups == null || groups.Count != 1)
+            {
+                message = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "The member apertures of this grouped device do not form ONE group from the current geometry ({0} groups result). The model changed since the device was designed — or, for a device saved before grouping criteria were recorded, the group was formed under non-default tolerances. Re-run SAMAnalytical.RationaliseAwningGroup and wire its current groupedShadingDevices.",
+                    groups?.Count ?? 0);
+                return null;
+            }
+
+            ApertureShadingGroup group = groups[0];
+            if (group.GroupGuid != groupedShadingDevice.GroupGuid)
+            {
+                message = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "The group re-established from the supplied apertures ({0}) is not the group this device was designed for ({1}). The model changed since the device was designed. Re-run SAMAnalytical.RationaliseAwningGroup and wire its current groupedShadingDevices.",
+                    group.GroupGuid, groupedShadingDevice.GroupGuid);
+                return null;
+            }
+
+            List<int> offsets = new List<int>();
+            foreach (Guid guid in group.ApertureGuids)
+            {
+                offsets.Add(context.CellIndexOffset(guid));
+            }
+
+            return GroupedShadingOperationProfile(
+                group, solarControlProfiles, context.SolarVisibilityCache, context.ContextOccluders,
+                groupedShadingDevice.Typology, context.WeatherData, out message, offsets);
+        }
+
+        /// <summary>The same, without the failure message.</summary>
+        public static GroupedShadingOperationProfile GroupedShadingOperationProfile(
+            this GroupedShadingDevice groupedShadingDevice,
+            IEnumerable<ApertureSolarTarget> apertureSolarTargets,
+            IEnumerable<SolarControlProfile> solarControlProfiles,
+            ApertureSolarContext context)
+        {
+            return GroupedShadingOperationProfile(groupedShadingDevice, apertureSolarTargets, solarControlProfiles, context, out string _);
+        }
+
+        private static string GuidsText(IEnumerable<Guid> guids)
+        {
+            List<string> parts = new List<string>();
+            foreach (Guid guid in guids ?? new List<Guid>())
+            {
+                parts.Add(guid.ToString());
+            }
+
+            return "[" + string.Join(", ", parts) + "]";
+        }
+
+        /// <summary>
         /// Whether two control rules are the same rule, NaN-aware: an unused criterion (NaN) on one
         /// side matches only an unused criterion on the other. This is what makes the grouped
         /// agreement gate able to refuse a group whose members carry different wind limits.
