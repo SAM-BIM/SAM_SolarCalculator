@@ -31,8 +31,10 @@ namespace SAM.Analytical.SolarCalculator
     /// </summary>
     public class GroupedShadingDevice : IJSAMObject, ISolarObject
     {
-        // The grouping-criteria defaults, identical to the Create.ApertureShadingGroups optional
-        // parameters: a device that does not record its criteria is treated as formed under them.
+        // The ONE definition of the grouping-criteria defaults: the Create.ApertureShadingGroups
+        // and Create.AwningGroupResults optional parameters reference these constants, so the
+        // algorithm and the device can never drift into disagreeing about what a criteria-less
+        // call claims. A device that does not record its criteria is treated as formed under them.
         internal const double DefaultMaximumGap = 0.20;
         internal const double DefaultHeadTolerance = 0.02;
 

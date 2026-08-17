@@ -288,6 +288,22 @@ namespace SAM.Analytical.SolarCalculator
                 return null;
             }
 
+            // The device may not list the same aperture twice. The scope gate below is a SET
+            // comparison, so a duplicated member would slip past it — and every later step (one
+            // control profile per member, one measurement per member) assumes one entry per
+            // window. Refuse the malformed device here rather than double-count it downstream.
+            HashSet<Guid> distinctMembers = new HashSet<Guid>();
+            foreach (Guid memberGuid in memberGuids)
+            {
+                if (!distinctMembers.Add(memberGuid))
+                {
+                    message = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                        "The grouped shading device lists member aperture {0} twice. One physical device spans each of its windows exactly once.",
+                        memberGuid);
+                    return null;
+                }
+            }
+
             // ---- the scope gate: the wired targets must BE the device's member group. ----------
             List<Guid> supplied = new List<Guid>();
             foreach (ApertureSolarTarget target in apertureSolarTargets ?? new List<ApertureSolarTarget>())

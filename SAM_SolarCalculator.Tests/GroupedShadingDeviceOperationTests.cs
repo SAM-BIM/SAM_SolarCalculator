@@ -312,6 +312,34 @@ namespace SAM.SolarCalculator.Tests
 
         [Fact]
         [Trait("Category", "LongRunning")]
+        public void Grouped_Device_Handoff_Refuses_A_Device_That_Lists_A_Member_Twice()
+        {
+            // The device defines the scope, so a malformed device — one that lists the same
+            // member aperture twice — is refused BEFORE the set-based scope gate, which a
+            // duplicated member would otherwise slip past to be double-counted downstream.
+            AnalyticalModel analyticalModel = KolobrzegFixture.Model();
+            int year = KolobrzegFixture.Year(analyticalModel);
+            WeatherData weatherData = analyticalModel.GetValue<WeatherData>(AnalyticalModelParameter.WeatherData);
+            ApertureSolarContext solarContext = Context();
+
+            ApertureShadingGroup group = Group(solarContext);
+            List<Guid> duplicatedMembers = new List<Guid>(group.ApertureGuids) { group.ApertureGuids[0] };
+            GroupedShadingDevice malformed = new GroupedShadingDevice(group.GroupGuid, group.PanelGuid, duplicatedMembers, Awning(), AwningSpecification.Dakar);
+
+            List<ApertureSolarTarget> wired = WiredTargets(StudiedGuids());
+            List<SolarControlProfile> profiles = Profiles(wired, weatherData, year);
+
+            GroupedShadingOperationProfile refused = Analytical.SolarCalculator.Create.GroupedShadingOperationProfile(
+                malformed, wired, profiles, solarContext, out string message);
+
+            Assert.Null(refused);
+            Assert.Contains("twice", message);
+            Assert.Contains(group.ApertureGuids[0].ToString(), message);
+            output.WriteLine($"duplicate member on the device: {message}");
+        }
+
+        [Fact]
+        [Trait("Category", "LongRunning")]
         public void Grouped_Device_Handoff_Refuses_An_Additional_Or_Unrelated_Aperture()
         {
             AnalyticalModel analyticalModel = KolobrzegFixture.Model();
@@ -613,6 +641,34 @@ namespace SAM.SolarCalculator.Tests
             Assert.Null(refused);
             Assert.Contains("do not form ONE group", message);
             output.WriteLine($"legacy criteria: {message}");
+        }
+
+        [Fact]
+        public void NaN_Grouping_Criteria_Are_Normalised_Before_Grouping()
+        {
+            // Review pin: NaN is not a criterion. Every ">" comparison against it is false, so
+            // grouping under NaN would NEVER split on that criterion — while GroupedShadingDevice
+            // records the DEFAULT for a NaN, and the hand-off would then refuse a device the
+            // algorithm itself produced. The algorithm normalises NaN to the same constants the
+            // device records, before a single comparison runs, so the criterion used and the
+            // criterion carried are identical by construction.
+            List<ApertureSolarTarget> targets = new List<ApertureSolarTarget>
+            {
+                SyntheticAperture(new Guid("ffff6666-0000-0000-0000-000000000011"), 0.0, 0.9),
+                SyntheticAperture(new Guid("ffff6666-0000-0000-0000-000000000012"), 1.2, 0.9),
+                SyntheticAperture(new Guid("ffff6666-0000-0000-0000-000000000013"), 2.4, 0.6),
+            };
+
+            // 0.30 m gaps: ONE group only above the 0.20 m default. NaN must read as the
+            // default — three one-member groups, identical in identity to the explicit default,
+            // not one merged group as raw NaN comparisons would produce.
+            List<ApertureShadingGroup> underDefault = targets.ApertureShadingGroups(AwningSpecification.Dakar, Extension);
+            List<ApertureShadingGroup> underNaN = targets.ApertureShadingGroups(AwningSpecification.Dakar, Extension, double.NaN, double.NaN);
+
+            Assert.Equal(3, underDefault.Count);
+            Assert.Equal(
+                underDefault.ConvertAll(x => x.GroupGuid),
+                underNaN.ConvertAll(x => x.GroupGuid));
         }
 
         [Fact]
