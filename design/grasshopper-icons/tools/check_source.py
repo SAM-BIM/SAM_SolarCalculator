@@ -59,8 +59,14 @@ def main(base):
         if len(minus) != len(plus):
             bad.append((f, "added/removed lines"))
             continue
+        now = open(os.path.join(REPO, f), encoding="utf-8-sig").read()
+        getters = [m.end() for m in re.finditer(r"Bitmap\s+Icon\b", now)]
+
+        def in_icon_getter(line):  # the line sits inside an `Icon` getter (single- or multi-line form)
+            i = now.find(line.strip())
+            return i >= 0 and any(0 <= i - g <= 300 for g in getters)
         for a, b in zip(minus, plus):
-            if "Icon" not in a or TOKEN.sub("X", a) != TOKEN.sub("X", b) or "SAM_GH_" not in b or KEEP_RE.search(a):
+            if ("Icon" not in a and not in_icon_getter(b)) or TOKEN.sub("X", a) != TOKEN.sub("X", b) or "SAM_GH_" not in b or KEEP_RE.search(a):
                 bad.append((f, a.strip(), b.strip()))
             else:
                 swaps += 1
