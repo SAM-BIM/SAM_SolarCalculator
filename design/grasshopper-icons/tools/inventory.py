@@ -2,7 +2,8 @@
 
 Same parser as SAM/design/grasshopper-icons/tools/inventory.py (SAM#166), generalised to any
 repository layout: every .cs file under a project whose .csproj references Grasshopper is scanned.
-An object is inventoried when a non-abstract class declares `ComponentGuid`.
+An object is inventoried when a non-abstract class declares `ComponentGuid` in a file the project compiles
+(files excluded by `<Compile Remove="..."/>` are skipped).
 Writes ../manifest_raw.json.
 """
 import json
@@ -62,6 +63,20 @@ def lit(a):
     return "{" + a + "}"
 
 
+def compile_removed(pdir):
+    """Files excluded from compilation by the project's `<Compile Remove="..."/>` globs (SDK-style csproj)."""
+    import fnmatch
+    csproj = [f for f in os.listdir(pdir) if f.endswith(".csproj")]
+    pats = []
+    for f in csproj:
+        txt = open(long_path(os.path.join(pdir, f)), encoding="utf-8-sig", errors="replace").read()
+        pats += [m.replace("\\", "/") for m in re.findall(r'<Compile\s+Remove="([^"]+)"', txt)]
+    def removed(rel):
+        rel = rel.replace("\\", "/")
+        return any(fnmatch.fnmatch(rel, p) or fnmatch.fnmatch(rel, p.replace("**/", "")) for p in pats)
+    return removed
+
+
 def gh_projects():
     """{project dir (abs): project name} for every non-test .csproj that references Grasshopper."""
     out = {}
@@ -78,12 +93,15 @@ def gh_projects():
 def main():
     items = []
     for pdir, proj in sorted(gh_projects().items(), key=lambda kv: kv[1]):
+        removed = compile_removed(pdir)
         for root, dirs, files in os.walk(pdir):
             dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
             for f in sorted(files):
                 if not f.endswith(".cs") or f.endswith(".Designer.cs"):
                     continue
                 path = os.path.join(root, f)
+                if removed(os.path.relpath(path, pdir)):
+                    continue  # not compiled (<Compile Remove>): not a GH object of this plugin
                 src = open(long_path(path), encoding="utf-8-sig").read()
                 if "ComponentGuid" not in src:
                     continue
