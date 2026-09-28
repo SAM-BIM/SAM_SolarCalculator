@@ -79,5 +79,25 @@ namespace SAM.Geometry.Grasshopper.SolarCalculator.Properties {
                 return ((System.Drawing.Bitmap)(obj));
             }
         }
+        
+        /// <summary>
+        ///   Looks up a localized resource of type System.Drawing.Bitmap.
+        /// </summary>
+        internal static System.Drawing.Bitmap SAM_GH_ShadePluralGet {
+            get {
+                object obj = ResourceManager.GetObject("SAM_GH_ShadePluralGet", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized resource of type System.Drawing.Bitmap.
+        /// </summary>
+        internal static System.Drawing.Bitmap SAM_GH_SolarPluralCalculate {
+            get {
+                object obj = ResourceManager.GetObject("SAM_GH_SolarPluralCalculate", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
     }
 }
