@@ -88,7 +88,15 @@ jobs:
             # branch, not from quarterly code, otherwise master CI silently builds against sow/** and masks
             # integration/branch-skew issues.
             $isDefaultBranchBuild = (-not $headRef) -and ($refName -eq 'master' -or $refName -eq 'main')
-            if (-not $isDefaultBranchBuild) { $candidates += 'sow/2026-Q2' }
+            if (-not $isDefaultBranchBuild) {
+              # Hard fallback: the newest quarterly branch (sow/YYYY-Qn) the dependency has, so the active
+              # quarter is followed without editing a branch list every quarter.
+              $newestSow = git ls-remote --heads "https://github.com/$org/$r.git" 'sow/*' 2>$null |
+                ForEach-Object { ($_ -split '\s+')[1] -replace '^refs/heads/', '' } |
+                Where-Object { $_ -match '^sow/\d{4}-Q\d$' } |
+                Sort-Object -Descending | Select-Object -First 1
+              if ($newestSow -and $candidates -notcontains $newestSow) { $candidates += $newestSow }
+            }
             $cloned = $false
             foreach ($cand in $candidates) {
               $has = (git ls-remote --heads "https://github.com/$org/$r.git" $cand 2>$null | Out-String).Trim()
