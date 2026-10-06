@@ -106,7 +106,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
     {
         public override Guid ComponentGuid => new Guid("8d5e1b02-3a44-4c7e-9e6b-2b1f0d54c003");
 
-        protected override System.Drawing.Bitmap Icon => Resources.SAM_SolarCalculator;
+        protected override System.Drawing.Bitmap Icon => Resources.SAM_GH_Shade;
 
         bool IGH_PreviewObject.Hidden { get; set; }
 

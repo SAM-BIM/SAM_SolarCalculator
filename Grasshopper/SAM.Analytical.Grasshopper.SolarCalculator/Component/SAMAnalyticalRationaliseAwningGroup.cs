@@ -36,7 +36,7 @@ namespace SAM.Analytical.Grasshopper.SolarCalculator
         public override string LatestComponentVersion => "1.2.0";
 
         /// <summary>Provides an Icon for the component.</summary>
-        protected override System.Drawing.Bitmap Icon => Resources.SAM_SolarCalculator;
+        protected override System.Drawing.Bitmap Icon => Resources.SAM_GH_ShadePluralModify;
 
         public override GH_Exposure Exposure => GH_Exposure.tertiary;
 
