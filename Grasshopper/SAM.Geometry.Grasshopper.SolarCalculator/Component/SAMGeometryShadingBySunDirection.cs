@@ -27,7 +27,7 @@ namespace SAM.Geometry.Grasshopper.SolarCalculator
         /// <summary>
         /// Provides an Icon for the component.
         /// </summary>
-        protected override System.Drawing.Bitmap Icon => Resources.SAM_SolarCalculator;
+        protected override System.Drawing.Bitmap Icon => Resources.SAM_GH_ShadePluralGet;
 
         public override GH_Exposure Exposure => GH_Exposure.primary;
 
